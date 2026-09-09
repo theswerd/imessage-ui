@@ -176,8 +176,29 @@ export const palettes: Record<Platform, { light: Palette; dark: Palette }> = {
   ios: {
     light: {
       background: "#ffffff",
-      imessage: { top: "#77c7f5", bottom: "#3682f7", screenHeight: 874 },
-      sms: { top: "#53e678", bottom: "#31c355", screenHeight: 874 },
+      /**
+       * iMessage blue, from `-[CKUITheme balloonColorsForColorType:]` rather than borrowed from the
+       * macOS captures, which is what this used to carry and what SPEC flagged. No iOS capture in
+       * `references/` contains a blue bubble at all - the simulator's fixture chats are SMS-only, so
+       * every blue in them is a tapback balloon, a button or the avatar - so the framework is the
+       * only source, and three things say it is the right one:
+       *
+       * 1. `colorType 0` returns the SMS green, and its light top #53e678 is the value measured from
+       *    `conv3-light.png` to the letter.
+       * 2. Its dark top #30db5b is exactly what a fit over 1131 rows of four dark captures produced
+       *    earlier today, independently and before this property was ever read.
+       * 3. `colorType 1`'s light **bottom is #0088ff**, and the effects picker's preview bubble in
+       *    `effects-picker-light.png` - which SPEC records as a flat #0088ff - samples (0, 136, 255).
+       *
+       * So these are the iOS screen-space endpoints. macOS keeps its own, which are measured: fitting
+       * 530 rows of `conversation-pane-light.png` gives #7bc5f5 -> #3482f7 against the #77c7f5 ->
+       * #3682f7 it ships, nowhere near this. The Mac paints a different blue from the one its own
+       * `CKUIThemeMac` reports, exactly as it does with the balloon corner radius.
+       */
+      imessage: { top: "#5ac8fa", bottom: "#0088ff", screenHeight: 874 },
+      // `balloonColorsForColorType:` 0, light. The top is the value already measured from
+      // `conv3-light.png`; the bottom was fitted at #32c457 there, against this #34c759.
+      sms: { top: "#53e678", bottom: "#34c759", screenHeight: 874 },
       incoming: { top: "#e9e9eb", bottom: "#e9e9eb", screenHeight: 874 },
       incomingText: "#000000",
       outgoingText: "#ffffff",
@@ -189,7 +210,8 @@ export const palettes: Record<Platform, { light: Palette; dark: Palette }> = {
     },
     dark: {
       background: "#000000",
-      imessage: { top: "#589af7", bottom: "#3d8ef7", screenHeight: 874 },
+      /** `balloonColorsForColorType:` 1, dark. See the light entry for why the framework is the source. */
+      imessage: { top: "#409cff", bottom: "#0091ff", screenHeight: 874 },
       // Dark green is NOT the light ramp. Fitted over 1131 rows of core green pixels - green by a
       // wide margin, eroded by one pixel so no rim or glyph edge is in it, and with anything under
       // G 195 dropped so a bubble behind a long-press dim cannot pull it - across conv2-dark,
@@ -197,7 +219,9 @@ export const palettes: Record<Platform, { light: Palette; dark: Palette }> = {
       // 197.39, B 90.82 -> 88.84 over the 874 pt screen, rms 0.40 / 0.53 / 0.44. Only green ramps;
       // red and blue are nearly flat and sit 35 and 30 levels below their light-mode selves at the
       // top of the screen, which is why the light ramp read washed out here.
-      sms: { top: "#30db5b", bottom: "#34c559", screenHeight: 874 },
+      // `balloonColorsForColorType:` 0, dark: #30db5b -> #34c759. The fit below produced the same
+      // top to the letter and a bottom 2 levels off, so the framework's pair ships.
+      sms: { top: "#30db5b", bottom: "#34c759", screenHeight: 874 },
       incoming: { top: "#262629", bottom: "#262629", screenHeight: 874 },
       incomingText: "#ffffff",
       outgoingText: "#ffffff",

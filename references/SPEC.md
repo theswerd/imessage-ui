@@ -430,10 +430,19 @@ described as measured:
   does. The iOS picker itself *is* measured now, see "Send with effect" above; the macOS popover is
   not. Invisible Ink's look is measured from the iOS preview (a #0088ff bubble whose text dissolves
   into bright specks) but its particle motion is not.
-- **The iOS iMessage blue gradient.** `tokens.ts` still carries the macOS values (#76c2f5 → #3583f6)
-  because no iOS capture contains a blue conversation bubble: the simulator has no iMessage account,
-  so every outgoing message there is SMS green. The one blue directly measured on iOS is the flat
-  #0088ff of the effects preview, and it is flat by design, so it says nothing about the ramp.
+- **The iOS iMessage blue gradient** is no longer borrowed. `-[CKUITheme balloonColorsForColorType:]`
+  returns the screen-space endpoints, and `colorType 1` is **#5ac8fa → #0088ff** light,
+  **#409cff → #0091ff** dark. No iOS capture contains a blue bubble - the simulator's fixture chats
+  are SMS-only, so every blue in them is a tapback balloon, a button or the avatar - so the framework
+  is the only source, and three things say it is the right one: `colorType 0`'s light top #53e678 is
+  the SMS green already measured from `conv3-light.png` to the letter; its dark top #30db5b is
+  exactly what a fit over 1131 rows of four dark captures produced independently; and `colorType 1`'s
+  light bottom #0088ff is what `effects-picker-light.png` samples at the preview bubble, (0, 136, 255),
+  which this document already records as a flat #0088ff. Taking them moved `conv3-light` 1.55% → 1.43%
+  (the green's bottom went #31c355 → #34c759 in the same pass). **macOS keeps its own**, which are
+  measured: fitting 530 rows of `conversation-pane-light.png` gives #7bc5f5 → #3482f7 against the
+  #77c7f5 → #3682f7 it ships, nowhere near the framework's. The Mac paints a different blue from the
+  one `CKUIThemeMac` reports, the same way it paints a different balloon corner radius.
 - **Inline replies** (`message-reply.tsx`): the quoted stub is **not** a scaled copy of the quoted
   bubble, which is what this said before. ChatKit gives it its own box: `_replyBalloonTextFont`
   .SFNS-Regular **11**, `textReplyBalloonCornerRadius` **17.5**, `replyBalloonMinHeight` **26**,
