@@ -273,6 +273,8 @@ export type MacMessagesAppProps = {
   onContextMenuClose?: () => void;
   onTapback?: (id: string, selection: TapbackSelection) => void;
   onMenuAction?: (id: string, action: string) => void;
+  /** Play a message's effect again — the Replay control under a message sent with one. */
+  onReplayEffect?: (id: string) => void;
   /** The plus-button popover. */
   plusMenu?: boolean;
   onPlusMenuSelect?: (id: string) => void;
@@ -386,7 +388,7 @@ export function MacMessagesApp({
   width = macScreen.width, height = macScreen.height, active = true, conversations = [], selectedId, onSelectConversation, contact, group = false, participants,
   messages, typing = false, now, composer, compose, onCompose, onComposeRecipientChange, onAddRecipient, onComposeClose,
   onVideoCall, onDetails, sendAnimation, receiveAnimation, onSendAnimationEnd,
-  selectedMessageIds, onSelectMessage, contextMenu, onContextMenu, onContextMenuClose, onTapback, onMenuAction,
+  selectedMessageIds, onSelectMessage, contextMenu, onContextMenu, onContextMenuClose, onTapback, onMenuAction, onReplayEffect,
   plusMenu, onPlusMenuSelect, onPlusMenuClose, conversationTransition, menuTransition,
   searchQuery, onSearch,
   details, onDetailsClose, onDetailsTabChange, onDetailsWidthChange, detailsContent,
@@ -868,7 +870,7 @@ export function MacMessagesApp({
               }}>
               <div data-slot="pane-content" className="absolute inset-0">
                 <MessageList ref={list} frameRef={pane} messages={transcript} typing={composing ? false : typing} group={isGroup} now={now} anchor="bottom" selectedIds={selection}
-                  insetTop={macScreen.listTop} insetBottom={macScreen.listBottom} renderReactions={renderReactions} messageActions={Boolean(onContextMenu)} openMenuId={menu?.id ?? null}
+                  insetTop={macScreen.listTop} insetBottom={macScreen.listBottom} renderReactions={renderReactions} messageActions={Boolean(onContextMenu)} openMenuId={menu?.id ?? null} onReplayEffect={onReplayEffect}
                   onOpenImage={(id, index) => quickLook(id, index)} className="absolute inset-0" />
               </div>
               {/* The conversation that is leaving, under the header's glass so it is washed like the one

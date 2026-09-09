@@ -274,7 +274,7 @@ export function InvisibleInk({ revealed, onRevealChange, children, className, st
 }
 
 /** Convenience: run a bubble effect on the message row with `data-message-id={id}` inside `frame`. */
-export function useBubbleEffectOnMessage(frame: RefObject<HTMLElement | null>, effect: { id: string; kind: BubbleEffectKind; progress?: number } | null | undefined) {
+export function useBubbleEffectOnMessage(frame: RefObject<HTMLElement | null>, effect: { id: string; kind: BubbleEffectKind; progress?: number; replayNonce?: number } | null | undefined) {
   useEffect(() => {
     if (!effect) return;
     const element = frame.current?.querySelector<HTMLElement>(`[data-message-id="${effect.id}"] [data-slot="bubble-frame"]`);

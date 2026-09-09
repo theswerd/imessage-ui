@@ -143,6 +143,8 @@ export type IosMessagesAppProps = {
   onLongPressClose?: () => void;
   onTapback?: (id: string, selection: TapbackSelection) => void;
   onMenuAction?: (id: string, action: string) => void;
+  /** Play a message's effect again — the Replay control under a message sent with one. */
+  onReplayEffect?: (id: string) => void;
   /**
    * Select mode: the checkbox multi-select the long-press menu's "Select" row opens, drawn by
    * `ios-select-mode.tsx` and measured on `select-mode-dark.png` — a circle in the leading gutter of
@@ -551,7 +553,7 @@ export function IosMessagesApp({
   messages, typing = false, now, composer, screenTransition, onBack, onSelectConversation, onCompose, onCloseNewMessage, onDetails,
   thread, onOpenThread, onCloseThread,
   sendAnimation, receiveAnimation, onSendAnimationEnd,
-  longPress, onLongPress, onLongPressClose, onTapback, onMenuAction,
+  longPress, onLongPress, onLongPressClose, onTapback, onMenuAction, onReplayEffect,
   selectMode, onOpenSelectMode, onCloseSelectMode, selectedMessageIds, onSelectMessage, onDeleteMessages, onForwardMessages,
   effectsPicker, onEffectsPickerOpen, onEffectsTabChange, onEffectSelect, onSendWithEffect, onEffectsPickerClose,
   plusMenu, onPlusMenuSelect, onPlusMenuClose, plusMenuItems = defaultPlusMenuItems,
@@ -965,7 +967,7 @@ export function IosMessagesApp({
             <IosSelectMode active={selecting} progress={selectValue?.progress} onExited={selectLatch.exited}>
             {selectShown && <style>{selectModeRules(selectTransition.timing)}</style>}
             <MessageList ref={list} frameRef={frame} messages={messages} typing={typing} group={isGroup} now={now} anchor="top"
-              insetTop={iosScreen.listTop} insetBottom={listBottom} renderReactions={renderReactions} messageActions={Boolean(onLongPress)} openMenuId={overlayMessage?.id ?? null}
+              insetTop={iosScreen.listTop} insetBottom={listBottom} renderReactions={renderReactions} messageActions={Boolean(onLongPress)} openMenuId={overlayMessage?.id ?? null} onReplayEffect={onReplayEffect}
               onOpenThread={onOpenThread} onOpenImage={openPhoto} systemArrival={systemArrival} className="absolute inset-0" />
             {/* Over the log and under the nav bar, so a circle scrolled up behind the bar is covered
                 by it the way the bubbles are. */}

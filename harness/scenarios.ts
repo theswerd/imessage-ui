@@ -230,7 +230,8 @@ export type FixtureMessage = {
   audio?: { duration: number };
   replyTo?: { id: string; text: string; direction: Direction; sender?: string };
   replyCount?: number;
-  effect?: "slam" | "loud" | "gentle" | "invisible-ink";
+  effect?: "slam" | "loud" | "gentle" | "invisible-ink"
+    | "echo" | "spotlight" | "balloons" | "confetti" | "love" | "lasers" | "fireworks" | "celebration";
   failed?: boolean;
 };
 
@@ -1041,6 +1042,11 @@ export function frameAt(id: ScenarioId, milliseconds: number): SceneFrame {
     case "effect-gentle": {
       const kind = id.replace("effect-", "") as BubbleEffectKind;
       frame.effect = { id: "m6", progress: clamp01(t / nativeMotion.bubbleEffect[kind]), bubble: kind };
+      // The message is marked as well as the frame, the way Invisible Ink already is below. A
+      // message sent with an effect keeps that fact — it is what the Replay control under it reads,
+      // and `REPLAY_BUTTON_TITLE` exists precisely because the effect outlives its own animation.
+      const sent = frame.messages.find(item => item.id === "m6");
+      if (sent) sent.effect = kind;
       break;
     }
     // Invisible Ink is a STATE, not a timeline. `playBubbleEffect` returns a no-op handle for it and
@@ -1065,6 +1071,10 @@ export function frameAt(id: ScenarioId, milliseconds: number): SceneFrame {
     case "effect-celebration": {
       const kind = id.replace("effect-", "") as ScreenEffectKind;
       frame.effect = { id: "m6", progress: clamp01(t / unverifiedMotion.screenEffect[kind]), screen: kind };
+      // Marked on the message too, so it carries its own Replay — `FSM_CONTROL_BUTTON_TITLE_*` is
+      // the screen effects' half of the same pair of strings.
+      const withScreen = frame.messages.find(item => item.id === "m6");
+      if (withScreen) withScreen.effect = kind;
       break;
     }
     case "effects-picker":

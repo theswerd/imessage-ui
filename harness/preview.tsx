@@ -168,7 +168,20 @@ export function HarnessPreview({ platform, scenario, time, interactive = true, o
   const thread = threadId ? { rootId: threadId } : frame.thread && !dismissedThread ? frame.thread : null;
   const composerValue = draft ?? frame.composerDraft ?? "";
   const currentCall = call ?? frame.call;
-  const bubbleEffect = frame.effect?.bubble ? { id: frame.effect.id, kind: frame.effect.bubble, progress: frame.effect.progress } : null;
+  /**
+   * The Replay control plays the effect again from the top. A stated `progress` would freeze it on
+   * one frame, so a replay drops it and lets the effect run on its own clock; `replayNonce` is what
+   * makes a second press a new effect object rather than the same one the hook has already played.
+   */
+  const [replay, setReplay] = useState<{ id: string; nonce: number } | null>(null);
+  const framedEffect = frame.effect?.bubble ? { id: frame.effect.id, kind: frame.effect.bubble, progress: frame.effect.progress } : null;
+  const bubbleEffect = useMemo(
+    () => (replay && framedEffect && replay.id === framedEffect.id
+      ? { id: framedEffect.id, kind: framedEffect.kind, replayNonce: replay.nonce }
+      : framedEffect),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the nonce is what re-identifies it
+    [replay, framedEffect?.id, framedEffect?.kind, framedEffect?.progress],
+  );
   // The effects screen: the timeline drives it, and an interactive hold on the send button opens it.
   const timelinePicker = frame.effectsPicker
     ? { tab: frame.effectsPicker.tab, selection: frame.effectsPicker.bubble ? { bubble: frame.effectsPicker.bubble } : frame.effectsPicker.screen ? { screen: frame.effectsPicker.screen } : null, progress: frame.effectsPicker.progress }
@@ -300,6 +313,7 @@ export function HarnessPreview({ platform, scenario, time, interactive = true, o
       );
     },
     onMenuAction: (id: string, action: string) => onEvent?.(`menu.${action} ${id}`),
+    onReplayEffect: (id: string) => { setReplay(current => ({ id, nonce: (current?.id === id ? current.nonce : 0) + 1 })); onEvent?.(`effects.replay ${id}`); },
   };
 
   return (

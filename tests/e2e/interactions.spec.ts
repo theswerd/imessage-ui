@@ -1074,3 +1074,33 @@ test("everything that says it has a popup also says whether the popup is open", 
     await expect(button).toHaveAttribute("aria-expanded", "true");
   }
 });
+
+/**
+ * A message sent with an effect carries a control that plays it again — ChatKit has a
+ * `REPLAY_BUTTON_TITLE` ("Replay") and a per-effect accessible name beside it
+ * (`EFFECT_CONTROL_BUTTON_TITLE_*` for the bubble effects, `FSM_CONTROL_BUTTON_TITLE_*` for the
+ * screen ones) — and nothing here had one, so an effect could be watched exactly once. Invisible Ink
+ * is the exception on purpose: it has a reveal, not a replay.
+ */
+test("a message sent with an effect can be played again", async ({ page }, info) => {
+  test.skip(platformFor(info) !== "ios", "one shell is enough for a control both share");
+  const control = page.locator('[data-slot="replay-effect"]');
+
+  await openScene(page, info, "effect-slam", 640);
+  await expect(control).toHaveText("Replay");
+  await expect(control).toHaveAttribute("aria-label", "Replay Slam");
+
+  await openScene(page, info, "effect-balloons", 4200);
+  await expect(control, "a screen effect replays too").toHaveAttribute("aria-label", "Replay Balloons");
+
+  await openScene(page, info, "effect-invisible-ink", 5200);
+  await expect(control, "ink is revealed, not replayed").toHaveCount(0);
+
+  // Pressing it runs the effect again: the bubble leaves the identity transform it settled on.
+  await openScene(page, info, "effect-slam", 640);
+  const bubble = page.locator('[data-slot="message-row"][data-effect] [data-slot="bubble-frame"]');
+  await expect(bubble).toHaveCSS("transform", "matrix(1, 0, 0, 1, 0, 0)");
+  await control.click();
+  await expect.poll(async () => await bubble.evaluate(el => getComputedStyle(el).transform),
+    { message: "the effect runs again" }).not.toBe("matrix(1, 0, 0, 1, 0, 0)");
+});

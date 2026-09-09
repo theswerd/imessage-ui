@@ -13,7 +13,7 @@ import { MessageAudio } from "@/registry/imessage/message-audio";
 import { InvisibleInk } from "@/registry/imessage/message-effects";
 import { SwipeTimes, useSwipeToRevealTimes } from "@/registry/imessage/ios-swipe-times";
 import { ReplyCount, ReplyStub } from "@/registry/imessage/message-reply";
-import { FailedSendBadge, NotDelivered } from "@/registry/imessage/ios-notices";
+import { FailedSendBadge, NotDelivered, ReplayEffect } from "@/registry/imessage/ios-notices";
 import { TypingIndicator } from "@/registry/imessage/typing-indicator";
 import { useBubbleScreenSpace } from "@/registry/imessage/use-screen-space";
 import { SystemMessage, systemMessageMetrics, type SystemMessageEvent } from "@/registry/imessage/system-message";
@@ -78,7 +78,14 @@ export type Message = {
   /** How many replies hang off this message. */
   replyCount?: number;
   /** Sent with a bubble effect. "invisible-ink" hides the message until it is revealed. */
-  effect?: "slam" | "loud" | "gentle" | "invisible-ink";
+  /**
+   * The effect the message was sent with. It outlives its own animation — that is what the Replay
+   * control under the message reads, and why ChatKit carries a `REPLAY_BUTTON_TITLE` at all — so a
+   * screen effect belongs here beside the four bubble ones. Only `invisible-ink` changes what the
+   * bubble draws; the rest are a memory of how it arrived.
+   */
+  effect?: "slam" | "loud" | "gentle" | "invisible-ink"
+    | "echo" | "spotlight" | "balloons" | "confetti" | "love" | "lasers" | "fireworks" | "celebration";
   /** Force the tail on or off. Native draws it only on the last bubble of a cluster; use this to reproduce captures. */
   tail?: boolean;
   /** Override the gap above this message (px). Only for reproducing captures; the cluster rule decides otherwise. */
@@ -197,6 +204,8 @@ export type MessageListProps = Omit<ComponentProps<"div">, "children" | "ref"> &
    * other half of what the attribute is for.
    */
   openMenuId?: string | null;
+  /** Play a message's effect again. Without it an effect message draws no Replay control. */
+  onReplayEffect?: (id: string) => void;
   /**
    * Ids of the messages a click has selected. Passing this (even empty) turns the rows into a
    * multi-select listbox and paints the selection overlay on their bubbles. macOS only: iOS has no
@@ -358,7 +367,7 @@ function EmojiMessage({ message, platform }: { message: Message; platform: Platf
 
 export function MessageList({
   messages, typing = false, group = false, now, frameRef, platform: platformProp, serviceLabel, renderReactions, autoScroll = true,
-  firstDateHeader = true, messageActions = false, openMenuId = null, selectedIds, onOpenThread, onJumpToMessage, openThreadId, flash, onOpenImage, systemArrival,
+  firstDateHeader = true, messageActions = false, openMenuId = null, onReplayEffect, selectedIds, onOpenThread, onJumpToMessage, openThreadId, flash, onOpenImage, systemArrival,
   swipeTimes, anchor = "top", insetTop, insetBottom, ref, className, style, onScroll, onKeyDown, ...props
 }: MessageListProps) {
   const contextPlatform = usePlatform();
@@ -673,6 +682,16 @@ export function MessageList({
                 </button>
               ) : <ReplyStub quote={quote} platform={platform} />)}
               {content}
+              {/* An effect message carries a control that plays it again. ChatKit's own copy:
+                  `REPLAY_BUTTON_TITLE` is the visible "Replay", and the accessible name is the
+                  per-effect `EFFECT_CONTROL_BUTTON_TITLE_*` / `FSM_CONTROL_BUTTON_TITLE_*` — "Replay
+                  Slam", "Replay Balloons". Nothing here had one at all, so a message sent with an
+                  effect could be watched exactly once. */}
+              {message.effect && onReplayEffect && (
+                <span data-slot="replay-controls" style={{ display: "contents" }} onClick={event => event.stopPropagation()}>
+                  <ReplayEffect kind={message.effect} platform={platform} onReplay={() => onReplayEffect(message.id)} />
+                </span>
+              )}
               {message.status === "failed" && <NotDelivered platform={platform} />}
               {message.replyCount ? (onOpenThread ? (
                 // `display: contents` keeps the button exactly where it was in the layout while giving

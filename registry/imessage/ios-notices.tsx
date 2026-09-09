@@ -114,6 +114,57 @@ export function FailedSendBadge({ size, platform: platformProp, label = "Message
   );
 }
 
+/**
+ * ChatKit's own names for the effects, used as the Replay control's accessible name:
+ * `EFFECT_CONTROL_BUTTON_TITLE_*` for the four bubble effects and `FSM_CONTROL_BUTTON_TITLE_*` for
+ * the screen ones, all of the form "Replay <Name>". The visible label is `REPLAY_BUTTON_TITLE`,
+ * which is just "Replay" — the effect's name is in the accessible name only, because on screen the
+ * message it sits under already is the effect.
+ *
+ * Invisible Ink has no entry: it has no motion to replay, it has a reveal, which is
+ * `InvisibleInk`'s own tap.
+ */
+export const replayEffectNames: Record<string, string> = {
+  slam: "Slam", loud: "Loud", gentle: "Gentle",
+  echo: "Echo", spotlight: "Spotlight", balloons: "Balloons", confetti: "Confetti",
+  love: "Love", lasers: "Lasers", fireworks: "Fireworks", celebration: "Celebration",
+};
+
+export type ReplayEffectProps = Omit<ComponentProps<"button">, "children" | "onClick"> & {
+  /** The effect the message was sent with. Invisible Ink draws nothing: it is revealed, not replayed. */
+  kind: string;
+  platform?: Platform;
+  label?: string;
+  onReplay?: () => void;
+};
+
+/**
+ * The control under a message sent with an effect. **UNMEASURED:** no capture in `references/` holds
+ * one, so it takes the status line's slot — the platform's measured status typography, gap and
+ * trailing inset, which is where "Delivered" and "Not Delivered" already sit — in the accent blue a
+ * control gets rather than the secondary grey a label gets. What is measured is that the slot exists
+ * and where it is; what is chosen is that Replay belongs in it.
+ */
+export function ReplayEffect({ kind, platform: platformProp, label = "Replay", onReplay, className, style, ...props }: ReplayEffectProps) {
+  const contextPlatform = usePlatform();
+  const platform = platformProp ?? contextPlatform;
+  const s = statusStyle[platform];
+  const name = replayEffectNames[kind];
+  if (!name) return null;
+  return (
+    <button type="button" data-slot="replay-effect" data-effect={kind} aria-label={`${label} ${name}`}
+      onClick={onReplay}
+      className={cn("cursor-pointer select-none border-0 bg-transparent p-0 text-right focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff]", className)}
+      style={{
+        fontFamily: font, fontSize: s.fontSize, lineHeight: `${s.lineHeight}px`, fontWeight: 600,
+        letterSpacing: s.letterSpacing, marginTop: s.gap, paddingInlineEnd: s.inset,
+        color: "var(--im-tapback-own, #0088ff)", ...style,
+      }} {...props}>
+      {label}
+    </button>
+  );
+}
+
 export type NotDeliveredProps = Omit<ComponentProps<"div">, "children"> & {
   label?: string;
   platform?: Platform;
