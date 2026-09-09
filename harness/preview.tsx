@@ -151,10 +151,13 @@ export function HarnessPreview({ platform, scenario, time, interactive = true, o
   const deviceFrame = useRef<HTMLDivElement>(null);
   const size = platforms[platform];
 
-  const messages = useMemo(() => [...frame.messages, ...extra].map(message => {
+  /** Messages the toolbar's Delete has taken out, so the button does what it says. */
+  const [deleted, setDeleted] = useState<string[]>([]);
+
+  const messages = useMemo(() => [...frame.messages, ...extra].filter(message => !deleted.includes(message.id)).map(message => {
     const applied = reactions[message.id];
     return applied ? { ...message, reactions: applied } : message;
-  }).map(toMessage), [frame.messages, extra, reactions]);
+  }).map(toMessage), [frame.messages, extra, reactions, deleted]);
 
   const longPress = pressedId ? { id: pressedId } : frame.longPress && !dismissedPress ? { id: frame.longPress.id, progress: frame.longPress.progress } : null;
   const activeScreen = screen ?? (frame.screen === "details" ? "conversation" : frame.screen);
@@ -184,7 +187,17 @@ export function HarnessPreview({ platform, scenario, time, interactive = true, o
   // iOS select mode. `{ progress }` with no number is the settled mode; with one, the shell seeks
   // `IosSelectMode`'s single `--ios-sel-t` timeline instead of playing it. Left `undefined` the shell
   // owns the mode, which is what keeps the long-press menu's "Select" row working with nothing wired.
-  const selectMode = frame.selectMode ? { progress: frame.selectMode.progress } : undefined;
+  /**
+   * The scenario states the mode for a checkpoint, and a live "Done" takes it back — without that
+   * second half the toolbar's ✕, Delete and Forward were all inert on the one scene that shows them:
+   * the frame kept re-asserting the mode every render, so the shell's own close could never win.
+   * A scrub onto a different `selectMode` frame drops the live close, so the timeline still rules.
+   */
+  const [leftSelectMode, setLeftSelectMode] = useState(false);
+  const framedSelect = frame.selectMode ? { progress: frame.selectMode.progress } : undefined;
+  const lastFramedSelect = useRef(framedSelect?.progress);
+  if (lastFramedSelect.current !== framedSelect?.progress) { lastFramedSelect.current = framedSelect?.progress; if (leftSelectMode) setLeftSelectMode(false); }
+  const selectMode = interactive && leftSelectMode ? undefined : framedSelect;
   const photoViewer = frame.photoViewer ?? undefined;
   const photoPicker = frame.photoPicker ? { selected: frame.photoPicker.selected, detent: frame.photoPicker.detent, progress: frame.photoPicker.progress } : undefined;
   const stickerPicker = frame.stickerPicker ? { tab: frame.stickerPicker.tab, progress: frame.stickerPicker.progress, drag: frame.stickerPicker.drag } : undefined;
@@ -200,7 +213,19 @@ export function HarnessPreview({ platform, scenario, time, interactive = true, o
   const systemArrival = frame.systemArrival ?? null;
   // The switch states which conversation the pane is on; the group flag already picks the same row,
   // so the two agree and a group frame and a switched-to-group frame are the same frame.
-  const selectedConversation = frame.conversationSwitch?.to ?? frame.selectedConversation ?? (frame.group ? "design" : "alex");
+  /**
+   * Which conversation the sidebar has. The frame decides it while the timeline is scrubbing - a
+   * checkpoint has to render the row the scenario says - and a click takes it over from there, the
+   * way `plusMenu` takes over the frame's menu. Without the second half the Mac's sidebar was inert:
+   * `onSelectConversation` reported an event and nothing on screen moved, so every row but the
+   * selected one looked dead to a click.
+   */
+  const framedConversation = frame.conversationSwitch?.to ?? frame.selectedConversation ?? (frame.group ? "design" : "alex");
+  const [pickedConversation, setPickedConversation] = useState<string | null>(null);
+  const selectedConversation = (interactive ? pickedConversation : null) ?? framedConversation;
+  // A scrub back onto a scenario that names its own row drops the click, so the timeline still wins.
+  const lastFramed = useRef(framedConversation);
+  if (lastFramed.current !== framedConversation) { lastFramed.current = framedConversation; if (pickedConversation) setPickedConversation(null); }
   useBubbleEffectOnMessage(deviceFrame, bubbleEffect);
   // The press-and-hold scenario scrubs the hold itself: grow the bubble the way use-long-press does
   // while the finger is down, so the checkpoint before the menu opens is inspectable.
@@ -345,10 +370,11 @@ export function HarnessPreview({ platform, scenario, time, interactive = true, o
           // Mac; both shells read the one piece of state, and only one of them is ever mounted.
           selectedMessageIds={selectedMessages ?? frame.selectMode?.selected}
           onOpenSelectMode={id => onEvent?.(`selection.mode ${id}`)}
-          onCloseSelectMode={() => { setSelectedMessages(null); onEvent?.("selection.mode.close"); }}
+          onCloseSelectMode={() => { setSelectedMessages(null); setLeftSelectMode(true); onEvent?.("selection.mode.close"); }}
           onSelectMessage={(ids, context) => { setSelectedMessages(ids); onEvent?.(`selection.select ${context.id ?? "none"} (${ids.length})`); }}
-          onDeleteMessages={ids => onEvent?.(`selection.delete ${ids.join(",") || "none"}`)}
-          onForwardMessages={ids => onEvent?.(`selection.forward ${ids.join(",") || "none"}`)}
+          onDeleteMessages={ids => { setDeleted(current => [...current, ...ids]); setSelectedMessages(null); setLeftSelectMode(true); onEvent?.(`selection.delete ${ids.join(",") || "none"}`); }}
+          // Forwarding opens a compose sheet this kit does not own, so it leaves the mode and reports.
+          onForwardMessages={ids => { setSelectedMessages(null); setLeftSelectMode(true); onEvent?.(`selection.forward ${ids.join(",") || "none"}`); }}
           longPress={longPress} onLongPress={interactive ? id => { setPressedId(id); onEvent?.(`reactions.open ${id}`); } : undefined}
           onLongPressClose={() => { setPressedId(null); setDismissedPress(true); onEvent?.("reactions.close"); }}
           effectsPicker={picker && { ...picker, draft: composerValue }}
@@ -361,7 +387,8 @@ export function HarnessPreview({ platform, scenario, time, interactive = true, o
       ) : (
         <MacMessagesApp {...shared} width={width ?? size.width} height={size.height} active
           conversations={macConversations(frame.conversations)}
-          selectedId={selectedConversation} onSelectConversation={id => onEvent?.(`navigation.open ${id}`)}
+          selectedId={selectedConversation}
+          onSelectConversation={id => { if (interactive) setPickedConversation(id); onEvent?.(`navigation.open ${id}`); }}
           composer={{ value: composerValue, onChange: setDraft, onSend: send, onAttach: () => { setPlusMenu(current => !(current ?? frame.menu === "plus")); onEvent?.("menu.plus"); }, onAudio: () => onEvent?.("audio.record") }}
           plusMenu={plusMenu ?? frame.menu === "plus"} onPlusMenuSelect={id => { setPlusMenu(false); onEvent?.(`menu.plus.${id}`); }} onPlusMenuClose={() => setPlusMenu(false)}
           // `menuTransition` seeks whichever popover is presenting. Only state it while the timeline

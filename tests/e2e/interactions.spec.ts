@@ -1010,3 +1010,42 @@ test("the macOS sidebar's options button opens the inbox menu and Unread filters
   await page.getByRole("menuitem", { name: "All Messages" }).click();
   await expect(rows).toHaveCount(all);
 });
+
+/**
+ * The workbench states a scenario's pose so a checkpoint renders what the timeline says, and a live
+ * gesture has to be able to take it back — otherwise every control the scenario is currently
+ * asserting reads as dead. Two did: on the Mac, `onSelectConversation` reported an event and left
+ * `selectedId` on the frame's row, so every sidebar row but the selected one answered a click with
+ * nothing; on the phone, `selectMode` was re-asserted every render, so the toolbar's ✕, Delete and
+ * Forward could never close the mode they sit in.
+ */
+test("a live gesture takes the workbench's state back from the frame", async ({ page }, info) => {
+  if (platformFor(info) === "macos") {
+    await openScene(page, info, "list");
+    const rows = page.locator('[data-slot="sidebar-row"]');
+    const selectedIndex = async () => {
+      const flags = await rows.evaluateAll(list => list.map(row => row.getAttribute("data-selected") === "true" || row.getAttribute("aria-current") === "true"));
+      return flags.indexOf(true);
+    };
+    const before = await selectedIndex();
+    expect(before, "the scene starts with a row selected").toBeGreaterThanOrEqual(0);
+    const other = before === 0 ? 1 : 0;
+    await rows.nth(other).click();
+    await expect.poll(selectedIndex, { message: "the clicked row takes the selection" }).toBe(other);
+    return;
+  }
+
+  // The phone: leaving select mode, and a Delete that deletes.
+  await openScene(page, info, "select-mode");
+  const circles = page.locator('[data-slot="selection-circle"]');
+  await expect(circles.first()).toBeVisible();
+  await page.getByRole("button", { name: "Done selecting" }).click();
+  await expect(circles).toHaveCount(0);
+
+  await openScene(page, info, "select-mode");
+  const bubbles = page.locator('[data-slot="bubble"]');
+  const count = await bubbles.count();
+  await page.getByRole("button", { name: /^Delete/ }).click();
+  await expect(bubbles, "the deleted message is gone").toHaveCount(count - 1);
+  await expect(circles, "and the mode closes behind it").toHaveCount(0);
+});
