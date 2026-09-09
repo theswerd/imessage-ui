@@ -9,13 +9,17 @@ concurrency:
   group: deploy-production
   cancel-in-progress: false
 
+# imessage.swerdlow.dev is served by Vercel, which deploys it from this repo on every push to main
+# through its own GitHub integration - there is no job for it here. This workflow is the second
+# target: the same commit on Cloudflare Workers at its workers.dev hostname. It only runs once
+# CLOUDFLARE_API_TOKEN exists, so the repo is not red while that secret is missing.
 jobs:
   deploy:
     name: Build and deploy to Cloudflare
     runs-on: ubuntu-latest
+    if: vars.CLOUDFLARE_ENABLED == 'true'
     environment:
-      name: production
-      url: https://imessage.swerdlow.dev
+      name: cloudflare
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2

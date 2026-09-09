@@ -149,28 +149,37 @@ is installable on its own. Applications own transport, storage, uploads and real
 
 ## Deploying
 
-The site runs on Cloudflare Workers through the OpenNext adapter, and every push to `main` deploys it.
+**https://imessage.swerdlow.dev** is live. Vercel builds it from this repo on every push to `main`
+through its own GitHub integration, so there is no deploy step to run by hand and no token to keep.
+`REGISTRY_URL` is set to the production origin in the project's environment, which is what makes the
+installable JSON at `/r/*.json` point at real URLs rather than localhost.
+
+The zone is the reason it is not on Cloudflare. A Workers custom domain needs the zone to live on
+the same Cloudflare account, and `swerdlow.dev` is on Vercel DNS along with a dozen sibling
+subdomains. Cloudflare Pages would have taken a plain CNAME, but the OpenNext adapter targets
+Workers. So the hostname is an `A` record at Vercel's edge, like every other subdomain here.
+
+The Cloudflare Worker is still a second target for the same commit, on its `workers.dev` hostname:
 
 ```sh
 bun run preview   # build and run the Worker locally
 bun run deploy    # build and deploy
 ```
 
-Two GitHub Actions workflows: `ci.yml` runs typecheck, lint and the unit tests on every push and pull
-request, plus the full Playwright suite against a production build. That second job does not gate,
-because the visual baselines are rendered on macOS and a Linux runner rasterises glyphs differently,
-so it reports the diff rather than failing on it. `deploy.yml` runs the same checks and then deploys.
+`deploy.yml` does that in CI, gated on a repository variable so a missing token does not turn the
+repo red. To turn it on, add the `CLOUDFLARE_API_TOKEN` secret (an "Edit Cloudflare Workers" token;
+`CLOUDFLARE_ACCOUNT_ID` is already set) and set the repository variable `CLOUDFLARE_ENABLED` to
+`true`.
 
-`registry:build` runs before the deploy and fails when a component's declared `registryDependencies`
-do not match its real imports, so a drifted manifest breaks the deploy rather than shipping a registry
-that cannot be installed.
+`ci.yml` runs typecheck, lint and the unit tests on every push and pull request, plus the full
+Playwright suite against a production build. That second job does not gate, because the visual
+baselines are rendered on macOS and a Linux runner rasterises glyphs differently, so it reports the
+diff rather than failing on it.
 
-The deploy needs two repository secrets: `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` (an
-"Edit Cloudflare Workers" token).
-
-**The custom domain is not attached yet.** A Workers custom domain requires the zone to live on the
-same Cloudflare account, and `swerdlow.dev` is on Vercel DNS. Until the zone moves, the deploy binds
-only the `workers.dev` hostname.
+`registry:build` runs before every build and fails when a component's declared
+`registryDependencies` do not match its real imports, or when a file under `registry/imessage` is
+not shipped by any item. A drifted manifest breaks the build rather than shipping a registry that
+cannot be installed.
 
 ## Layout
 
