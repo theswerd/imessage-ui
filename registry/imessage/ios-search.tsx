@@ -683,13 +683,21 @@ function GlassLayers({ round = false, clip }: { round?: boolean; clip?: "left" |
   );
 }
 
+/**
+ * The same trick `ios-conversation-list` uses: a `lineHeight: 1` box around a 17 px SF name is
+ * shorter than the font's own ascent + descent, so `truncate`'s `overflow: hidden` shaves the
+ * bottom off every descender. Grow the clip box with padding and take it back off `top` so the
+ * text does not move - `overflow: hidden` clips at the padding box.
+ */
+const NAME_BLEED = 3;
+
 function ConversationRow({ result, query, last, onSelect }: { result: IosSearchConversationResult; query: string; last: boolean; onSelect?: () => void }) {
   const m = iosSearchMetrics.row;
   return (
     <button type="button" onClick={onSelect} aria-label={`${result.name}, ${result.time}, ${result.preview}`}
       className="absolute inset-0 w-full text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-500">
       <Avatar aria-hidden="true" size={m.avatar} initials={result.initials ?? initialsOf(result.name)} className="absolute" style={{ left: m.avatarLeft, top: m.avatarTop }} />
-      <span aria-hidden="true" data-slot="name" className="absolute truncate" style={{ left: m.textLeft, right: 96, top: m.nameTop, transform: "translateY(0.3333px)", fontSize: m.nameSize, lineHeight: 1, fontWeight: m.nameWeight, letterSpacing: 0, color: "var(--ios-search-label)" }}>
+      <span aria-hidden="true" data-slot="name" className="absolute truncate" style={{ left: m.textLeft, right: 96, top: m.nameTop - NAME_BLEED, paddingBlock: NAME_BLEED, transform: "translateY(0.3333px)", fontSize: m.nameSize, lineHeight: 1, fontWeight: m.nameWeight, letterSpacing: 0, color: "var(--ios-search-label)" }}>
         {result.name}
       </span>
       <span aria-hidden="true" data-slot="time" className="absolute whitespace-nowrap" style={{ right: m.timeRight, top: m.timeTop, transform: "translateY(0.3333px)", fontSize: m.timeSize, lineHeight: 1, letterSpacing: 0, color: "var(--ios-search-secondary)" }}>

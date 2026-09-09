@@ -54,7 +54,7 @@ export const reactionOffsets: Record<Platform, { marginTop: number; top: number;
 
 function fillVars(direction: Direction, service: Service): CSSProperties {
   const key = direction === "incoming" ? "gray" : service === "sms" ? "green" : "blue";
-  return { "--im-fill-top": `var(--im-${key}-top)`, "--im-fill-bottom": `var(--im-${key}-bottom)`, "--im-sel": `var(--im-sel-${key})` } as CSSProperties;
+  return { "--im-fill-top": `var(--im-${key}-top)`, "--im-fill-bottom": `var(--im-${key}-bottom)`, "--im-sel": `var(--im-sel-${key})`, "--im-seltext": `var(--im-seltext-${key})` } as CSSProperties;
 }
 
 /**
@@ -68,6 +68,30 @@ function fillVars(direction: Direction, service: Service): CSSProperties {
 export const selectionOverlayClass =
   "[--im-sel-blue:#1b60d8] [--im-sel-gray:#c6c6c7] [--im-sel-green:#0a0a7833] " +
   "dark:[--im-sel-blue:#0b50c8] dark:[--im-sel-gray:#55555c]";
+
+/**
+ * Dragging across the words inside a balloon, which is a Mac-only gesture: `-[CKUIBehaviorPhone
+ * enableBalloonTextSelection]` is NO and `-[CKUIBehaviorMac enableBalloonTextSelection]` is YES, so
+ * on iOS the text is not selectable at all and "Select" in the long-press menu means the whole
+ * message (`ios-select-mode`), not a range inside it. That is why `user-select` is `none` on iOS
+ * here rather than an oversight, and it is also why iOS has no colour below.
+ *
+ * The Mac's colours come from `-[CKUITheme selectionHighlightColorOverrideForColorType:]`, read
+ * beside `balloonColorsForColorType:` and `balloonTextColorForColorType:` so each type's fill, text
+ * and highlight line up. Across all twelve types the rule is the text colour, not the fill: every
+ * type whose text is white takes white at 0.65 (type 0 green #53e678->#34c759, type 1 blue
+ * #5ac8fa->#0088ff, type 5 #303032, type 6, type 7), and every type with dark text takes
+ * `blueSelectionHighlightColor`, #00a1ff at 0.35 (type 4 white/black text, type 8, and type 9, the
+ * incoming balloon: fill #000000 at 0.20 over the pane, text #000000 at 0.44). Neither value moves
+ * with the appearance - the probe returns the same pair resolved light and dark - so there is no
+ * `dark:` half to this.
+ *
+ * This is a background behind the glyphs, not a filter over them - `-[CKBalloonTextView
+ * _setFakeSelectionBackgroundColorForRange:]` sets a background colour attribute on the range - so
+ * the text keeps its own colour and white-on-blue selected text really does land on #aad4fe.
+ */
+export const balloonTextSelectionClass =
+  "[--im-seltext-blue:#ffffffa6] [--im-seltext-green:#ffffffa6] [--im-seltext-gray:#00a1ff59]";
 
 /**
  * Native bubbles hug their longest wrapped line instead of stretching to the maximum width, and
@@ -155,7 +179,7 @@ export function MessageBubble({
 
   return (
     <div data-slot="message-bubble" data-direction={direction} data-service={service} data-platform={platform} data-selected={selected ? "true" : undefined}
-      className={cn("flex min-w-0 flex-col", selectionOverlayClass, outgoing ? "items-end" : "items-start", className)}
+      className={cn("flex min-w-0 flex-col", selectionOverlayClass, balloonTextSelectionClass, "selection:bg-[var(--im-seltext)]", outgoing ? "items-end" : "items-start", className)}
       style={{ fontFamily: fontStack, ...vars, ...style }} {...props}>
       {/* `-[CKUIBehavior senderTranscriptInsets]` is {0, 14, 0, 0} on iPhone and {0, 12, 0, 0} at
           idiom 5: a leading inset only, with nothing on the top, bottom or trailing edge. This used
@@ -164,7 +188,7 @@ export function MessageBubble({
         style={{ color: "var(--im-secondary)", paddingInlineStart: platform === "ios" ? 14 : 12 }}>{sender}</span>}
       <div ref={frame} data-slot="bubble-frame" className="relative max-w-full" style={{ maxWidth: maxWidth ?? (platform === "ios" ? m.maxWidth : `${m.maxWidthRatio * 100}%`), marginTop: reactions ? reactionOffset.marginTop : undefined }}>
         {big ? (
-          <div data-slot="emoji" style={{ fontSize: m.emojiOnlySize, lineHeight: `${m.emojiOnlyLineHeight}px`, fontFamily: emojiFontStack, padding: `0 ${m.emojiOnlyInset}px` }}>
+          <div data-slot="emoji" style={{ fontSize: m.emojiOnlySize, lineHeight: `${m.emojiOnlyLineHeight}px`, fontFamily: emojiFontStack, padding: `0 ${m.emojiOnlyInset}px`, userSelect: platform === "ios" ? "none" : "text" }}>
             <span className="sr-only">{outgoing ? "You: " : `${sender ?? "Contact"}: `}</span>{children}
           </div>
         ) : (
@@ -172,6 +196,7 @@ export function MessageBubble({
             fontSize: m.fontSize, lineHeight: `${m.lineHeight}px`, letterSpacing: m.letterSpacing,
             padding: `${m.paddingY}px ${m.paddingX}px`, minWidth: m.minWidth, textAlign: "start",
             color: outgoing ? "var(--im-outgoing-text)" : "var(--im-incoming-text)",
+            userSelect: platform === "ios" ? "none" : "text",
           }}>
             {/* The fill lives behind the text so clipping the tail corner never clips glyphs.
                 Chrome rounds a painted background box to whole CSS px, so the widest macOS bubble,
