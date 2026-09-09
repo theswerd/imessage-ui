@@ -389,7 +389,9 @@ described as measured:
   gap: three 8.5 dots at 12.5 span 33.5 and leave 12 of padding each side of the 57.5 balloon,
   where reading it as a gap would leave 3.5. It also has the two smaller bubbles that trail the
   balloon (`…MediumBubbleSize` {11.5, 11.5} at (7, -7.5), the large one at (14, -28.5), whole
-  indicator `transcriptTypingIndicatorDefaultSize` {78.5, 35}), which the kit does not draw yet.
+  indicator `transcriptTypingIndicatorDefaultSize` {78.5, 35}), which the kit does not draw yet. At
+  idiom 5 the Mac keeps the same 8.5 dots at the same 12.5 pitch and shrinks only the balloon, to
+  **{44, 27}**.
 - **The macOS tapback overshoot.** `tapback-apply-frames-100-123.png` ends while the balloon is still
   growing, so the peak scale and the settle in `tapbackAppear` are invented; only the 110 ms rise, the
   trail's lack of delay, and the 183 ms menu dissolve are measured. See "macOS tapback motion".
@@ -438,8 +440,10 @@ described as measured:
   `replyPreviewBalloonMinWidth` **48**, `replyBalloonTextContainerInset` **{6.5, 0, 6.5, 0}** and
   `replyBalloonMaximumNumberOfLines` **3**. A corner nearly as round as a full bubble's over type
   two thirds the size cannot come from one scale factor; the 0.76 recorded here would have given
-  12.93 / 15.21 / 30.4 / 36.5 / 7.6 / 2. `CKUIBehaviorMac` inherits all of them. The one number that
-  survives is the opacity: `replyPreviewBalloonImageAlpha` is **0.55**. Still not measured, because
+  12.93 / 15.21 / 30.4 / 36.5 / 7.6 / 2. **Read at both idioms rather than assumed to be shared:**
+  `CKUIBehaviorMac` overrides three - corner **15**, min height **20**, text inset **{2, 0, 2, 0}** -
+  and inherits min width 48, max lines 3 and the opacity. The one number that survives from before is
+  that opacity: `replyPreviewBalloonImageAlpha` is **0.55**. Still not measured, because
   ChatKit is silent on them: the stub's horizontal padding, its tail, and its maximum width, which
   stay derived from the bubble. The thread view dims and blurs the rest of the conversation, from
   documented behaviour.
@@ -451,7 +455,8 @@ described as measured:
   was guessed here. `audioWaveformHeight` **35**, `audioWaveformGapWidth` **2**,
   `audioProgressViewSize` **{29, 29}**, `audioBalloonHorizontalSpacing` **10**,
   `audioBalloonWaveformTimeSpace` **6**, `audioBalloonVerticalSpacing` **7** with
-  `audioBalloonAlignmentInsets` {0,0,0,0}. So the waveform is taller than the control beside it
+  `audioBalloonAlignmentInsets` {0,0,0,0}. At idiom 5 the Mac class overrides exactly one of them,
+  `audioProgressViewSize` **{22, 22}**; the 35 waveform is the same on both. So the waveform is taller than the control beside it
   (35 against 29, where one 28 used to serve as both), and the balloon insets its row by 7
   vertically rather than by a text bubble's 10. Still provisional: the **bar width**, and
   therefore the bar count, which is only how many fit. `audioRecordingViewTimeBetweenWaveformSegments`

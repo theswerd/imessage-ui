@@ -21,6 +21,10 @@ import { MessageBubble } from "@/registry/imessage/message-bubble";
  * | waveform to time | `audioBalloonWaveformTimeSpace` **6** | 10 |
  * | vertical inset | `audioBalloonVerticalSpacing` **7** | the text bubble's 10 |
  *
+ * Read at both idioms rather than assumed: `CKUIBehaviorMac` overrides exactly one of them,
+ * `audioProgressViewSize` **{22, 22}**. Everything else above is the same on the Mac, including the
+ * 35 waveform, which is why macOS no longer draws a 22 one.
+ *
  * So the row is not one height: the waveform is 35 and the control is 29, and the balloon insets its
  * contents by 7 vertically rather than by the 10 a text bubble uses. `audioBalloonAlignmentInsets`
  * is {0,0,0,0}, which is what says the 7 is the whole vertical inset.
@@ -87,14 +91,14 @@ export function MessageAudio({ peaks, duration, direction = "outgoing", tail = f
   const barWidth = ios ? 3 : 2.5;
   /** `audioWaveformGapWidth`. */
   const barGap = ios ? 2 : 2;
-  /** `audioWaveformHeight`: the waveform's full-scale peak, taller than the control beside it. */
-  const waveHeight = ios ? 35 : 22;
-  /** `audioProgressViewSize`. */
+  /** `audioWaveformHeight`: 35 on both idioms, taller than the control beside it. */
+  const waveHeight = 35;
+  /** `audioProgressViewSize`: the one value the Mac class overrides, {22, 22} against {29, 29}. */
   const controlSize = ios ? 29 : 22;
-  /** `audioBalloonVerticalSpacing`: the audio balloon insets its row by 7, not by a text bubble's 10. */
-  const insetY = ios ? 7 : 5;
-  /** `audioBalloonWaveformTimeSpace`. */
-  const timeGap = ios ? 6 : 6;
+  /** `audioBalloonVerticalSpacing`: 7 on both, not the text bubble's 10 (iOS) or 7.03 (macOS). */
+  const insetY = 7;
+  /** `audioBalloonWaveformTimeSpace`: 6 on both. */
+  const timeGap = 6;
   const played = duration > 0 ? Math.max(0, Math.min(1, position / duration)) : 0;
   const track = useRef<HTMLSpanElement>(null);
   const outgoing = direction === "outgoing";

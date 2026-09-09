@@ -18,6 +18,9 @@ import { bubbleMetrics, palettes } from "@/registry/imessage/tokens";
  * | dot diameter | `transcriptTypingIndicatorThinkingDotDiameter` **8.5** | 10 |
  * | dot pitch | `transcriptTypingIndicatorThinkingDotSpace` **12.5** centre to centre | 15 (10 + 5) |
  * | balloon | `transcriptTypingIndicatorLargeBubbleSize` **{57.5, 35}** | 3 dots plus the bubble's padding |
+ *
+ * Read at both idioms: the Mac keeps the same 8.5 dots at the same 12.5 pitch and shrinks only the
+ * balloon, to **{44, 27}**.
  * | whole indicator | `transcriptTypingIndicatorDefaultSize` **{78.5, 35}** | - |
  *
  * 12.5 is the pitch and not the gap: three 8.5 dots at that pitch span 33.5, which leaves 12 of
@@ -56,16 +59,21 @@ export type TypingIndicatorMetrics = {
  * `transcriptTypingIndicatorLargeBubbleSize`. macOS scales them by the ratio its bubble already
  * carries, because `CKUIBehaviorMac` does not override any of the three and its balloon is smaller.
  */
-const chatKitDots = { dot: 8.5, pitch: 12.5, balloon: { width: 57.5, height: 35 } } as const;
+const chatKitDots: Record<Platform, { dot: number; pitch: number; balloon: { width: number; height: number } }> = {
+  ios: { dot: 8.5, pitch: 12.5, balloon: { width: 57.5, height: 35 } },
+  // The Mac class keeps the dots and shrinks the balloon: `transcriptTypingIndicatorLargeBubbleSize`
+  // is {44, 27} at idiom 5, read rather than scaled from the phone's.
+  macos: { dot: 8.5, pitch: 12.5, balloon: { width: 44, height: 27 } },
+};
 
 function metricsFor(platform: Platform): TypingIndicatorMetrics {
   const b = bubbleMetrics[platform];
-  const scale = platform === "ios" ? 1 : b.lineHeight / bubbleMetrics.ios.lineHeight;
-  const dot = chatKitDots.dot * scale;
-  const dotGap = (chatKitDots.pitch - chatKitDots.dot) * scale;
+  const ck = chatKitDots[platform];
+  const dot = ck.dot;
+  const dotGap = ck.pitch - ck.dot;
   return {
-    width: chatKitDots.balloon.width * scale,
-    height: chatKitDots.balloon.height * scale,
+    width: ck.balloon.width,
+    height: ck.balloon.height,
     dot,
     dotGap,
     radius: b.radius,

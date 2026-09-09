@@ -71,44 +71,47 @@ export type ReplyQuote = {
  *
  * `stubScale` is kept for the parts ChatKit says nothing about - the tail, and the maximum width -
  * so those stay derived from the bubble as before, and it is no longer used for anything ChatKit
- * settles. `CKUIBehaviorMac` inherits every one of these, so macOS takes the same numbers.
+ * settles.
+ *
+ * **macOS is not the same.** `CKUIBehaviorMac` overrides three of them, read at idiom 5 rather than
+ * assumed: `textReplyBalloonCornerRadius` **15**, `replyBalloonMinHeight` **20** and
+ * `replyBalloonTextContainerInset` **{2, 0, 2, 0}**. It inherits `replyPreviewBalloonMinWidth` 48,
+ * `replyBalloonMaximumNumberOfLines` 3 and `replyPreviewBalloonImageAlpha` 0.55. Its reply font was
+ * not read, so macOS still derives that one from its own bubble.
  */
 export const replyMetrics: Record<Platform, { stubScale: number; stubOpacity: number; stubMaxLines: number }> = {
   ios: { stubScale: 0.76, stubOpacity: 0.55, stubMaxLines: 3 },
   macos: { stubScale: 0.78, stubOpacity: 0.55, stubMaxLines: 3 },
 };
 
-/** What ChatKit fixes about the stub, on both idioms. */
-const stubChatKit = {
-  /** `_replyBalloonTextFont`. */
-  fontSize: 11,
-  /** `replyBalloonTextContainerInset` {6.5, 0, 6.5, 0}: vertical only, no horizontal inset of its own. */
-  insetY: 6.5,
-  /** `textReplyBalloonCornerRadius`. */
-  radius: 17.5,
-  /** `replyBalloonMinHeight`. */
-  minHeight: 26,
-  /** `replyPreviewBalloonMinWidth`, the same 48 a full bubble uses. */
-  minWidth: 48,
-} as const;
+/** What ChatKit fixes about the stub, read once per idiom rather than assumed to be shared. */
+const stubChatKit: Record<Platform, { fontSize: number | null; insetY: number; radius: number; minHeight: number; minWidth: number }> = {
+  // `_replyBalloonTextFont` .SFNS-Regular 11, `replyBalloonTextContainerInset` {6.5,0,6.5,0},
+  // `textReplyBalloonCornerRadius` 17.5, `replyBalloonMinHeight` 26, `replyPreviewBalloonMinWidth` 48.
+  ios: { fontSize: 11, insetY: 6.5, radius: 17.5, minHeight: 26, minWidth: 48 },
+  // The Mac class overrides the first four; `fontSize` null means it was not read there, so the
+  // stub's type still comes from the bubble.
+  macos: { fontSize: null, insetY: 2, radius: 15, minHeight: 20, minWidth: 48 },
+};
 
 /** The stub's geometry: ChatKit's own numbers, and the bubble's only where ChatKit is silent. */
 export function replyStubMetrics(platform: Platform) {
   const m = bubbleMetrics[platform];
   const scale = replyMetrics[platform].stubScale;
-  // The line box has to carry the 26 minimum on one line: 26 - 2 * 6.5 = 13.
-  const lineHeight = stubChatKit.minHeight - stubChatKit.insetY * 2;
+  const ck = stubChatKit[platform];
+  // The line box carries the minimum on one line: iOS 26 - 2 x 6.5 = 13, macOS 20 - 2 x 2 = 16.
+  const lineHeight = ck.minHeight - ck.insetY * 2;
   return {
     scale,
-    fontSize: stubChatKit.fontSize,
+    fontSize: ck.fontSize ?? m.fontSize * scale,
     lineHeight,
     // No horizontal text inset of ChatKit's own, so the balloon's own padding is the bubble's,
     // scaled - the one place the old uniform scale still has to answer.
     paddingX: m.paddingX * scale,
-    paddingY: stubChatKit.insetY,
-    radius: stubChatKit.radius,
-    minWidth: stubChatKit.minWidth,
-    minHeight: stubChatKit.minHeight,
+    paddingY: ck.insetY,
+    radius: ck.radius,
+    minWidth: ck.minWidth,
+    minHeight: ck.minHeight,
     letterSpacing: m.letterSpacing * scale,
     tailScale: m.tailScale * scale,
     /** How far the tail hangs below the body. It is drawn outside the body and takes no space. */
