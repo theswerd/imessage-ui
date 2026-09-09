@@ -670,6 +670,7 @@
       "title": "Photo viewer",
       "description": "The full-screen viewer a photo opens into: zoom out of the tile, swipe between the message's photos, pinch and pan, react, and drag down to close.",
       "registryDependencies": [
+        "@imessage/ios-status-bar",
         "@imessage/platform",
         "@imessage/tapback",
         "@imessage/tapback-bar",
@@ -738,6 +739,8 @@
       "title": "iOS group details",
       "description": "A group conversation's details screen: the stacked group photo, an editable name, the members, and the shared photos and links.",
       "registryDependencies": [
+        "@imessage/avatar",
+        "@imessage/group-avatar",
         "@imessage/ios-details"
       ],
       "files": [
@@ -813,7 +816,8 @@
       "description": "The search state of the conversation list: the field rising under the nav, a Cancel button, and results grouped into Conversations, Messages, Photos and Links.",
       "registryDependencies": [
         "@imessage/avatar",
-        "@imessage/ios-composer"
+        "@imessage/ios-composer",
+        "@imessage/use-screen-space"
       ],
       "files": [
         {
@@ -858,7 +862,6 @@
       "title": "System message",
       "description": "The centred grey lines that are not bubbles: group renames, joins and leaves, the group photo, a missed call, a reaction summary, and the unknown-sender sentence.",
       "registryDependencies": [
-        "@imessage/ios-notices",
         "@imessage/platform",
         "@imessage/tapback",
         "@imessage/tokens"

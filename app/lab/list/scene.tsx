@@ -31,6 +31,31 @@ const iosConv3: Message[] = [
  * references/macos/captures/conversation-pane-dark-2.png (self chat). Tails are set explicitly to match the
  * capture (only the two- and four-line bubbles have one); the tailed two-line bubble is followed by an 8pt
  * gap (3 + the 4.7pt tail hang), also reproduced explicitly.
+ *
+ * `?platform=macos&theme=dark` over 0 115 630 470 scores 2.60%, the worst row in SPEC's fidelity table.
+ * It is anti-aliasing, not geometry or colour; measured, so nobody has to re-open it:
+ *
+ *   - interior mean signed +0.02 (0.1, 0.0, -0.0), largest interior blob 0.3% -> no tint. The pane ground
+ *     reads #1e1e1e in both at every probe and the bubble fill (67,145,247) differs by one level in G.
+ *   - 68.6% of the region is bare pane in the capture; over exactly those pixels our error is mean +0.028,
+ *     mean abs 0.029, with 510 px (0.04%) past 8/255 and every one of them an AA fringe outside a bubble.
+ *     The scene reconstructs.
+ *   - 30 844 of the 30 844 mismatched pixels: 99.8% lie within 3 device px of a colour step in the capture.
+ *     Exactly 62 px (0.005% of the region) sit away from every edge.
+ *   - Bubble geometry agrees within 1 device px (0.5pt). Blue runs, ref vs ours: y 2-59/2-58, 66-123/66-122,
+ *     469-526/470-526, 533-628/534-628, 636-751/636-751, 758-912/758-912; the trailing edge is x 1219 in
+ *     both, every leading edge within 3 device px. "Second of two" is the widest miss at 1.5pt, which SPEC
+ *     already attributes to that string's advance in Chrome.
+ *   - 👋 is the only non-text contributor: same ink bbox in both (143 x 142 device px), ours one device px
+ *     lower, its interior shading off by -6.47 over 2 580 px. Worth 740 mismatched pixels, 2.4% of the total.
+ *   - The residual is our glyphs being thinner than the capture's: white ink measures 15.0-15.6% lighter in
+ *     every one of the six bubbles, uniformly, because app/globals.css sets `-webkit-font-smoothing:
+ *     antialiased` on body. Injecting `-webkit-font-smoothing: auto` takes this row to 1.99%, but overshoots
+ *     the other way (+13.4% ink) and moves every other row in the table, so it is a repo-wide call, not one
+ *     this lab should make.
+ *   - The capture also carries the sidebar's shadow on the pane's leading edge (#1c1c1c to x 6pt, #1d1d1d to
+ *     18.5pt, then #1e1e1e). /lab/macos-chrome?scene=pane reproduces it; this lab draws the message area with
+ *     no sidebar, so it cannot. At two levels deep it costs zero mismatched pixels.
  */
 const macPane2: Message[] = [
   { id: "m1", direction: "outgoing", sentAt: at(0), text: "First of two, sent back to back", tail: false },

@@ -15,83 +15,156 @@ import {
 import { cn } from "@/lib/utils";
 import { usePlatform, type Platform } from "@/registry/imessage/platform";
 import { bubbleMetrics, fontStack } from "@/registry/imessage/tokens";
+import { IosStatusBar } from "@/registry/imessage/ios-status-bar";
 import { Tapback, TapbackGlyph, balloonGeometry, balloonSlot, pickerBalloonGeometry, tapbackVars } from "@/registry/imessage/tapback";
 import { SmileyIcon, TapbackBar, tapbackBarMetrics, type TapbackSelection } from "@/registry/imessage/tapback-bar";
 
 /**
  * The full-screen photo viewer: what a photo in a bubble opens into.
  *
- * NO CAPTURE OF THIS SCREEN EXISTS, and none can be made from here, so every number below says where
- * it actually came from. Three kinds, and each value repeats its own:
+ * THIS SURFACE IS NOW CAPTURED. Messages does not draw a photo browser of its own — it presents
+ * QuickLook, and `ChatKit.CKQLPreviewController` is the `QLPreviewController` subclass it presents.
+ * That subclass can be instantiated outside Messages, so the screen was reproduced and shot:
  *
- * FRAMEWORK. Read out of the binaries shipped on this Mac (macOS 26.5.2, Messages 26.0) by dlopen-ing
- * the macCatalyst frameworks from a macCatalyst process and reading the live Objective-C objects, plus
- * `dyld_info` over the same images. The class and selector is named on every value.
- *   - Messages does not draw a photo browser of its own: it opens QuickLook.
- *     `ChatKit.CKQLPreviewController` is a `QLPreviewController` subclass, and its members say what the
- *     screen holds: `numberOfPreviewItemsInPreviewController:` and `currentPreviewItemIndex` (paging
- *     over the message's own items), `replyButton`, `tapbackButton`, `saveTapped:`, `replyTapped:`,
- *     `tapbackTapped:` and `updateBarButtonItems` (the bars). That is the shape this component copies.
- *   - The reaction picker over a full-screen item is `ChatKit.CKFullScreenBalloonViewController`,
- *     anchored on the toolbar's tapback button
- *     (`CKQLPreviewController -tapbackButtonFrameForFullScreenBalloonViewController:`) and drawn with a
- *     downward tail (`-fullScreenBalloonViewControllerPickerViewUsesBottomTail:`). Hence the picker pill
- *     floats above the footer with its thought bubble pointing back down at that button.
- *   - Colour and type come from `PhotosUIPrivate.PUBlackOneUpInterfaceTheme`, the theme the photo
- *     browser runs under. Durations, zoom factors and the page gap come from
- *     `PhotosUIPrivate.PUOneUpSettings` and `PUTilingViewSettings`.
- *   - The accessible names are ChatKit's own, from
- *     `AccessibilityBundles/ChatKitFramework.axbundle/Contents/Resources/Accessibility.loctable`:
- *     `photo.attachment` = "Photo", `messages.attachment.stack.view.format` = "attachment %1$d of %2$d",
- *     `save.photo.button` = "Save photo", `delete.button.label` = "Delete", `balloon.message.reply` = "Reply".
+ *   1. A throwaway iOS app (`clang -target arm64-apple-ios18.0-simulator`) with a `QLPreviewItem`
+ *      data source over five generated JPEGs, installed on a private iPhone 17 Pro / iOS 26.0
+ *      (23A343) simulator with `xcrun simctl install`.
+ *   2. `dlopen("/System/Library/PrivateFrameworks/ChatKit.framework/ChatKit")` inside that app,
+ *      `objc_getClass("CKQLPreviewController")`, present it full screen.
+ *   3. `xcrun simctl io <udid> screenshot` at 402x874 @3x, and a walk of the live view hierarchy
+ *      logging every frame in window coordinates — so the bar geometry is read off the runtime, not
+ *      guessed from pixels, and the screenshot only confirms it.
  *
- * MEASURED, from `references/SPEC.md`: the iOS safe area. SPEC's iOS frame is 402x874 with the status
- * bar over y 0-54 (Dynamic Island 14-50.67) and records "Home indicator: none in simulator captures".
- * So the default inset is 54 top and 0 bottom, and `safeArea` is the prop for a device that does show a
- * gesture bar. The chrome is laid out inside those insets and never under them.
+ * Captures: `references/ios/captures/image-viewer-chrome-dark.png` (chrome up over the black ground)
+ * and `image-viewer-fit-dark.png` (a 3:4 photo fitted, chrome auto-hidden). Written up in
+ * `references/image-viewer.md` and `references/SPEC.md`.
  *
- * JUDGEMENT, with no framework symbol and no capture behind it (each one says so again where it lives):
- * the thresholds that commit a swipe or a dismissal, the scale the photo shrinks to while it is being
- * flung away, the bar heights (UIKit's stock 44 and 49), the gradient behind the bars, where an applied
- * tapback balloon sits on a full-screen photo, and the whole macOS presentation.
+ * WHAT THE CAPTURE OVERTURNED. The chrome is not two opaque bars with a scrim and a centred title.
+ * On iOS 26 it is three Liquid Glass circles floating over the photo: a close X top right, and a
+ * bottom row of reply (left) and share (right). There is no "Done" text button, no title text and no
+ * thumbnail tray. `-[CKQLPreviewController updateBarButtonItems]` disassembles to a single `ret`, so
+ * ChatKit builds no bars at all: `loadView` only sets `navigationBar.barStyle`, and QuickLook lays
+ * the buttons out itself (`-tapbackButtonFrameForFullScreenBalloonViewController:` forwards to
+ * `-frameForAdditionalButtonWithActionName:`, QuickLook's own additional-button slot).
  *
- * macOS ASSUMPTION. Messages on macOS is the same Catalyst binary, so the same QuickLook viewer opens,
- * but into a 960x640 window instead of over a phone screen. This component keeps one API and changes
- * only the framing: no safe-area inset, shorter bars, the macOS two-row tapback picker in a floating
- * panel instead of the iOS pill, and pointer and keyboard paths (double click, trackpad pinch, arrow
- * keys, plus and minus) carrying what touch carries on iOS. None of that is measured.
+ * FRAMEWORK values are read out of the binaries on this Mac (macOS 26.5.2, Messages 26.0) from a
+ * macCatalyst process that dlopens the iOSSupport frameworks. `PUOneUpSettings` is idiom-dependent
+ * and its singleton latches the idiom at first `+sharedInstance`, so every read below was taken in a
+ * fresh process with `-[UIDevice userInterfaceIdiom]` swizzled to 0 (phone) BEFORE the first access.
+ * That is the difference between `interpageSpacing` 40 (phone and mac) and 100 (pad); a plain
+ * Catalyst process reports pad. Method bodies come from `lldb ... -o "disassemble -n '-[Class sel]'"`
+ * against the loaded image, because the on-disk binaries are shared-cache stubs.
+ *
+ * The accessible names are ChatKit's own, from
+ * `AccessibilityBundles/ChatKitFramework.axbundle/Contents/Resources/Accessibility.loctable`:
+ * `photo.attachment` = "Photo", `messages.attachment.stack.view.format` = "attachment %1$d of %2$d",
+ * `save.photo.button` = "Save photo", `balloon.message.reply` = "Reply". The live bar buttons carry
+ * `accessibilityLabel` "close", "reply" and "Share".
+ *
+ * JUDGEMENT, with no framework symbol and no capture behind it — each one says so again where it
+ * lives, and they are listed in SPEC's "what is not measured": the thresholds that commit a swipe or
+ * a dismissal, the scale the photo shrinks to while it is being flung away, where an applied tapback
+ * balloon sits on a full-screen photo, the save and tapback buttons' glyphs and their slot in the
+ * bar, and the whole macOS presentation.
  *
  * SEEKABLE. The entrance and the exit are one Web Animations timeline per layer, so
  * `document.getAnimations()` reaches them and `progress` pauses and seeks instead of playing. With
- * `progress` set, every CSS transition in the tree is switched off too, so a checkpoint renders the
- * same frame every run.
+ * `progress` set, every CSS transition in the tree is switched off and the chrome's auto-hide timer
+ * never arms, so a checkpoint renders the same frame every run.
  */
 export const imageViewerMetrics = {
   /**
    * The viewer's ground. `PUBlackOneUpInterfaceTheme -photoBrowserChromeVisibleBackgroundColor` and
    * `-photoBrowserChromeHiddenBackgroundColor` both resolve to opaque black in the light AND the dark
-   * trait collection, so the viewer does not follow the theme: it is black either way.
+   * trait collection, so the viewer does not follow the theme: it is black either way. Confirmed in
+   * `image-viewer-fit-dark.png`, where every pixel outside the fitted photo is exactly (0,0,0).
    */
   ground: "#000000",
-  /** `PUBlackOneUpInterfaceTheme -photoBrowserTitleViewTextColor` (and `-photoBrowserTitleViewTappableTextColor`): white in both themes. */
-  chromeInk: "#ffffff",
-  /** `-photoBrowserPhotoPrimaryTitleFont` is ".SFNS-Regular 15.00 pt". */
-  title: { fontSize: 15, weight: 400 },
-  /** `-photoBrowserPhotoSubtitleFont` is ".SFNS-Regular 11.00 pt". The opacity is JUDGEMENT: the theme gives one white for both lines. */
-  subtitle: { fontSize: 11, weight: 400, opacity: 0.72 },
-  /** `PUBlackOneUpInterfaceTheme -topToolbarToolButtonGlyphSize` = 21. */
-  glyph: 21,
-  /** `-topToolbarToolButtonFont` is ".SFNS-Regular 15.00 pt"; the Done button takes it. */
-  button: { fontSize: 15, weight: 400 },
   /**
-   * Bar heights. UIKit's stock navigation bar and toolbar for a phone in portrait, and a guess for a
-   * window. NOT measured, and not a framework value I could read: platform default, not Messages' own.
+   * The Liquid Glass disc every chrome button is drawn on, MEASURED off
+   * `image-viewer-chrome-dark.png` over the viewer's own black ground: the disc's interior reads
+   * #131313 (19/255), i.e. white at 7.45% over black, and its outer edge peaks at 52/255, i.e. a rim
+   * of white at 14% on top of that fill. The glyph ink reads #f3f3f3, not pure white. A disabled
+   * glyph (the capture's reply button, which had no delegate to enable it) peaks at 90/255, which is
+   * 0.32 of the enabled ink over the same disc.
+   *
+   * `blur` is the one number here that a capture cannot give back: the ground behind the discs is
+   * flat black, so no radius is recoverable from it. UNMEASURED.
    */
-  bars: { ios: { header: 44, footer: 49 }, macos: { header: 38, footer: 44 } },
-  /** `PUOneUpSettings -barsAreaVerticalOutset` = 10: how far the bars' area runs past the bars themselves. */
+  glass: {
+    fill: "rgba(255,255,255,0.0745)",
+    rim: "rgba(255,255,255,0.14)",
+    ink: "#f3f3f3",
+    disabledInk: 0.32,
+    blur: 20,
+  },
+  /**
+   * Where the chrome sits. iOS is MEASURED from the live view hierarchy of `CKQLPreviewController`
+   * on an iPhone 17 Pro at 402x874:
+   *   - `UIWindow.safeAreaInsets` = {62, 0, 34, 0}. Note this is NOT the 54 the status bar's ink
+   *     occupies (SPEC's "status bar 0-54"): the layout inset is 62, and there is a 34pt home
+   *     indicator inset the conversation captures never showed.
+   *   - `UINavigationBar` frame {0, 62, 402, 54}, i.e. it begins exactly at the safe-area top; its
+   *     `_UIBarBackground` spans {0, 0, 402, 116}, which is the bar plus `barsOutset`.
+   *   - The nav bar's `_UINavigationBarPlatterView`s are 44x44 at (16, 62) and (342, 62), so 16 in
+   *     from each edge. ChatKit's build has only the right one (`accessibilityLabel` "close").
+   *   - The floating bottom bar is {0, 798, 402, 76}; its button row is {28, 798, 346, 48} and its
+   *     `UIPlatformGlassInteractionView`s are 48x48 at (28, 798) and (326, 798).
+   * Both slots reproduce numbers SPEC already carries for other screens: the conversation's back
+   * button is "a 44pt circle centered (38, 84)" = (16, 62, 44, 44), and the list's compose button is
+   * "Ø48 centered (350, 822)" = (326, 798, 48, 48). Same slots, independently measured twice.
+   *
+   * macOS is UNMEASURED. Messages on macOS is the same Catalyst binary presenting the same
+   * QuickLook, so the disc sizes and the horizontal insets are carried over unchanged and only
+   * `header.top` is invented — a window has no safe area to hang the bar off.
+   */
+  chrome: {
+    ios: {
+      // The header's top IS the safe-area top: `UINavigationBar.frame.origin.y` and
+      // `safeAreaInsets.top` are both 62, measured in the same hierarchy dump.
+      safeArea: { top: 62, bottom: 34 },
+      header: { size: 44, inset: 16 },
+      footer: { size: 48, inset: 28, bottom: 28 },
+    },
+    macos: {
+      // A window has no safe area, so `top` here is the inset the chrome keeps instead. UNMEASURED;
+      // everything else is carried over from iOS, which is the same Catalyst binary.
+      safeArea: { top: 16, bottom: 0 },
+      header: { size: 44, inset: 16 },
+      footer: { size: 48, inset: 28, bottom: 28 },
+    },
+  },
+  /**
+   * Glyph ink boxes, MEASURED. The reply and share sizes are the `UIImage` symbol sizes logged off
+   * the live `_UIModernBarButton`s (`arrowshape.turn.up.left` 21.333 x 17.333,
+   * `square.and.arrow.up` 19 x 22); the close X is the ink box traced in the capture, 17 x 17
+   * centred on the disc.
+   *
+   * `save` and `tapback` are UNMEASURED: ChatKit has `-saveTapped:` and `-tapbackTapped:` and the
+   * axbundle has "Save photo", but neither button appears in the bar unless a
+   * `ckQLPreviewControllerDelegate` supplies a chat item, which a probe outside Messages cannot do.
+   * Their glyphs and their slot in the bar are drawn to match the two that were measured.
+   */
+  glyph: {
+    close: 17,
+    reply: { width: 21.67, height: 19.67, offsetX: -1.17, offsetY: 0.17 },
+    share: { width: 18.67, height: 24 },
+    save: { width: 18.67, height: 24 },
+    tapback: 21,
+  },
+  /**
+   * `PUOneUpSettings -barsAreaVerticalOutset` = 10: how far the bars' AREA runs past the bars
+   * themselves. It checks out against the capture — the nav bar's background is 116 tall and the bar
+   * itself ends at 62 + 44 = 106.
+   */
   barsOutset: 10,
-  /** `PUOneUpSettings -interpageSpacing` = 100. The gap is the viewer's ground, so it reads as black. */
-  interpageSpacing: 100,
+  /**
+   * `PUOneUpSettings -interpageSpacing`. 40 under idiom 0 (phone) and idiom 5 (mac), 100 under idiom
+   * 1 (pad). This file used to carry the pad value, which put 60pt too much black between photos on
+   * every swipe and threw the parallax off with it. The gap is the viewer's ground, so it reads as
+   * black.
+   */
+  interpageSpacing: 40,
   /** `PUOneUpSettings -doubleTapZoomFactor` = 2.5. */
   doubleTapZoom: 2.5,
   /** `PUOneUpSettings -defaultZoomInFactor` = 6, the pinch ceiling. */
@@ -100,34 +173,66 @@ export const imageViewerMetrics = {
   allowDoubleTapZoom: true,
   allowChromeHiding: true,
   /**
-   * `PUOneUpSettings -parallaxFactor` = 12.5 with `-allowParallax` = 1: while a page moves, its photo
-   * lags by 1/12.5 of that page's offset, so the strip does not slide as one sheet.
+   * `-doubleTapZoomAreaExcludesBackground` = 1 and `-doubleTapZoomAreaExcludesBars` = 1: a double tap
+   * on the letterboxed black, or inside the bars' area, does not zoom. `doubleTapTarget` below is
+   * where it does.
+   */
+  doubleTapExcludesBackground: true,
+  doubleTapExcludesBars: true,
+  /**
+   * `PUOneUpSettings -parallaxFactor` = 12.5 with `-allowParallax` = 1 and `-parallaxModel` = 1:
+   * while a page moves, its photo lags by 1/12.5 of that page's offset, so the strip does not slide
+   * as one sheet.
    */
   parallaxFactor: 12.5,
-  /** `PUOneUpSettings -chromeAutoHideDelay` = 3 s. Messages does not auto-hide, so nothing here uses it; recorded because it is the framework's number. */
+  /**
+   * `PUOneUpSettings -chromeAutoHideDelay` = 3 s with `-allowChromeHiding` = 1 and
+   * `-persistChromeVisibility` = 0. This is not theoretical: in the capture run the chrome was up at
+   * 1.4 s and gone by 2.6 s without any input, so the viewer really does drop its chrome on a timer.
+   */
   chromeAutoHideDelay: 3000,
   /**
-   * Rubber band. UIScrollView's documented resistance constant, which every Apple scroll view uses and
-   * the one-up pager is one. NOT read out of PhotosUI: platform default, not a measurement.
+   * `PUOneUpSettings -chromeAutoHideBehaviorOnZoom` = 2. The raw value is measured; what the enum's
+   * cases mean is not, so this component takes the only reading that is consistent with the other
+   * two `chromeAutoHideBehavior*` settings and hides the chrome when the photo leaves fit.
+   */
+  hideChromeOnZoom: true,
+  /**
+   * `PUOneUpSettings -userNavigationMaximumDistance` = 2: how far ahead of the current item the pager
+   * keeps content ready. Used as the mount window, so a twenty-photo message mounts five pages, not
+   * twenty.
+   */
+  pageWindow: 2,
+  /**
+   * Rubber band. UIScrollView's documented resistance constant, which every Apple scroll view uses
+   * and the one-up pager is one. NOT read out of PhotosUI: platform default, not a measurement.
    */
   rubberBand: 0.55,
   /**
    * Committing a swipe. JUDGEMENT, no framework value: the page flips when the drag passes a third of
-   * the frame or the flick is faster than 500 pt/s.
+   * the frame or the flick is faster than 500 pt/s. (`-pagingFrictionAdjustment` = 2 and
+   * `-pagingSpringPullAdjustment` = 0 are the only paging numbers PhotosUI exposes and neither is a
+   * threshold.)
    */
   pageCommit: { distance: 1 / 3, velocity: 500 },
   /**
    * Committing a drag-to-dismiss, and how far the photo shrinks on the way down. JUDGEMENT:
    * `PUOneUpSettings` carries no dismissal threshold. 120 pt of travel or a 700 pt/s flick, with the
-   * photo scaling to 0.6 across that travel while the ground fades out under it.
+   * photo scaling to 0.6 across that travel.
    */
   dismiss: { distance: 120, velocity: 700, minScale: 0.6 },
+  /**
+   * How far the ground dims under an interactive dismissal.
+   * `PUTilingViewSettings -interactiveTransitionBackgroundDimming` = 0.5, so the black goes to 50%
+   * across the drag and the conversation shows through behind it — it does not fade away entirely.
+   */
+  dismissDimming: 0.5,
   /** How far a pointer has to move before a drag stops being a tap. JUDGEMENT. */
   slop: 6,
   /** How long a second tap counts as a double tap, and how far it may land from the first. JUDGEMENT. */
   doubleTap: { window: 300, slop: 24 },
   timing: {
-    /** `PUTilingViewSettings -springAnimationDuration` = 0.3, with `-useSpringAnimations` = 1. The open zoom, and the exit that reverses it. */
+    /** `PUTilingViewSettings -springAnimationDuration` = 0.3, with `-useSpringAnimations` = 1. The open zoom, the exit that reverses it, and every settle of the photo's own transform. */
     zoom: 300,
     /** `PUTilingViewSettings -transitionDuration` = 0.2: the ground coming up behind the zoom. */
     backdrop: 200,
@@ -137,7 +242,12 @@ export const imageViewerMetrics = {
     chromeDelay: 0,
     /** `PUOneUpSettings -finalFadeOutDuration` = 0.2. Used when there is no tile to zoom out of. */
     fade: 200,
-    /** `PUOneUpSettings -bounceDuration` = 0.5 with `-bounceSpringDamping` = 1, i.e. critically damped, no overshoot. The snap back from an overscrolled pan. */
+    /**
+     * `PUOneUpSettings -bounceDuration` = 0.5 with `-bounceSpringDamping` = 1 (critically damped, no
+     * overshoot) and `-bounceDelay` = 0. This is the snap back from an OVERSCROLLED pan and nothing
+     * else. A double tap, a pinch settle and a page settle all take `zoom` (0.3); this file used to
+     * route every one of them through 0.5.
+     */
     bounce: 500,
     /** Paging under its own steam, e.g. an arrow key. `PUTilingViewSettings -springAnimationDuration`. */
     page: 300,
@@ -150,17 +260,6 @@ export const imageViewerMetrics = {
    * the standard curve the rest of the kit uses. JUDGEMENT.
    */
   ease: "cubic-bezier(0.32, 0.72, 0, 1)",
-  /**
-   * The iOS safe area, from SPEC: the status bar occupies y 0-54 and no gesture bar appears in any
-   * capture. A device that shows one passes its own inset through `safeArea`.
-   */
-  safeArea: { ios: { top: 54, bottom: 0 }, macos: { top: 0, bottom: 0 } },
-  /**
-   * The wash under each bar, so white ink stays legible over a bright photo. JUDGEMENT: the theme gives
-   * an opaque black ground for the chrome, which is the colour behind the bars once the photo is
-   * letterboxed, but nothing says what covers the photo itself.
-   */
-  barScrim: "rgba(0,0,0,0.55)",
 } as const;
 
 export type ImageViewerRect = { x: number; y: number; width: number; height: number };
@@ -176,12 +275,19 @@ export type ImageViewerProps = Omit<ComponentProps<"div">, "children" | "onSelec
   onIndexChange?: (index: number) => void;
   /**
    * The tapped tile's box in the viewer's OWN coordinates, i.e. relative to the element this viewer
-   * fills. A caller holding a viewport `DOMRect` (which is what `MessageImages onOpenImage` hands over)
-   * subtracts the viewer host's own `getBoundingClientRect()` first. The open zoom starts here and the
-   * exit returns to it; null falls back to a fade, which is what a viewer opened from a keyboard or a
-   * deep link should do.
+   * fills. A caller holding a viewport `DOMRect` (which is what `MessageImages onOpenImage` hands
+   * over) subtracts the viewer host's own `getBoundingClientRect()` first. The open zoom starts here;
+   * null falls back to a fade, which is what a viewer opened from a keyboard or a deep link should
+   * do.
    */
   sourceRect?: ImageViewerRect | null;
+  /**
+   * Where each photo's tile is, so the EXIT lands on the photo that is actually showing. Native
+   * returns the current item to its own tile and fades when that tile is off-screen; a viewer given
+   * only `sourceRect` flies photo 4 back into photo 1's thumbnail. Return null for a tile that is not
+   * on screen and the exit fades instead.
+   */
+  rectForIndex?: (index: number) => ImageViewerRect | null;
   /** The tile's corner radius, so the zoom starts with the bubble's corner and squares off on the way out. */
   sourceRadius?: number;
   /** False plays the exit and then calls `onExited`. Derive it during render, never in an effect. */
@@ -190,7 +296,11 @@ export type ImageViewerProps = Omit<ComponentProps<"div">, "children" | "onSelec
   onClose?: () => void;
   /** Seek the entrance to this fraction (0..1) instead of playing it, and freeze every transition. */
   progress?: number;
-  /** Header lines: who sent it above, when below. */
+  /**
+   * Header lines. OFF by default and rendered only when given, because the measured iOS 26 chrome has
+   * none: `CKQLPreviewController` sets `navigationItem.title` to the preview item's title, but the
+   * bar draws no title view and the capture shows no text anywhere in the chrome.
+   */
   title?: string;
   subtitle?: string;
   /** Show "2 of 5" beside the subtitle. Off by default: neither `PUOneUpSettings` nor QuickLook has a page indicator. */
@@ -198,20 +308,52 @@ export type ImageViewerProps = Omit<ComponentProps<"div">, "children" | "onSelec
   /** Header and footer visibility. Controlled when given; tapping the photo toggles it either way. */
   chrome?: boolean;
   onChromeChange?: (visible: boolean) => void;
+  /**
+   * Drop the chrome after `chromeAutoHideDelay` with no input, the way the capture run showed the
+   * real viewer doing. Never arms while `progress` is set, so a scrubbed checkpoint is stable.
+   */
+  autoHideChrome?: boolean;
+  /**
+   * Drive the drag-to-dismiss pose from outside: 0 at rest, 1 at the commit threshold. Given, it
+   * replaces the finger's own travel, so a harness checkpoint or a lab scene can hold the pose the
+   * gesture passes through instead of having to synthesise a drag.
+   */
+  dismissProgress?: number;
   /** Fit is 1. Controlled when given. */
   zoom?: number;
   onZoomChange?: (zoom: number) => void;
-  /** The reaction on the photo that is showing, and the picker over it. */
+  /**
+   * The reaction on the photo that is showing, and the picker over it. Reacting from inside the
+   * viewer is real: `CKQLPreviewController` has `-tapbackTapped:`, `-tapbackButton`,
+   * `-_sendTapback:targetChatItem:isRemoval:` and a full `CKFullScreenBalloonViewController` delegate
+   * surface, and `-shouldShowTapbackPickerForFullScreenBalloonViewController:` asks the chat
+   * controller per item.
+   */
   reaction?: TapbackSelection | null;
   onReact?: (selection: TapbackSelection) => void;
   tapbackOpen?: boolean;
   onTapbackOpenChange?: (open: boolean) => void;
   recent?: string[];
+  /**
+   * Who reacted, shown beside the balloon.
+   * `-shouldShowTapbackAttributionForFullScreenBalloonViewController:` is delegated per chat item, so
+   * the real surface can show it. Its placement here is UNMEASURED.
+   */
+  reactionAttribution?: string;
+  /** QuickLook's own share button, `_actionButtonTapped:`. Always in the bar. */
   onShare?: () => void;
-  onDelete?: () => void;
+  /** ChatKit's `-replyTapped:`. The button is always in the bar and is DISABLED when this is absent, which is what `-shouldShowReplyButtonForMediaObject:previewController:` does to it natively. */
   onReply?: () => void;
+  /** ChatKit's `-saveTapped:`, gated natively on `-canCurrentPreviewItemQuickSave`. Omit and no save button is drawn. */
+  onSave?: () => void;
+  /** `-currentPreviewItemIsSaved`: the save button reports the item is already in the library. */
+  saved?: boolean;
   /** Insets the chrome stays inside. Defaults to the platform's measured ones. */
   safeArea?: { top?: number; bottom?: number };
+  /** Draw the status bar. `PUOneUpSettings -allowStatusBar` = 1 and the capture shows it, in white over the black ground. */
+  statusBar?: boolean;
+  /** Clock text for that status bar. */
+  time?: string;
   /** The viewer's own size before it can measure itself, e.g. during a server render. */
   frame?: ImageViewerSize;
   platform?: Platform;
@@ -244,10 +386,10 @@ function prefersReducedMotion() {
 
 /**
  * The two poses of the open zoom, in the zoom layer's own coordinates with `transform-origin: 0 0`.
- * The end pose is the identity, because the photo is already fitted in the frame. The start pose scales
- * the whole frame down until the fitted photo covers `source` exactly, clips away everything outside
- * it, and divides the tile's corner radius by the same scale so it lands at `radius` on screen. Both
- * poses are `inset()` clips of the same shape, which is what makes the pair animatable.
+ * The end pose is the identity, because the photo is already fitted in the frame. The start pose
+ * scales the whole frame down until the fitted photo covers `source` exactly, clips away everything
+ * outside it, and divides the tile's corner radius by the same scale so it lands at `radius` on
+ * screen. Both poses are `inset()` clips of the same shape, which is what makes the pair animatable.
  */
 export function zoomPose(source: ImageViewerRect | null, fit: ImageViewerRect, frame: ImageViewerSize, radius: number) {
   const settled = { transform: "translate(0px, 0px) scale(1)", clipPath: "inset(0px 0px 0px 0px round 0px)", opacity: 1 };
@@ -271,32 +413,110 @@ export function zoomPose(source: ImageViewerRect | null, fit: ImageViewerRect, f
   };
 }
 
-/** SF Symbol "square.and.arrow.up" look-alike. */
-function ShareIcon({ size }: { size: number }) {
+/**
+ * Where a double tap is allowed to zoom, from `-doubleTapZoomAreaExcludesBackground` = 1 and
+ * `-doubleTapZoomAreaExcludesBars` = 1: inside the fitted photo, and outside the bars' areas — which
+ * are each bar's band grown by `barsAreaVerticalOutset`.
+ */
+export function doubleTapTarget(point: { x: number; y: number }, fit: ImageViewerRect, frame: ImageViewerSize, bars: { top: number; bottom: number }): boolean {
+  const m = imageViewerMetrics;
+  if (m.doubleTapExcludesBackground) {
+    const inside = point.x >= fit.x && point.x <= fit.x + fit.width && point.y >= fit.y && point.y <= fit.y + fit.height;
+    if (!inside) return false;
+  }
+  if (m.doubleTapExcludesBars) {
+    if (point.y < bars.top || point.y > frame.height - bars.bottom) return false;
+  }
+  return true;
+}
+
+/**
+ * Which pages are mounted. `PUOneUpSettings -userNavigationMaximumDistance` = 2, so the pager keeps
+ * two items either side ready and everything past that is not in the tree at all.
+ */
+export function pageWindow(index: number, count: number, distance: number = imageViewerMetrics.pageWindow): number[] {
+  const pages: number[] = [];
+  for (let i = Math.max(0, index - distance); i <= Math.min(count - 1, index + distance); i++) pages.push(i);
+  return pages;
+}
+
+/* --------------------------------------------------------------------------------- glyphs */
+
+/**
+ * The close button's X, traced off `image-viewer-chrome-dark.png` at 3x: ink x 355.0-371.67,
+ * y 75.67-92.67 inside a disc at (342, 62, 44, 44), i.e. 16.67 x 17.0 centred on the disc to within
+ * two thirds of a point. Each diagonal reads 9.5 device px across a row, and a 45 degree stroke
+ * measured along a row is its true width times root two, so the stroke is 9.5 / 3 / 1.414 = 2.24.
+ */
+function CloseIcon({ size }: { size: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 21 21" fill="none" aria-hidden="true">
-      <path d="M10.5 1.6v11.2M6.9 5.1l3.6-3.5 3.6 3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M5.6 8.1H4.3a1.9 1.9 0 0 0-1.9 1.9v7.6a1.9 1.9 0 0 0 1.9 1.9h12.4a1.9 1.9 0 0 0 1.9-1.9V10a1.9 1.9 0 0 0-1.9-1.9h-1.3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    <svg width={size} height={size} viewBox="0 0 17 17" fill="none" aria-hidden="true">
+      <path d="M1.2 1.2 15.8 15.8M15.8 1.2 1.2 15.8" stroke="currentColor" strokeWidth="2.24" strokeLinecap="round" />
     </svg>
   );
 }
 
-/** SF Symbol "trash" look-alike. */
-function TrashIcon({ size }: { size: number }) {
+/**
+ * SF Symbol `arrowshape.turn.up.left`, the image ChatKit's `-replyButton` is built with
+ * (`[[CKUIBehavior sharedBehaviors] replyImage]`, logged off the live bar button as a 21.333 x 17.333
+ * symbol). The silhouette is traced off `image-viewer-chrome-dark.png` at 3x, where its ink runs
+ * x 40.0-61.67 and y 812.67-832.33 inside a disc at (28, 798, 48, 48):
+ *   - the arrowhead's tip is the leftmost ink, at y 822.17;
+ *   - its top and bottom corners sit at x 50.17, y 812.67 and y 832.33;
+ *   - the back edge between them is a 2.0 pt vertical run at x 50.0-51.67, broken where the hook
+ *     leaves it at y 818.0 and rejoins it at y 825.33;
+ *   - the hook's outer edge reaches x 61.67 and comes down to a tip at (61.3, 832), which is why
+ *     the bottom row of the mask has TWO ink runs and not one.
+ * Stroke 1.9 = the 6 device px the back edge measures.
+ */
+function ReplyIcon({ width, height }: { width: number; height: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 21 21" fill="none" aria-hidden="true">
-      <path d="M3.4 5.3h14.2M8.2 5.3V3.9a1.3 1.3 0 0 1 1.3-1.3h2a1.3 1.3 0 0 1 1.3 1.3v1.4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M5.2 5.3l.8 11.4a1.9 1.9 0 0 0 1.9 1.8h5.2a1.9 1.9 0 0 0 1.9-1.8l.8-11.4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M8.9 8.6v6.6M12.1 8.6v6.6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    <svg width={width} height={height} viewBox="0 0 21.67 19.67" fill="none" aria-hidden="true">
+      <path
+        d="M1.35 9.6 10.9 1.05v4.85c6.5 0 9.5 3.7 9.5 12.6 0-3.9-3.4-5.3-9.5-5.3v5.4Z"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
 
-/** SF Symbol "arrowshape.turn.up.left" look-alike, the reply control `CKQLPreviewController -replyButton` puts in the bars. */
-function ReplyIcon({ size }: { size: number }) {
+/**
+ * SF Symbol `square.and.arrow.up`, QuickLook's own action button (`_actionButtonTapped:`), logged as
+ * a 19 x 22 symbol and traced off `image-viewer-chrome-dark.png`, where its ink runs x 340.33-359.0
+ * and y 809.67-833.67 inside a disc at (326, 798, 48, 48) — 18.67 x 24.0, centred on the disc to
+ * within a third of a point. The tray's walls are 1.67 pt runs whose centres sit at x 341.17 and
+ * 358.17; its top edge is at y 817.5 and is broken between x 347 and x 352.67 for the shaft; its
+ * bottom is at y 832.8 with corners of about r 2.5. The chevron's apex is at (349.67, 810.5) and its
+ * arms end at (345.5, 814.67) and (353.8, 814.67).
+ */
+function ShareIcon({ width, height }: { width: number; height: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 21 21" fill="none" aria-hidden="true">
-      <path d="M8.6 4.2 2.9 9.3l5.7 5.1v-2.9c4 0 6.7 1.1 8.4 4.3.3-5.1-2.1-8.3-8.4-8.7V4.2Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+    <svg width={width} height={height} viewBox="0 0 19 24" fill="none" aria-hidden="true">
+      <path d="M9.5 1v14.8M5.35 5.15 9.5 1l4.15 4.15" stroke="currentColor" strokeWidth="1.67" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M6.9 7.85H3.5A2.5 2.5 0 0 0 1 10.35v10.25a2.5 2.5 0 0 0 2.5 2.5h12a2.5 2.5 0 0 0 2.5-2.5V10.35a2.5 2.5 0 0 0-2.5-2.5h-3.4" stroke="currentColor" strokeWidth="1.67" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/**
+ * The save button. UNMEASURED: ChatKit has `-saveTapped:` and the axbundle has "Save photo", but the
+ * button never appears without a chat item, so its symbol is a `square.and.arrow.down` look-alike
+ * drawn to the share glyph's box, and the saved state is a checkmark in the same box.
+ */
+function SaveIcon({ width, height, saved }: { width: number; height: number; saved?: boolean }) {
+  if (saved) {
+    return (
+      <svg width={width} height={height} viewBox="0 0 19 24" fill="none" aria-hidden="true">
+        <path d="M3.6 12.6 7.9 17l7.5-9.4" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  return (
+    <svg width={width} height={height} viewBox="0 0 19 24" fill="none" aria-hidden="true">
+      <path d="M9.5 1v14.8M5.35 11.65 9.5 15.8l4.15-4.15" stroke="currentColor" strokeWidth="1.67" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M6.9 7.85H3.5A2.5 2.5 0 0 0 1 10.35v10.25a2.5 2.5 0 0 0 2.5 2.5h12a2.5 2.5 0 0 0 2.5-2.5V10.35a2.5 2.5 0 0 0-2.5-2.5h-3.4" stroke="currentColor" strokeWidth="1.67" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -326,12 +546,16 @@ function midpointOf(points: Point[]): Point {
   return { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
 }
 
+/** How long the photo's own transform takes to settle, per the thing that started it moving. */
+type Motion = "none" | "settle" | "bounce" | "page";
+
 export function ImageViewer({
   photos,
   index: indexProp,
   defaultIndex = 0,
   onIndexChange,
   sourceRect = null,
+  rectForIndex,
   sourceRadius,
   open = true,
   onExited,
@@ -342,6 +566,8 @@ export function ImageViewer({
   pageIndicator = false,
   chrome: chromeProp,
   onChromeChange,
+  autoHideChrome = true,
+  dismissProgress,
   zoom: zoomProp,
   onZoomChange,
   reaction = null,
@@ -349,10 +575,14 @@ export function ImageViewer({
   tapbackOpen: tapbackOpenProp,
   onTapbackOpenChange,
   recent,
+  reactionAttribution,
   onShare,
-  onDelete,
   onReply,
+  onSave,
+  saved = false,
   safeArea,
+  statusBar,
+  time,
   frame: frameProp,
   platform: platformProp,
   className,
@@ -362,11 +592,12 @@ export function ImageViewer({
   const contextPlatform = usePlatform();
   const platform = platformProp ?? contextPlatform;
   const m = imageViewerMetrics;
-  const bars = m.bars[platform];
-  const inset = { ...m.safeArea[platform], ...safeArea };
+  const chromeBox = m.chrome[platform];
+  const inset = { ...chromeBox.safeArea, ...safeArea };
   const radius = sourceRadius ?? bubbleMetrics[platform].radius;
   const scrubbed = progress !== undefined;
   const count = photos.length;
+  const showStatusBar = statusBar ?? platform === "ios";
 
   const root = useRef<HTMLDivElement>(null);
   const backdrop = useRef<HTMLDivElement>(null);
@@ -374,10 +605,11 @@ export function ImageViewer({
   const chromeLayer = useRef<HTMLDivElement>(null);
   const tapbackButton = useRef<HTMLButtonElement>(null);
   const exited = useRef(false);
-  const chromeTimer = useRef<number | undefined>(undefined);
+  const tapTimer = useRef<number | undefined>(undefined);
+  const motionTimer = useRef<number | undefined>(undefined);
 
-  // The viewer lays out in its own coordinates, so it has to know its own box before it can fit a photo
-  // or read `sourceRect`. `frame` covers the render before the observer has fired.
+  // The viewer lays out in its own coordinates, so it has to know its own box before it can fit a
+  // photo or read `sourceRect`. `frame` covers the render before the observer has fired.
   const [measuredFrame, setMeasuredFrame] = useState<ImageViewerSize | null>(null);
   const frame = useMemo(
     () => measuredFrame ?? frameProp ?? (platform === "ios" ? { width: 402, height: 874 } : { width: 960, height: 640 }),
@@ -413,6 +645,12 @@ export function ImageViewer({
     },
     [chromeProp, onChromeChange],
   );
+  // Callers pass `onChromeChange` inline, so `setChrome` is a new function every parent render. The
+  // auto-hide timer reads it through a ref instead, or a render would restart the countdown.
+  const setChromeRef = useRef(setChrome);
+  useLayoutEffect(() => {
+    setChromeRef.current = setChrome;
+  });
 
   const [internalZoom, setInternalZoom] = useState(1);
   const zoom = clamp(zoomProp ?? internalZoom, 1, m.maxZoom);
@@ -435,8 +673,8 @@ export function ImageViewer({
     [tapbackOpenProp, onTapbackOpenChange],
   );
   // The same derive-during-render rule the shells use for the long-press overlay: the picker has to
-  // outlive the flag that opened it, because an effect would leave one committed frame with it already
-  // gone and its dismissal would never be seen.
+  // outlive the flag that opened it, because an effect would leave one committed frame with it
+  // already gone and its dismissal would never be seen.
   const [seenTapbackOpen, setSeenTapbackOpen] = useState(tapbackOpen);
   const [tapbackClosing, setTapbackClosing] = useState(false);
   if (seenTapbackOpen !== tapbackOpen) {
@@ -445,24 +683,45 @@ export function ImageViewer({
   }
 
   // Where the footer's tapback button actually sits, so the picker's thought bubble points at it
-  // rather than at the middle of the bar: the footer spreads its controls, and how many it has depends
-  // on whether the caller wired a reply handler.
+  // rather than at the middle of the bar: how many controls the footer holds depends on which
+  // handlers the caller wired.
   const [tapbackCentre, setTapbackCentre] = useState<number | null>(null);
   useLayoutEffect(() => {
     const node = tapbackButton.current;
-    if (!node) return;
-    const sync = () => setTapbackCentre(node.offsetLeft + node.offsetWidth / 2);
+    const host = root.current;
+    if (!node || !host) return;
+    // Against the viewer's own box, not `offsetLeft`: the footer is an inset positioned element, so
+    // `offsetLeft` is measured from ITS left edge and lands the picker's tail 28 pt off.
+    const sync = () => {
+      const button = node.getBoundingClientRect();
+      const box = host.getBoundingClientRect();
+      setTapbackCentre(button.left - box.left + button.width / 2);
+    };
     sync();
     const observer = new ResizeObserver(sync);
     observer.observe(node);
+    observer.observe(host);
     return () => observer.disconnect();
-  }, [frame.width]);
+  }, [frame.width, onSave, onReply]);
 
   const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
   const [dragX, setDragX] = useState(0);
   const [drop, setDrop] = useState<Point>({ x: 0, y: 0 });
-  const [settling, setSettling] = useState(false);
+  const [motion, setMotionState] = useState<Motion>("none");
   const [aspects, setAspects] = useState<Record<string, number>>({});
+
+  // `motion` used to be a boolean that only `onPointerDown` ever cleared, so any keyboard action left
+  // the settle transition armed for good. It now clears itself after the animation it describes.
+  const beginMotion = useCallback((kind: Exclude<Motion, "none">) => {
+    setMotionState(kind);
+    window.clearTimeout(motionTimer.current);
+    const duration = kind === "bounce" ? imageViewerMetrics.timing.bounce : kind === "page" ? imageViewerMetrics.timing.page : imageViewerMetrics.timing.zoom;
+    motionTimer.current = window.setTimeout(() => setMotionState("none"), duration);
+  }, []);
+  const endMotion = useCallback(() => {
+    window.clearTimeout(motionTimer.current);
+    setMotionState("none");
+  }, []);
 
   const aspectOf = useCallback(
     (photo: ImageViewerPhoto | undefined) => (photo && photo.width && photo.height ? photo.width / photo.height : (photo && aspects[photo.src]) || 4 / 3),
@@ -473,23 +732,60 @@ export function ImageViewer({
   const pitch = frame.width + m.interpageSpacing;
   const trackX = -index * pitch + dragX;
 
-  // How far the drag has carried the dismissal: 0 at rest, 1 where it commits.
-  const dropProgress = clamp(Math.abs(drop.y) / m.dismiss.distance, 0, 1);
+  /* ------------------------------------------------------------------ chrome geometry */
+
+  // The bars' areas, which the double-tap zoom is not allowed into and which the picker has to clear.
+  const headerBand = inset.top + chromeBox.header.size + m.barsOutset;
+  const footerBand = chromeBox.footer.bottom + chromeBox.footer.size + m.barsOutset;
+  // How far the whole thought bubble hangs below the pill. `TapbackBar` puts the blob's centre
+  // `pickerDrop` below the pill's bottom, and the two trailing circles hang further still: the small
+  // one's bottom lands `pickerDrop + smallOffset[1] + small / 2` = 49.37 down. Measuring only to the
+  // blob (36.67) drove the trail 12.7 pt into the button it is meant to be pointing at.
+  const pickerLift = tapbackBarMetrics.ios.pickerDrop + pickerBalloonGeometry.smallOffset[1] + pickerBalloonGeometry.small / 2;
+  // The pill floats far enough above the footer that the thought bubble's lowest dot lands exactly on
+  // the tapback button's top edge. Derived from the measured footer and the measured bubble geometry
+  // — not itself a measured gap.
+  const pickerBottom = chromeBox.footer.bottom + chromeBox.footer.size + pickerLift;
+  const pickerInset = tapbackBarMetrics.ios.edgeInset;
+  const pickerWidth = frame.width - pickerInset * 2;
+  // Where the thought bubble's blob goes, in the pill's own coordinates. `TapbackBar` hangs the blob
+  // at `pickerX` and its trailing circles down and to the LEFT of it, the small one landing on the
+  // blob's own centre line minus `smallOffset[0]`. Over a bubble that trail points at the bubble, so
+  // over a photo it points at the button the picker belongs to: the blob is offset by that much so
+  // the small circle, not the blob, lands on the tapback button. Derived from the measured balloon
+  // geometry; nothing measures the placement itself.
+  const pickerAim = (tapbackCentre ?? frame.width / 2) - pickerInset - pickerBalloonGeometry.smallOffset[0];
+  const pickerX = clamp(pickerAim, pickerBalloonGeometry.main / 2, Math.max(pickerBalloonGeometry.main / 2, pickerWidth - pickerBalloonGeometry.main / 2));
+
+  // How far the drag has carried the dismissal: 0 at rest, 1 where it commits. Only DOWNWARD travel
+  // counts — dragging up used to shrink the photo, fade the ground and hide the chrome before
+  // snapping back, because this read `Math.abs(drop.y)` while the commit test read `drop.y`.
+  const shift = dismissProgress === undefined ? drop : { x: 0, y: clamp(dismissProgress, 0, 1) * m.dismiss.distance };
+  const dropProgress = clamp(Math.max(0, shift.y) / m.dismiss.distance, 0, 1);
   const dropScale = 1 - (1 - m.dismiss.minScale) * dropProgress;
 
   /* ------------------------------------------------------------------ entrance and exit */
 
-  const pose = useMemo(() => zoomPose(sourceRect, fit, frame, radius), [sourceRect, fit, frame, radius]);
+  // Which item the viewer opened on. The entrance keys off THIS one, so paging cannot restart it,
+  // while the pose below tracks whichever photo is showing so the exit lands on its own tile.
+  // State, not a ref, because it is read during render: a lazy initial value that never changes.
+  const [openIndex] = useState(index);
+  const openRect = rectForIndex ? rectForIndex(openIndex) : sourceRect;
+  const exitRect = rectForIndex ? rectForIndex(index) : index === openIndex ? sourceRect : null;
+
+  const pose = useMemo(() => zoomPose(exitRect, fit, frame, radius), [exitRect, fit, frame, radius]);
   // The keyframes are read from a ref inside the timeline effect, so a re-render that only moves the
   // page or the pan cannot restart the entrance mid-flight.
   const poseRef = useRef(pose);
-  // Written in a layout effect rather than in render: layout effects all run before the passive effect
-  // below, so the timeline still reads the pose this render computed.
+  const durationRef = useRef(0);
+  // Written in a layout effect rather than in render: layout effects all run before the passive
+  // effect below, so the timeline still reads the pose this render computed.
   useLayoutEffect(() => {
     poseRef.current = pose;
+    durationRef.current = exitRect ? m.timing.zoom : m.timing.fade;
   });
-  // `sourceRect` is a fresh object on every parent render, so the timeline keys off its values instead.
-  const sourceKey = sourceRect ? `${sourceRect.x},${sourceRect.y},${sourceRect.width},${sourceRect.height}` : "";
+  // `sourceRect` is a fresh object on every parent render, so the timeline keys off its values.
+  const sourceKey = openRect ? `${openRect.x},${openRect.y},${openRect.width},${openRect.height}` : "";
 
   // Callers normally pass `onExited` inline, and it must not be an effect dependency: a parent
   // re-render mid-exit would cancel the exit and start it again, and it would never finish.
@@ -500,7 +796,10 @@ export function ImageViewer({
 
   useEffect(() => {
     exited.current = false;
-    return () => window.clearTimeout(chromeTimer.current);
+    return () => {
+      window.clearTimeout(tapTimer.current);
+      window.clearTimeout(motionTimer.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -509,7 +808,7 @@ export function ImageViewer({
     const chromeNode = chromeLayer.current;
     if (!stage || !ground) return;
     const reduced = prefersReducedMotion();
-    const duration = sourceKey ? m.timing.zoom : m.timing.fade;
+    const duration = durationRef.current || (sourceKey ? m.timing.zoom : m.timing.fade);
     const { start, end } = poseRef.current;
 
     const finish = () => {
@@ -537,11 +836,14 @@ export function ImageViewer({
     }
 
     if (reduced) {
-      finish();
-      return;
+      // `finish` is the parent's `onExited`, i.e. a setState in another component. Calling it in the
+      // effect body is the exact thing the lint rule forbids one boundary further in, so it goes out
+      // on a task of its own.
+      const id = window.setTimeout(finish, 0);
+      return () => window.clearTimeout(id);
     }
-    // The exit reverses the entrance: back down into the tile it came out of, with the ground fading
-    // out under it.
+    // The exit reverses the entrance: back down into the tile the CURRENT photo came out of, with the
+    // ground fading out under it.
     const running = [
       stage.animate([end, start], { duration, easing: m.ease, fill: "forwards" }),
       ground.animate([{ opacity: 1 }, { opacity: 0 }], { duration, easing: "linear", fill: "forwards" }),
@@ -554,12 +856,21 @@ export function ImageViewer({
     };
   }, [open, scrubbed, progress, sourceKey, m.ease, m.timing.zoom, m.timing.fade, m.timing.backdrop, m.timing.chrome, m.timing.chromeDelay]);
 
-  // Modal, so it takes focus when it opens. A scrubbed entrance does not: the harness seeks frames and
-  // must not move the caret.
+  // Modal, so it takes focus when it opens. A scrubbed entrance does not: the harness seeks frames
+  // and must not move the caret.
   useEffect(() => {
     if (!open || scrubbed) return;
     root.current?.focus({ preventScroll: true });
   }, [open, scrubbed]);
+
+  // `-chromeAutoHideDelay` = 3 s: the chrome drops on its own. Never while scrubbing, never while the
+  // picker is up, and never while a reaction is being chosen.
+  useEffect(() => {
+    if (!autoHideChrome || !m.allowChromeHiding || scrubbed || !open) return;
+    if (!chromeVisible || tapbackOpen) return;
+    const id = window.setTimeout(() => setChromeRef.current(false), m.chromeAutoHideDelay);
+    return () => window.clearTimeout(id);
+  }, [autoHideChrome, scrubbed, open, chromeVisible, tapbackOpen, index, zoom, m.allowChromeHiding, m.chromeAutoHideDelay]);
 
   /* ------------------------------------------------------------------ zoom, pan and paging */
 
@@ -572,13 +883,15 @@ export function ImageViewer({
   );
 
   const settle = useCallback(
-    (nextZoom: number, nextPan: Point) => {
+    (nextZoom: number, nextPan: Point, kind: Exclude<Motion, "none"> = "settle") => {
       const limit = panLimit(nextZoom);
-      setSettling(true);
+      beginMotion(kind);
       setZoom(nextZoom);
       setPan({ x: clamp(nextPan.x, -limit.x, limit.x), y: clamp(nextPan.y, -limit.y, limit.y) });
+      // `-chromeAutoHideBehaviorOnZoom` = 2: leaving fit takes the chrome with it.
+      if (m.hideChromeOnZoom && nextZoom > 1) setChrome(false);
     },
-    [panLimit, setZoom],
+    [panLimit, setZoom, beginMotion, setChrome, m.hideChromeOnZoom],
   );
 
   const zoomAbout = useCallback(
@@ -600,13 +913,13 @@ export function ImageViewer({
     (delta: number) => {
       const next = index + delta;
       if (next < 0 || next > count - 1) return;
-      setSettling(true);
+      beginMotion("page");
       setDragX(0);
       setPan({ x: 0, y: 0 });
       setZoom(1);
       setIndex(next);
     },
-    [index, count, setIndex, setZoom],
+    [index, count, setIndex, setZoom, beginMotion],
   );
 
   /* ------------------------------------------------------------------ gestures */
@@ -631,13 +944,23 @@ export function ImageViewer({
     return { x: clientX - (box?.left ?? 0), y: clientY - (box?.top ?? 0) };
   }, []);
 
+  /** Start a one-finger drag from `point`, whether it is the first finger down or the last one left. */
+  function armDrag(g: Gesture, point: Point, time: number) {
+    g.mode = "undecided";
+    g.start = point;
+    g.startPan = { ...pan };
+    g.last = point;
+    g.lastTime = time;
+    g.velocity = { x: 0, y: 0 };
+  }
+
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (event.pointerType === "mouse" && event.button !== 0) return;
     const g = gesture.current;
     const point = localPoint(event.clientX, event.clientY);
     g.pointers.set(event.pointerId, point);
     event.currentTarget.setPointerCapture(event.pointerId);
-    setSettling(false);
+    endMotion();
     if (g.pointers.size === 2) {
       const points = [...g.pointers.values()];
       g.mode = "pinch";
@@ -650,12 +973,7 @@ export function ImageViewer({
     if (g.pointers.size > 2) return;
     // Always undecided to begin with, even zoomed in: a tap on a zoomed photo still has to reach the
     // double-tap and chrome paths, so the pan only starts once the pointer has moved past the slop.
-    g.mode = "undecided";
-    g.start = point;
-    g.startPan = { ...pan };
-    g.last = point;
-    g.lastTime = event.timeStamp;
-    g.velocity = { x: 0, y: 0 };
+    armDrag(g, point, event.timeStamp);
   }
 
   function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
@@ -671,11 +989,15 @@ export function ImageViewer({
       const mid = midpointOf(points);
       const centre = { x: frame.width / 2, y: frame.height / 2 };
       const ratio = next / g.startZoom;
-      setZoom(next);
-      setPan({
+      const limit = panLimit(next);
+      const wanted = {
         x: mid.x - centre.x - ratio * (g.startMid.x - centre.x - g.startPan.x),
         y: mid.y - centre.y - ratio * (g.startMid.y - centre.y - g.startPan.y),
-      });
+      };
+      setZoom(next);
+      // Banded, not free: a mid-pinch pan used to be written straight through, so the photo could be
+      // shoved arbitrarily far off-centre and only came back on release.
+      setPan({ x: band(wanted.x, limit.x, frame.width), y: band(wanted.y, limit.y, frame.height) });
       return;
     }
 
@@ -689,6 +1011,7 @@ export function ImageViewer({
     if (g.mode === "undecided") {
       if (Math.hypot(dx, dy) < m.slop) return;
       // A zoomed photo pans in both axes; at fit, sideways is paging and downwards is a dismissal.
+      // Upwards is neither: it bands like an overscroll and springs back.
       g.mode = zoom > 1 ? "pan" : Math.abs(dx) > Math.abs(dy) ? "page" : "dismiss";
     }
 
@@ -701,15 +1024,13 @@ export function ImageViewer({
     }
 
     if (g.mode === "dismiss") {
-      setDrop({ x: dx, y: dy });
+      setDrop({ x: dx, y: dy > 0 ? dy : rubberBand(dy, frame.height) });
       return;
     }
 
     if (g.mode === "pan") {
       const limit = panLimit(zoom);
       const wanted = { x: g.startPan.x + dx, y: g.startPan.y + dy };
-      const band = (value: number, edge: number, dimension: number) =>
-        Math.abs(value) > edge ? Math.sign(value) * edge + rubberBand(value - Math.sign(value) * edge, dimension) : value;
       setPan({ x: band(wanted.x, limit.x, frame.width), y: band(wanted.y, limit.y, frame.height) });
     }
   }
@@ -723,10 +1044,14 @@ export function ImageViewer({
 
     if (g.mode === "pinch") {
       if (g.pointers.size >= 2) return;
-      g.mode = "none";
-      g.pointers.clear();
       const collapsed = zoom < 1.05;
       settle(collapsed ? 1 : zoom, collapsed ? { x: 0, y: 0 } : pan);
+      // The remaining finger keeps its capture and becomes a drag. Clearing the map here — which is
+      // what this used to do — threw that pointer's id away, so its own pointerup bailed out before
+      // `releasePointerCapture` and the capture was never given back.
+      const rest = [...g.pointers.entries()][0];
+      if (rest) armDrag(g, rest[1], event.timeStamp);
+      else g.mode = "none";
       return;
     }
 
@@ -734,25 +1059,39 @@ export function ImageViewer({
     g.mode = "none";
 
     if (mode === "page") {
-      const commit = Math.abs(dragX) > frame.width * m.pageCommit.distance || Math.abs(g.velocity.x) > m.pageCommit.velocity;
-      setSettling(true);
+      const flick = Math.abs(g.velocity.x) > m.pageCommit.velocity;
+      const dragged = Math.abs(dragX) > frame.width * m.pageCommit.distance;
+      // Direction follows whichever test fired. Taking it from `dragX` alone paged FORWARD on a drag
+      // 8px left followed by a hard flick right.
+      const direction = flick ? (g.velocity.x < 0 ? 1 : -1) : dragX < 0 ? 1 : -1;
+      // Armed before the branch, because `page` refuses to run past either end and the track still
+      // has to slide back to centre from wherever the finger left it.
+      beginMotion("page");
       setDragX(0);
-      if (commit) page(dragX < 0 ? 1 : -1);
+      if (flick || dragged) page(direction);
       return;
     }
 
     if (mode === "dismiss") {
       if (drop.y > m.dismiss.distance || g.velocity.y > m.dismiss.velocity) {
+        // Reset the drop as well as closing. Leaving it committed pinned `dropProgress` at its
+        // release value, so the chrome stayed hidden, the ground stayed dimmed and the exit reversed
+        // out of the dropped pose instead of the fitted one — and an uncontrolled viewer, whose
+        // `open` never goes false, was stuck mid-drop for good.
+        setDrop({ x: 0, y: 0 });
+        beginMotion("settle");
         onClose?.();
         return;
       }
-      setSettling(true);
+      beginMotion("bounce");
       setDrop({ x: 0, y: 0 });
       return;
     }
 
     if (mode === "pan") {
-      settle(zoom, pan);
+      const limit = panLimit(zoom);
+      const outside = Math.abs(pan.x) > limit.x || Math.abs(pan.y) > limit.y;
+      settle(zoom, pan, outside ? "bounce" : "settle");
       return;
     }
 
@@ -763,14 +1102,18 @@ export function ImageViewer({
     const doubled = event.timeStamp - g.tapTime < m.doubleTap.window && Math.hypot(point.x - g.tapPoint.x, point.y - g.tapPoint.y) < m.doubleTap.slop;
     g.tapTime = doubled ? 0 : event.timeStamp;
     g.tapPoint = point;
-    window.clearTimeout(chromeTimer.current);
+    window.clearTimeout(tapTimer.current);
     if (doubled) {
-      if (m.allowDoubleTapZoom) zoomAbout(zoom > 1 ? 1 : m.doubleTapZoom, point);
+      // `-doubleTapZoomAreaExcludesBackground` and `-doubleTapZoomAreaExcludesBars`: the letterbox
+      // and the bars' areas are not zoom targets. This used to zoom on a double tap anywhere.
+      if (m.allowDoubleTapZoom && doubleTapTarget(point, fit, frame, { top: headerBand, bottom: footerBand })) {
+        zoomAbout(zoom > 1 ? 1 : m.doubleTapZoom, point);
+      }
       return;
     }
     if (!m.allowChromeHiding) return;
     const stamp = event.timeStamp;
-    chromeTimer.current = window.setTimeout(() => {
+    tapTimer.current = window.setTimeout(() => {
       if (gesture.current.tapTime === stamp) setChrome(!chromeVisible);
     }, m.doubleTap.window);
   }
@@ -790,6 +1133,25 @@ export function ImageViewer({
   }, [zoom, zoomAbout, localPoint, m.maxZoom]);
 
   function onKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Tab") {
+      // `aria-modal` promises the rest of the page is inert, so Tab has to stay inside. Without this
+      // the first Tab walked straight out into the conversation behind the viewer.
+      const focusable = Array.from(root.current?.querySelectorAll<HTMLElement>('button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])') ?? []).filter(
+        node => node.offsetParent !== null,
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || active === root.current)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+      return;
+    }
     if (event.key === "Escape") {
       event.preventDefault();
       if (tapbackOpen) {
@@ -819,49 +1181,51 @@ export function ImageViewer({
     }
   }
 
-  /* ------------------------------------------------------------------ chrome geometry */
+  /* ------------------------------------------------------------------ painting */
 
-  const headerHeight = inset.top + bars.header;
-  const footerHeight = inset.bottom + bars.footer;
-  // The picker floats above the footer far enough that its thought bubble, which hangs half a Ø44 blob
-  // below the pill, lands on the tapback button rather than under it.
-  const pickerBottom = footerHeight + m.barsOutset + pickerBalloonGeometry.main / 2;
-  const pickerInset = tapbackBarMetrics.ios.edgeInset;
-
-  // The balloon's measured slot hangs it outside the bubble's trailing edge, which works over a bubble
-  // and does not over a photo whose trailing edge can be the screen's. Keep the slot, then pull it back
-  // inside the frame by the same edge inset a bubble keeps, and below the header.
+  // The balloon's measured slot hangs it outside the bubble's trailing edge, which works over a
+  // bubble and does not over a photo whose trailing edge can be the screen's. Keep the slot, then
+  // pull it back inside the frame by the same edge inset a bubble keeps, and below the header.
   const balloon = balloonSlot[platform];
   const balloonSize = balloonGeometry[platform].main;
   const balloonLeft = Math.min(fit.x + fit.width + balloon.side, frame.width - balloonSize - bubbleMetrics[platform].edgeInset);
-  const balloonTop = Math.max(headerHeight + m.barsOutset, fit.y + balloon.top);
+  const balloonTop = Math.max(headerBand, fit.y + balloon.top);
 
   const chromeAlpha = chromeVisible && dropProgress === 0 ? 1 : 0;
   const barTransition = scrubbed ? "none" : `opacity ${m.timing.chrome}ms linear`;
-  const trackTransition = scrubbed || !settling ? "none" : `transform ${m.timing.page}ms ${m.ease}`;
-  const photoTransition = scrubbed || !settling ? "none" : `transform ${m.timing.bounce}ms ${m.ease}`;
+  const trackTransition = scrubbed || motion === "none" ? "none" : `transform ${m.timing.page}ms ${m.ease}`;
+  const photoDuration = motion === "bounce" ? m.timing.bounce : m.timing.zoom;
+  const photoTransition = scrubbed || motion === "none" ? "none" : `transform ${photoDuration}ms ${m.ease}`;
 
-  const ink = m.chromeInk;
-  // The ground under the picker is measured black in both themes, so its glass takes the dark tokens
-  // whatever the page's theme is.
+  // The ground under the chrome is measured black in both themes, so the picker's glass takes the
+  // dark tokens whatever the page's theme is.
   const vars = tapbackVars("dark", platform) as CSSProperties;
-
-  const barButton: CSSProperties = {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    border: 0,
-    background: "transparent",
-    color: ink,
-    padding: 0,
-    fontFamily: "inherit",
-    cursor: "default",
-    minWidth: bars.footer,
-    height: bars.footer,
-  };
 
   const photo = photos[index];
   const position = count > 1 ? `attachment ${index + 1} of ${count}` : "";
+  const visible = pageWindow(index, count);
+
+  const glass: CSSProperties = {
+    background: m.glass.fill,
+    backdropFilter: `blur(${m.glass.blur}px)`,
+    WebkitBackdropFilter: `blur(${m.glass.blur}px)`,
+    boxShadow: `inset 0 0 0 0.5px ${m.glass.rim}`,
+  };
+
+  const discButton = (size: number): CSSProperties => ({
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: size,
+    height: size,
+    borderRadius: "50%",
+    border: 0,
+    padding: 0,
+    color: m.glass.ink,
+    fontFamily: "inherit",
+    cursor: "default",
+    ...glass,
+  });
 
   return (
     <div
@@ -877,12 +1241,14 @@ export function ImageViewer({
       style={{ fontFamily: fontStack, touchAction: "none", ...vars, ...style }}
       {...props}
     >
-      {/* The ground: measured black in both themes, so it does not follow the palette. */}
+      {/* The ground: measured black in both themes, so it does not follow the palette.
+          `-interactiveTransitionBackgroundDimming` = 0.5 is how far it dims under a drag — it does
+          not clear away entirely, so the conversation shows through at half strength. */}
       <div
         ref={backdrop}
         aria-hidden="true"
         data-slot="viewer-ground"
-        style={{ position: "absolute", inset: 0, background: m.ground, opacity: 1 - dropProgress }}
+        style={{ position: "absolute", inset: 0, background: m.ground, opacity: 1 - m.dismissDimming * dropProgress }}
       />
 
       <div ref={zoomLayer} data-slot="viewer-zoom" style={{ position: "absolute", inset: 0, transformOrigin: "0 0" }}>
@@ -900,17 +1266,20 @@ export function ImageViewer({
             data-slot="viewer-track"
             style={{ position: "absolute", inset: 0, transform: `translateX(${trackX}px)`, transition: trackTransition, willChange: "transform" }}
           >
-            {photos.map((item, i) => {
+            {/* Only `-userNavigationMaximumDistance` items either side are in the tree: a twenty-photo
+                message used to mount twenty full-resolution images at once. */}
+            {visible.map(i => {
+              const item = photos[i];
               const active = i === index;
               // Every page's photo lags its own page by 1/parallaxFactor of that page's offset, so a
               // swipe does not slide the whole strip as one sheet. At rest the active page's is 0.
               const parallax = -(trackX + i * pitch) / m.parallaxFactor;
               const box = fitPhotoRect(aspectOf(item), frame);
               const offset = active
-                ? { x: pan.x + drop.x + parallax, y: pan.y + drop.y, scale: zoom * dropScale }
+                ? { x: pan.x + shift.x + parallax, y: pan.y + shift.y, scale: zoom * dropScale }
                 : { x: parallax, y: 0, scale: 1 };
               return (
-                <div key={`${item.src}-${i}`} data-slot="viewer-page" style={{ position: "absolute", left: i * pitch, top: 0, width: frame.width, height: frame.height }}>
+                <div key={`${item.src}-${i}`} data-slot="viewer-page" data-index={i} style={{ position: "absolute", left: i * pitch, top: 0, width: frame.width, height: frame.height }}>
                   <div
                     data-slot="viewer-photo"
                     style={{
@@ -931,6 +1300,7 @@ export function ImageViewer({
                       alt={item.alt ?? "Photo"}
                       draggable={false}
                       decoding="async"
+                      loading={Math.abs(i - index) <= 1 ? "eager" : "lazy"}
                       onLoad={event => {
                         const image = event.currentTarget;
                         if (!image.naturalWidth || !image.naturalHeight) return;
@@ -949,7 +1319,7 @@ export function ImageViewer({
       <div ref={chromeLayer} data-slot="viewer-chrome" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
         {/* A reaction on the photo: the same balloon a bubble carries, on the photo's top trailing
             corner and clamped so it never rides under the header or off the frame. The slot is the
-            measured bubble one, because nothing captures a balloon on a full-screen photo, so its
+            measured bubble one, because no capture shows a balloon on a full-screen photo, so its
             placement here is JUDGEMENT. It lives in the chrome layer so it fades up with the rest of
             the overlay instead of hanging in the air while the photo is still zooming. */}
         {reaction && (
@@ -961,95 +1331,153 @@ export function ImageViewer({
               reaction={"type" in reaction ? reaction.type : undefined}
               emoji={"emoji" in reaction ? reaction.emoji : undefined}
             />
+            {reactionAttribution && (
+              <span
+                data-slot="viewer-reaction-attribution"
+                style={{ position: "absolute", top: balloonSize + 4, right: 0, whiteSpace: "nowrap", fontSize: 11, lineHeight: 1.2, color: m.glass.ink, opacity: 0.72 }}
+              >
+                {reactionAttribution}
+              </span>
+            )}
           </div>
         )}
 
+        {/* `-allowStatusBar` = 1, and the capture shows it: white ink over the black ground, drawn
+            with the same component the conversation uses, forced to its dark values. */}
+        {showStatusBar && (
+          <div
+            data-slot="viewer-status-bar"
+            aria-hidden="true"
+            style={{ position: "absolute", left: 0, right: 0, top: 0, opacity: chromeAlpha, transition: barTransition }}
+          >
+            <IosStatusBar
+              time={time}
+              style={
+                {
+                  "--ios-sb-label": "#ffffff",
+                  "--ios-sb-dot": "#333333",
+                  "--ios-sb-battery": "#666666",
+                  "--ios-sb-nub": "#808080",
+                } as CSSProperties
+              }
+            />
+          </div>
+        )}
+
+        {/* Header. One glass disc on the trailing side, `accessibilityLabel` "close" — there is no
+            "Done" text button and no title view in the measured chrome. `title`/`subtitle` render
+            only when a caller asks for them. */}
         <div
           data-slot="viewer-header"
           style={{
             position: "absolute",
             left: 0,
             right: 0,
-            top: 0,
-            height: headerHeight,
-            paddingTop: inset.top,
+            top: inset.top,
+            height: chromeBox.header.size,
+            paddingInline: chromeBox.header.inset,
             display: "flex",
             alignItems: "center",
-            color: ink,
+            justifyContent: "flex-end",
             opacity: chromeAlpha,
             transition: barTransition,
             pointerEvents: chromeAlpha ? "auto" : "none",
-            background: `linear-gradient(to bottom, ${m.barScrim}, transparent)`,
           }}
         >
-          <button
-            type="button"
-            data-slot="viewer-done"
-            onClick={onClose}
-            style={{ ...barButton, height: bars.header, paddingInline: 16, fontSize: m.button.fontSize, fontWeight: m.button.weight }}
-          >
-            Done
+          {(title || subtitle || (pageIndicator && count > 1)) && (
+            <div
+              data-slot="viewer-title"
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                top: 0,
+                height: chromeBox.header.size,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                pointerEvents: "none",
+                color: m.glass.ink,
+              }}
+            >
+              {title && <span style={{ fontSize: 15, lineHeight: 1.2 }}>{title}</span>}
+              {(subtitle || (pageIndicator && count > 1)) && (
+                <span style={{ display: "flex", gap: 6, fontSize: 11, lineHeight: 1.2, opacity: 0.72 }}>
+                  {subtitle && <span>{subtitle}</span>}
+                  {pageIndicator && count > 1 && <span>{`${index + 1} of ${count}`}</span>}
+                </span>
+              )}
+            </div>
+          )}
+          <button type="button" data-slot="viewer-close" aria-label="close" onClick={onClose} style={discButton(chromeBox.header.size)}>
+            <CloseIcon size={m.glyph.close} />
           </button>
-          <div
-            data-slot="viewer-title"
-            style={{ position: "absolute", left: 0, right: 0, top: inset.top, height: bars.header, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}
-          >
-            <span style={{ fontSize: m.title.fontSize, fontWeight: m.title.weight, lineHeight: 1.2, color: ink }}>{title ?? "Photo"}</span>
-            {(subtitle || (pageIndicator && count > 1)) && (
-              <span style={{ display: "flex", gap: 6, fontSize: m.subtitle.fontSize, fontWeight: m.subtitle.weight, lineHeight: 1.2, color: ink, opacity: m.subtitle.opacity }}>
-                {subtitle && <span>{subtitle}</span>}
-                {pageIndicator && count > 1 && <span>{`${index + 1} of ${count}`}</span>}
-              </span>
-            )}
-          </div>
         </div>
 
+        {/* Footer. MEASURED: reply on the leading edge, share on the trailing edge, both Ø48 discs
+            28 in from their own edge and 28 up from the bottom. The reply button is always drawn and
+            is disabled without a handler, the way `-shouldShowReplyButtonForMediaObject:` disables
+            it natively. Save and tapback are UNMEASURED additions in the trailing group. */}
         <div
           data-slot="viewer-footer"
           style={{
             position: "absolute",
-            left: 0,
-            right: 0,
-            bottom: 0,
-            height: footerHeight,
-            paddingBottom: inset.bottom,
+            left: chromeBox.footer.inset,
+            right: chromeBox.footer.inset,
+            bottom: chromeBox.footer.bottom,
+            height: chromeBox.footer.size,
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            paddingInline: 16,
-            color: ink,
             opacity: chromeAlpha,
             transition: barTransition,
             pointerEvents: chromeAlpha ? "auto" : "none",
-            background: `linear-gradient(to top, ${m.barScrim}, transparent)`,
           }}
         >
-          <button type="button" data-slot="viewer-share" aria-label="Share" onClick={onShare} style={barButton}>
-            <ShareIcon size={m.glyph} />
-          </button>
-          {onReply && (
-            <button type="button" data-slot="viewer-reply" aria-label="Reply" onClick={onReply} style={barButton}>
-              <ReplyIcon size={m.glyph} />
-            </button>
-          )}
           <button
             type="button"
-            ref={tapbackButton}
-            data-slot="viewer-tapback"
-            aria-label={reaction ? "Change reaction" : "Add a reaction"}
-            aria-expanded={tapbackOpen}
-            onClick={() => setTapbackOpen(!tapbackOpen)}
-            style={barButton}
+            data-slot="viewer-reply"
+            aria-label="reply"
+            disabled={!onReply}
+            onClick={onReply}
+            style={{ ...discButton(chromeBox.footer.size), opacity: onReply ? 1 : undefined, color: onReply ? m.glass.ink : `rgba(243,243,243,${m.glass.disabledInk})` }}
           >
-            {reaction ? (
-              <TapbackGlyph type={"type" in reaction ? reaction.type : undefined} emoji={"emoji" in reaction ? reaction.emoji : undefined} size={m.glyph} />
-            ) : (
-              <SmileyIcon size={m.glyph} color={ink} strokeWidth={1.6} />
+            {/* The reply symbol does not sit centred in its button: its ink centre measures 1.17 left
+                and 0.17 below the disc's, which is the symbol's own content insets showing through. */}
+            <span style={{ display: "inline-flex", transform: `translate(${m.glyph.reply.offsetX}px, ${m.glyph.reply.offsetY}px)` }}>
+              <ReplyIcon width={m.glyph.reply.width} height={m.glyph.reply.height} />
+            </span>
+          </button>
+          {/* Gap between the trailing controls: UNMEASURED, no capture shows more than one button on
+              this side. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {onReact && (
+              <button
+                type="button"
+                ref={tapbackButton}
+                data-slot="viewer-tapback"
+                aria-label={reaction ? "Change reaction" : "Add a reaction"}
+                aria-expanded={tapbackOpen}
+                onClick={() => setTapbackOpen(!tapbackOpen)}
+                style={discButton(chromeBox.footer.size)}
+              >
+                {reaction ? (
+                  <TapbackGlyph type={"type" in reaction ? reaction.type : undefined} emoji={"emoji" in reaction ? reaction.emoji : undefined} size={m.glyph.tapback} />
+                ) : (
+                  <SmileyIcon size={m.glyph.tapback} color={m.glass.ink} strokeWidth={1.6} />
+                )}
+              </button>
             )}
-          </button>
-          <button type="button" data-slot="viewer-delete" aria-label="Delete" onClick={onDelete} style={barButton}>
-            <TrashIcon size={m.glyph} />
-          </button>
+            {onSave && (
+              <button type="button" data-slot="viewer-save" aria-label="Save photo" aria-pressed={saved} onClick={onSave} style={discButton(chromeBox.footer.size)}>
+                <SaveIcon width={m.glyph.save.width} height={m.glyph.save.height} saved={saved} />
+              </button>
+            )}
+            <button type="button" data-slot="viewer-share" aria-label="Share" onClick={onShare} style={discButton(chromeBox.footer.size)}>
+              <ShareIcon width={m.glyph.share.width} height={m.glyph.share.height} />
+            </button>
+          </div>
         </div>
 
         {(tapbackOpen || tapbackClosing) && (
@@ -1059,10 +1487,10 @@ export function ImageViewer({
             scrubbed={scrubbed}
             selected={reaction ?? undefined}
             recent={recent}
-            width={frame.width - pickerInset * 2}
+            width={pickerWidth}
             bottom={pickerBottom}
             left={pickerInset}
-            pickerX={(tapbackCentre ?? frame.width / 2) - pickerInset}
+            pickerX={pickerX}
             onSelect={selection => {
               onReact?.(selection);
               setTapbackOpen(false);
@@ -1077,19 +1505,35 @@ export function ImageViewer({
         )}
       </div>
 
+      {/* One string per item, so it announces on an index change and stays silent on every other
+          render: identical text written back into a live region is not re-announced. */}
       <span aria-live="polite" className="sr-only">{[photo?.alt || "Photo", position].filter(Boolean).join(", ")}</span>
     </div>
   );
 }
 
+/** Rubber-banded past `edge`, one-for-one inside it. */
+function band(value: number, edge: number, dimension: number) {
+  return Math.abs(value) > edge ? Math.sign(value) * edge + rubberBand(value - Math.sign(value) * edge, dimension) : value;
+}
+
 /**
- * The reaction picker over a full-screen photo: the same `TapbackBar` a bubble gets, floated above the
- * footer instead of above a balloon, because a full-screen photo has no bubble to hang off.
+ * The reaction picker over a full-screen photo: the same `TapbackBar` a bubble gets, floated above
+ * the footer instead of above a balloon, because a full-screen photo has no bubble to hang off.
  * `CKQLPreviewController -tapbackButtonFrameForFullScreenBalloonViewController:` anchors it on the
- * toolbar's tapback button and `-fullScreenBalloonViewControllerPickerViewUsesBottomTail:` points its
- * thought bubble down at that button, which is the placement here. Its dismissal takes
- * `CKUIBehaviorPhone -tapbackDismissalDuration`, 0.5 s. Its entrance has no framework value: JUDGEMENT,
- * the same 0.2 s the chrome fades in over.
+ * toolbar's tapback button.
+ *
+ * Its thought bubble points DOWN at that button.
+ * `-fullScreenBalloonViewControllerPickerViewUsesBottomTail:` is not a constant, though the docblock
+ * here used to say so: it disassembles to `CGRectGetMinY(tapbackButtonFrame)` compared against
+ * `CGRectGetMaxY(navigationBar.frame)` and returns 1 only when the button sits at or below the nav
+ * bar's bottom (and when the frame is empty). The tapback button is in the FOOTER, always below the
+ * header (footer button top = height - 76, header bottom = 106 on a 402x874 frame), so this layout
+ * always takes the bottom-tail branch — but it takes it because the geometry says so, not because
+ * the method is a constant.
+ *
+ * Its dismissal takes `CKUIBehaviorPhone -tapbackDismissalDuration`, 0.5 s. Its entrance has no
+ * framework value: JUDGEMENT, the same 0.2 s the chrome fades in over.
  */
 function ViewerTapbackPicker({
   platform,
@@ -1149,8 +1593,8 @@ function ViewerTapbackPicker({
       onExitedRef.current();
     };
     if (reduced) {
-      finish();
-      return;
+      const id = window.setTimeout(finish, 0);
+      return () => window.clearTimeout(id);
     }
     const animation = node.animate(
       [
@@ -1166,17 +1610,22 @@ function ViewerTapbackPicker({
     };
   }, [open, scrubbed, m.timing.chrome, m.timing.tapbackDismiss, m.ease]);
 
+  // The pill's recents run past its trailing edge and are reached by scrolling, which is what the
+  // capture of the bar over a bubble shows too. The viewer's root sets `touch-action: none` so its
+  // own gestures work, which left that scroll unreachable on a touch device; the picker takes it back.
+  const scrollable: CSSProperties = { touchAction: "pan-x" };
+
   if (platform === "macos") {
     // UNVERIFIED, like the rest of the macOS presentation: the two-row picker lives in a context menu
-    // natively, so over a photo it is given the menu's own surface as a floating panel, centred on the
-    // same tapback button the iOS pill points at. The panel keeps its own centring transform and the
-    // host carries the entrance, because one element cannot hold both: an animated `transform` replaces
-    // the inline one outright.
+    // natively, so over a photo it is given the menu's own surface as a floating panel, centred on
+    // the same tapback button the iOS pill points at. The panel keeps its own centring transform and
+    // the host carries the entrance, because one element cannot hold both: an animated `transform`
+    // replaces the inline one outright.
     return (
       <div
         ref={host}
         data-slot="viewer-tapback-picker"
-        style={{ position: "absolute", bottom, left: 0, right: 0, height: 0, pointerEvents: "none", transformOrigin: `${left + pickerX}px 100%` }}
+        style={{ position: "absolute", bottom, left: 0, right: 0, height: 0, pointerEvents: "none", transformOrigin: `${left + pickerX}px 100%`, ...scrollable }}
       >
         <div
           data-slot="viewer-tapback-panel"
@@ -1204,9 +1653,23 @@ function ViewerTapbackPicker({
     <div
       ref={host}
       data-slot="viewer-tapback-picker"
-      style={{ position: "absolute", bottom, left, width, pointerEvents: "auto", transformOrigin: `${pickerX}px 100%` }}
+      style={{ position: "absolute", bottom, left, width, pointerEvents: "auto", transformOrigin: `${pickerX}px 100%`, ...scrollable }}
     >
       <TapbackBar layout="ios" selected={selected} recent={recent} onSelect={onSelect} onClose={onClose} autoFocus={!scrubbed} pickerX={pickerX} pickerSide="left" width={width} />
     </div>
   );
+}
+
+/**
+ * The two bars' AREAS, i.e. each bar's band grown by `barsAreaVerticalOutset`. This is what
+ * `doubleTapTarget` excludes, so anything testing or reusing that needs the same derivation.
+ */
+export type ImageViewerChrome = { header: number; footer: number };
+export function imageViewerChromeBands(platform: Platform, safeArea?: { top?: number; bottom?: number }): ImageViewerChrome {
+  const box = imageViewerMetrics.chrome[platform];
+  const inset = { ...box.safeArea, ...safeArea };
+  return {
+    header: inset.top + box.header.size + imageViewerMetrics.barsOutset,
+    footer: box.footer.bottom + box.footer.size + imageViewerMetrics.barsOutset,
+  };
 }

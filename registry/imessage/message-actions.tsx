@@ -33,6 +33,45 @@ import { ContextMenu, contextMenuMetrics, iosContextMenuHeight, iosMessageMenu, 
  */
 export const messageActionsTiming = { total: 600, exit: 220, dim: 150, lift: 130, menu: 130, picker: [60, 200], bar: [100, 320], glyphStart: 250, glyphStagger: 17, glyphDuration: 120 } as const;
 
+/**
+ * The dim behind the overlay. It covers the whole screen: the status bar and the nav bar go under it
+ * with the list, unblurred and not re-drawn above it. Fitted, not guessed — `longpress-ok-light.png`
+ * is `conv3-light.png` with one message pressed, so one capture over the other measures the dim
+ * directly. Outside the overlay's own furniture (device rows 1356-2349) and the status-bar clock (the
+ * two captures are 24 minutes apart) every pixel of that frame is `capture = screen·0.79 +
+ * (22,21,42)·0.21`, residual 0.14/255 mean and 0.9 max over the nav bar's full 0-255 range. Three more
+ * pairs agree: `incoming-light.png` -> `longpress-incoming-light.png` and `conv2-dark.png` ->
+ * `longpress-last-bubble-dark.png` come back at 0.001/255 mean error — exact after rounding — and the
+ * same value carries `longpress-two-line-light.png`. It is one dim in both themes, and one alpha over
+ * every layer: fitting the bands of the light pair separately gives 0.2103/0.2092/0.2130 over the nav
+ * bar, 0.2105/0.2054/0.2129 over the list and 0.2133/0.2118/0.2172 over the composer.
+ *
+ * The (22,18,44) this used to carry renders white as (206,205,210) where every light capture reads
+ * #ceced2 = (206,206,210): the green channel was a level dark everywhere the dim fell.
+ *
+ * Chrome cannot land both ends of this at once, and the last level is its rounding, not the value.
+ * It composites an overlay as `round(src·(1-a₈)) + round(tint·a₈)` with the alpha quantised to
+ * 54/255, so the tint's contribution is one rounded triple: over black it is (5,4,9), which fixes
+ * white at 201+(5,4,9) = (206,205,210). Native rounds the sum instead and gets (5,4,9) over black and
+ * (206,206,210) over white from the same value. (23,22,43) buys the light end (measured over the lab's
+ * nav band: interior G +0.2 instead of -0.8) and loses the dark one by the same level (+1.0 instead of
+ * 0.0), so this keeps the measured number and wears one level of green over bright grounds.
+ *
+ * `--im-dim` still wins wherever a palette sets it, and `tapback.tsx` sets it for both themes; it now
+ * carries this same value. Two fallbacks elsewhere are still the old one and want correcting:
+ * `message-reply.tsx` (the reply-thread dim) and `tapback-details.tsx` (the details scrim).
+ *
+ * KNOWN WRONG, and not fixable from here: this dim reaches the Dynamic Island, and nothing may. The
+ * island is a hardware cutout the OS composites above the app, so it reads #000000 in every capture
+ * that has an overlay over it — `longpress-*`, `newmsg-light.png`, `plus-menu-open-light.png`,
+ * `details-light.png`, `photo-picker-light.png` — while the status bar around it dims with everything
+ * else (#ceced2 under this dim, #cccccc under the sheet's). Under our dim it goes to (5,4,9), a flat
+ * +6 over the island's 125.33×36.67 pt, which is 6.4% of the 0 0 402 168 band. The fix belongs where
+ * the island is drawn (`ios-status-bar.tsx` plus the app's z-order), not in one overlay: every dim in
+ * the app has the same bug.
+ */
+export const messageActionsDim = "var(--im-dim, rgba(22,21,42,0.21))";
+
 export const messageActionsMetrics = {
   /** The lift widens the bubble by this much, up to `liftMaxScale`; height follows the same factor. */
   liftWidth: 26.07, liftMaxScale: 1.15, liftY: -0.18, barGap: 5, menuGap: 16.1, tailHang: 6.8, pickerBeside: 28, topInset: 60, bottomInset: 42,
@@ -252,7 +291,7 @@ export function MessageActions({ rect, frame, direction = "outgoing", service = 
           screen pixels and would set a frame that is `scale` too wide. Pin it to the measured body. */}
       <style>{`[data-actions="${id}"] [data-slot="bubble"] > span:last-child { display: inline-block; transform-origin: 50% 50%; transform: scale(var(--im-lift-text, 1)); }
 [data-actions="${id}"] [data-slot="bubble-frame"] { max-width: ${rect.width}px !important; }`}</style>
-      <div data-slot="backdrop" aria-hidden="true" onClick={onClose} style={{ position: "absolute", inset: 0, background: "var(--im-dim, rgba(22,18,44,0.21))" }} />
+      <div data-slot="backdrop" aria-hidden="true" onClick={onClose} style={{ position: "absolute", inset: 0, background: messageActionsDim }} />
       {/* The lifted bubble casts its own shadow onto the dimmed list. Fitted beside the "Ok" bubble in
           `longpress-ok-light.png`, where nothing else contributes: the dim (#ceced2 over white) reads
           194 at 0.7 pt out, 196 at 4, 198 at 7.3, 201 at 12.3 and 202 at 14, and 188 just under the body.

@@ -6,146 +6,239 @@ import { usePlatform, type Platform } from "@/registry/imessage/platform";
 import { fontStack } from "@/registry/imessage/tokens";
 
 /**
- * Recording an audio message: the composer's field becomes a row with a live waveform, a timer and
- * the stop control, and once you stop, a play control and a send button.
+ * Recording a voice message: the composer's field becomes a row carrying a live waveform, a running
+ * timer and a stop button; stopping swaps the stop for a play control, a duration pill with a `+`,
+ * and a send pill.
  *
  * ## Where these numbers come from
  *
- * **No capture in `references/` holds this screen on either platform.** Everything geometric below
- * was instead read out of ChatKit itself, which is the framework macOS Messages runs on: a Mac
- * Catalyst probe (`clang -target arm64-apple-ios18.0-macabi`) dlopens
+ * **No capture in `references/` holds this screen on either platform**, so every geometric number
+ * below was read out of ChatKit — the framework both Messages apps run on — by a Mac Catalyst probe
+ * whose full source is committed in `references/audio-recorder.md` and whose readings are tabulated
+ * in `references/SPEC.md` ("Audio recorder"). The probe dlopens
  * `/System/iOSSupport/System/Library/PrivateFrameworks/ChatKit.framework/ChatKit`, swizzles
  * `-[UIDevice userInterfaceIdiom]` so `+[CKUIBehavior sharedBehaviors]` vends the Phone or the Mac
- * behaviour, and then **builds the real view**: `-[CKAudioMessageRecordingView initWithFrame:service:]`
- * (a Swift class, `ChatKit.AudioMessageRecordingView`), feeds it levels through
- * `-addToWaveformWithIntensity:`, walks `-setState:` 0 to 3 and reads every subview's frame back.
- * So the frames below are the frames Messages lays out, not a reading of a screenshot and not a guess.
+ * behaviour, stubs `+[IMService iMessageService]` (which the view's initialiser force-unwraps), then
+ * **builds the real view**: `-[CKAudioMessageRecordingView initWithFrame:service:]`, feeds it known
+ * intensities through `-addToWaveformWithIntensity:`, walks `-setState:` 0 to 3 and reads every
+ * subview's frame, colour, radius, font and symbol image back. The frames below are the frames
+ * Messages lays out.
  *
- * Read off `CKUIBehavior` (shared by both idioms unless noted):
+ * ChatKit's `-setState:` has four states; three of them are this component's:
+ * 1 `recording`, 2 `stopped`, 3 `playing` (0 is the empty pose before recording starts).
  *
- * | Selector | Value |
- * |---|---|
- * | `audioRecordingViewDurationSpacing` | 12, and it is the only gap the row uses |
- * | `audioRecordingViewButtonSpacing` | 16, the waveform's leading inset with no play button |
- * | `audioWaveformViewHeight` / `audioWaveformHeight` | 39 / 35 |
- * | `waveformPowerLevelWidth` / `audioWaveformGapWidth` | 2 / 2, so the bar pitch is 4 |
- * | `minimumWaveformHeight` | 4 |
- * | `audioRecordingViewTimeBetweenWaveformSegments` | 0.0833333 s, i.e. 12 bars a second |
- * | `minAudioRecordingDuration` / `maxAudioRecordingDuration` | 0.25 / 60 |
- * | `audioRecordingViewMinimumDBLevel` / `MaximumDBLevel` | -60 / -10 |
- * | `audioBalloonTimeFont` | SF Regular **13** on Phone, **16** on Mac: the timer's type |
- * | `audioMessagePeakAnimationDuration` | 0.5 |
+ * ### The row
  *
- * Read off the built view (`-[CKAudioMessageRecordingView sizeThatFits:]` and its subviews' frames,
- * Phone idiom in a 294-wide box, which is the measured width of the iOS composer field):
+ * `-[CKAudioMessageRecordingView sizeThatFits:]` returns **52** tall on Phone and **49** on Mac.
+ * Every child is centred in it, and — this reproduces all twelve measured child frames exactly —
+ * **each child's leading or trailing inset equals its own vertical inset**, `(rowHeight - size) / 2`:
+ * the 34/31 circles sit 9 in, the 30 x 22 send pill 15 in on Phone and 13.5 on Mac. Every gap
+ * between neighbours is `audioRecordingViewDurationSpacing` **12**, except the waveform's leading
+ * inset while recording, which is `audioRecordingViewButtonSpacing` **16** (there is no play button
+ * to sit beside). Those two rules close on 294 and on 530 in all three states:
  *
- * - the row is **52** tall (Mac: **49**), and every child is centred in it;
- * - play/pause: a **34** circle 9 in from the leading edge (Mac: **31**), fill `#767680` at 12%,
- *   `play.fill` / `pause.fill`;
- * - stop: a **34** circle 9 in from the trailing edge (Mac: 31), fill `#FF383C` at 19%, `stop.fill`;
- * - send: `CKGlassSendButton`, **30 x 22, radius 11**, 15 in from the trailing edge (Mac: 13.5),
- *   `#0088ff` with `arrow.up`;
- * - the timer: `ChatKit.AudioMessageRecordingAppendButton`, **29.5 x 16 radius 8** while recording
- *   (Mac 35 x 19 radius 9.5) and **61 x 26 radius 13** once stopped (Mac 62.5 x 27 radius 13.5),
- *   where it also carries a `plus` and appends to the take;
- * - the waveform box: 39 tall in the 52 row and 36.75 in the Mac 49, i.e. **0.75 of the row** both
- *   times, its leading edge 16 while recording and (button + 12) once the play control is there.
+ * | | leading | waveform | trailing chain |
+ * |---|---|---|---|
+ * | iOS recording | 16 | 181.5 | 12 + timer 29.5 + 12 + stop 34 + 9 |
+ * | iOS stopped | 9 + play 34 + 12 | 109 | 12 + append 61 + 12 + send 30 + 15 |
+ * | iOS playing | 9 + play 34 + 12 | 140.5 | 12 + timer 29.5 + 12 + send 30 + 15 |
+ * | macOS recording | 16 | 415 | 12 + timer 35 + 12 + stop 31 + 9 |
+ * | macOS stopped | 9 + play 31 + 12 | 348 | 12 + append 62.5 + 12 + send 30 + 13.5 |
+ * | macOS playing | 9 + play 31 + 12 | 375.5 | 12 + timer 35 + 12 + send 30 + 13.5 |
  *
- * Those four layouts reproduce exactly: leading inset + parts + 12 between each + trailing inset add
- * up to the framework's own subview frames to the pixel, on both idioms and in both states.
+ * The waveform view is **0.75 of the row** — 39 in the 52 (which is `audioWaveformViewHeight`) and
+ * 36.75 in the 49 — and is vertically centred, top 6.5 / 6.125.
  *
- * Bar height is **not** linear in the level: feeding known intensities and reading the segment views
- * back gives `height = level^2 * waveformHeight`, floored at the 4 above (0.111 -> 4.333, 0.222 ->
- * 7.704, 0.444 -> 17.333, 1 -> 39, all at 39 of box). The bars are 2 wide with a radius of 1.
+ * ### The waveform
  *
- * Colours, resolved through `-resolvedColorWithTraitCollection:` in both styles:
- * recording bars `#FF383C` light / `#FF4245` dark; played-back bars `rgba(0,0,0,0.5)` /
- * `rgba(255,255,255,0.55)` with the part that has not played yet at half that alpha; the timer red
- * while recording and 85% label ink afterwards.
+ * Bars are `waveformPowerLevelWidth` **2** wide with a radius of 1, `audioWaveformGapWidth` **2**
+ * apart, so the pitch is 4; they are vertically centred and the strip is anchored to the box's
+ * trailing edge, which leaves `width - 2 - (count - 1) * 4` empty at the leading edge (3 of hole in
+ * a 109 box: measured, not a bug).
  *
- * The `x` that replaces the composer's `+` is `CKGlassCancelAudioRecordingButton`: **41** across on
- * Phone and **35** on Mac, its `xmark` ink 17 x 16 centred. Each glyph outline here was traced from
- * the framework's own rendering: the probe rasterised `xmark`, `stop.fill`, `play.fill`,
- * `pause.fill`, `plus` and `arrow.up` at 17 pt (arrow Bold) at 8x and measured the ink -- stop 14
- * square with a 1.5 corner, pause two 4.25 x 14 bars 2 apart, play a 12.5 x 14 triangle, plus and
- * xmark 1.5 of stroke over 14 and 13.5, arrow 13.5 x 16 with a 2.44 stem. The arrow is the same
- * glyph the composer's send pill draws, and the two agree: 2.44 of stroke here against the 2.41
- * traced from `conv3-light.png`.
+ * **`height = level² × waveformViewHeight`, floored at `minimumWaveformHeight` 4.** Feeding the view
+ * a ramp and reading the segments back: 0.3333 → 4.3333, 0.4 → 6.24, 0.4444 → 7.7037, 0.5 → 9.75,
+ * 0.6 → 14.04, 0.6667 → 17.3334, 0.75 → 21.9375, 0.8 → 24.96, 0.9 → 31.59, 1 → 39 — every one of
+ * them exactly `level² × 39`, and everything below 0.3203 clamped to 4. It scales to the **view**
+ * height 39, not to `audioWaveformHeight` 35; a full-scale bar fills the box edge to edge.
  *
- * ## What is not from the framework
+ * While recording, the newest bars ramp in: a bar `k` segments back from the leading edge is scaled
+ * by **`min(1, sqrt(k / 4))`**, measured to five decimals at k = 0, 1, 2, 3, 4 (0, 0.5, 0.70711,
+ * 0.86603, 1), with the k = 0 bar additionally at opacity 0. Bars ahead of the take are drawn at the
+ * minimum height and half opacity, which is the track the wave is written onto.
  *
- * - **Where the row sits.** It reuses the composer's measured geometry so it lands on the field:
- *   iOS 28 of padding, the leading circle, a 12 gap, then the row across the field's 294 with its
- *   bottom edge on the field's (`ios-composer.tsx`); macOS the field's own left 49, width 530 and
- *   bottom 11 (`macos-composer.tsx`). The row is taller than the field it replaces (52 against
- *   40.33, 49 against 31), so it grows upward. **Judgement**: nothing says the row is centred on the
- *   field's box rather than resting on its bottom edge.
- * - **The row's corner radius**: half its height, i.e. a capsule, because both composer fields are
- *   capsules at one line (iOS 20 on 40.33, macOS 15.5 on 31, both measured). Judgement.
- * - **The row's fill**: the composer's own glass (iOS) and field fill (macOS), copied from those two
- *   files rather than imported, so this stays a registry item with no dependency on either.
- * - **The stopped pill's fill and the play glyph's ink**: reused from the play button's measured fill
- *   and the pill's own label colour. The framework builds them from a `UIBackgroundConfiguration`
- *   that resolves to nothing outside a window, so the probe could not read them. Judgement.
- * - **Playback windowing.** While recording, the newest bar's right edge is the waveform box's right
- *   edge (framework). Once stopped, the framework resamples the take to the bars that fit
- *   (`waveformMinPowerLevelsCount` 25, `waveformMaxPowerLevelsCount` 50, and the built view showed
- *   27 bars in a 109-wide box), which is what this does; that the whole take spans the box rather
- *   than scrolling under a playhead is judgement.
- * - **Motion.** The state change is the framework's own `stateChangeAnimationDuration` **0.6** and
- *   `stateChangeSpringDamping` **0.86` (Swift ivars of `AudioMessageRecordingView`, read at the
- *   constructor's trap), but the spring frequency UIKit derives from that pair is not stored
- *   anywhere, so the `linear()` easing here samples a spring settled to 0.1% at 0.6 s: judgement.
- *   The entrance and exit reuse the measured 260/200 ms and `cubic-bezier(0.32, 0.72, 0, 1)` of the
- *   iOS effects screen (`effectsPickerMetrics.timing`), which is a reuse, not a measurement of this.
+ * Once stopped, the take is resampled up to the bars that fit by **nearest neighbour**, bar `j`
+ * taking level `floor(j × n / count)` — 5 levels in a 27-bar box measured as runs of 6, 5, 6, 5, 5.
+ * The played part is **`max(1, floor(fraction × count))`** bars, checked at nine positions.
  *
- * Every animation is seekable rather than merely playable: the scroll is one linear Web Animations
- * timeline whose offset is linear in time, so `progress` pauses and seeks it to a frame that renders
- * identically on every run, and the state change takes `transition={{ from, progress }}` the way
- * `MacComposer` takes `grow`. `prefers-reduced-motion` builds no timeline at all and poses the row.
+ * ### Colours, resolved with `-resolvedColorWithTraitCollection:` in both styles
+ *
+ * - recording bars and timer ink `#FF383C` light / `#FF4245` dark, at full opacity, over a track of
+ *   the same colour at 0.5;
+ * - stopped and playing bars `rgba(0, 0, 0, 0.498)` / `rgba(255, 255, 255, 0.549)`, the part not yet
+ *   played at 0.5 of that;
+ * - play button fill `rgba(118, 118, 128, 0.12)` light and **0.24 dark** (the framework's own
+ *   `UIBackgroundConfiguration`, read per trait), glyph `rgba(0, 0, 0, 0.847)` / `rgba(255, 255, 255, 0.847)`;
+ * - stop button fill `rgba(255, 56, 60, 0.19)` in **both** styles, glyph the red above;
+ * - the stopped duration pill `rgba(116, 116, 128, 0.08)` in both styles with 84.7% label ink; while
+ *   recording and while playing the same pill has **no fill at all**;
+ * - send `#0088ff` with a white arrow;
+ * - the cancel button's `xmark` at 84.7% label ink over glass.
+ *
+ * ### Glyphs
+ *
+ * Each is the framework's own symbol image, rasterised at 8x and measured for its ink box and its
+ * coverage, and the outlines below are fitted to both:
+ *
+ * | control | symbol | ink | coverage |
+ * |---|---|---|---|
+ * | stop | `stop.fill` 17 regular | 14 x 14 | 180.3853 |
+ * | play | `play.fill` 17 regular | 12.5 x 14 | 101.8686 |
+ * | pause | `pause.fill` 17 regular | 10.5 x 14 | 110.7490 |
+ * | append | `plus` 17 regular | 14 x 14 | 37.4529 |
+ * | send | `arrow.up` 17 **bold** | 13.5 x 16 | 68.9608 |
+ * | cancel | `xmark` **16 medium** | 13 x 13 | 55.3471 |
+ *
+ * The send arrow's stem measures **2.4098** of stroke, which is the same weight `conv3-light.png`
+ * gives the composer's own send pill (2.41 measured there) — but it is not the same drawing: the
+ * composer's is a 38 x 28 pill and this is a 30 x 22 one, so the arrow is smaller here.
+ *
+ * The `xmark` is the one place the two fits disagree: its rows integrate to 4.9588 of ink, i.e.
+ * 1.7532 of stroke at 45 degrees, while its total coverage wants 1.68. The 1.68 is drawn, because
+ * total coverage is the more robust measure and is what this repo fits elsewhere.
+ *
+ * ## What is *not* from the framework
+ *
+ * - **Where the surface sits in the composer.** ChatKit's own
+ *   `entryViewLeftInsetForRecordedAudioCancelButton` is 8.5 on both idioms, which is neither the
+ *   iOS composer's measured 28 nor the macOS `+`'s measured 9, so its frame of reference could not
+ *   be established and it is not used. Instead the cancel circle is centred on the **measured**
+ *   centre of the `+` it replaces (iOS x 48, `SPEC.md`; macOS pane x 24) and the row takes the
+ *   **measured** field box (iOS x 80–374, macOS pane x 49–579). Both rest their bottom edge on the
+ *   composer's measured baseline (iOS y 846, macOS pane y 629), because every other element of both
+ *   composers is bottom-aligned there. The row is taller than the field it replaces, so it grows
+ *   upward. Derived from measurements, but not itself measured.
+ * - **The row's corner radius.** UNMEASURED: `-[CKAudioMessageRecordingView cornerRadius]` is 0
+ *   until the entry view sets it, and nothing in the framework stores what it sets. Drawn as a
+ *   capsule (half the row's height), because both composer fields are capsules at one line.
+ * - **The row's fill, rim and shadow.** Copied from the two composer files, which measured them, so
+ *   that this stays a registry item with no dependency on either.
+ * - **The entrance and the exit.** UNMEASURED. 260 / 200 ms on the iOS effects screen's measured
+ *   `cubic-bezier(0.32, 0.72, 0, 1)`; a reuse, not a measurement of this surface.
+ * - **The spring's frequency.** `stateChangeAnimationDuration` 0.6 and `stateChangeSpringDamping`
+ *   0.86 are the view's own Swift ivars, read at their offsets; the frequency UIKit derives from
+ *   that pair is not stored anywhere, so `springEasing` samples the spring whose envelope has
+ *   decayed to 0.1% at 0.6 s. A fit.
+ * - **The slide between segments.** ChatKit lays every bar on a 4 pt grid, so its model steps 4 pt
+ *   twelve times a second; whether its display link interpolates between those frames cannot be read
+ *   from a view that never runs. This slides the strip by `4 × frac(t / segment)`, which is the
+ *   smallest continuous interpolation of the measured layout and is exactly ChatKit's frame at every
+ *   whole segment.
+ *
+ * Every animation is seekable rather than merely playable: the slide is one Web Animations timeline
+ * whose offset is linear in time, the state change takes `transition={{ from, progress }}` the way
+ * `MacComposer` takes `grow`, and `progress` seeks the entrance and the exit to a frame rather than
+ * jumping them to the end. `prefers-reduced-motion` builds no timeline at all and poses the row.
  */
 export const audioRecorderMetrics = {
-  /** Both sets are ChatKit's, read per idiom. Points equal CSS px. */
+  /** ChatKit's, read per idiom. Points equal CSS px. */
   ios: {
-    /** `-[CKAudioMessageRecordingView sizeThatFits:]`, Phone idiom. */
+    /** `-[CKAudioMessageRecordingView sizeThatFits:]`, Phone idiom, with a take in it. */
     rowHeight: 52,
-    /** Composer geometry (`ios-composer.tsx`): the row takes the field's box and its bottom edge. */
-    composer: { padding: 28, leading: 41, leadingGap: 12, fieldWidth: 294 },
-    button: { size: 34, inset: 9 },
-    send: { width: 30, height: 22, radius: 11, inset: 15 },
+    /** UNMEASURED: the entry view sets the row's radius and does not store it. A capsule. */
+    rowRadius: 26,
+    /** The play and stop circles. */
+    button: 34,
+    /** `CKGlassSendButton`. */
+    send: { width: 30, height: 22, radius: 11 },
+    /** `ChatKit.AudioMessageRecordingAppendButton` while recording and while playing. */
     timer: { width: 29.5, height: 16, radius: 8, fontSize: 13 },
-    append: { width: 61, height: 26, radius: 13 },
-    waveform: { leadingInset: 16, gap: 12, heightRatio: 0.75, barWidth: 2, barGap: 2, minBarHeight: 4 },
+    /**
+     * The same button once stopped, where the whole pill is the control that appends to the take.
+     * `glyph` is the framework's own image box for the `plus`; `ink` is what the symbol's 14 x 14 of
+     * ink becomes once scaled into it.
+     */
+    append: { width: 61, height: 26, radius: 13, labelLeft: 21.5, glyph: { left: 7, top: 8, width: 11.5, height: 10.5, inkWidth: 8.944, inkHeight: 9.188 } },
+    /** `CKGlassCancelAudioRecordingButton` `-sizeThatFits:`, radius 20.5, i.e. a circle. */
+    cancel: 41,
+    /**
+     * Not ChatKit: the measured iOS composer (`SPEC.md`, `ios-composer.tsx`). The field's box, the
+     * `+`'s centre and the composer's bottom margin on a 402-wide screen.
+     */
+    composer: { fieldLeft: 80, fieldWidth: 294, leadingCentre: 48, bottom: 28 },
   },
   macos: {
     rowHeight: 49,
-    /** `macos-composer.tsx`: field left 49, width 530, 11 above the pane's bottom. */
-    composer: { bottom: 11, left: 49, fieldWidth: 530, leading: 35, leadingInset: 8.5 },
-    button: { size: 31, inset: 9 },
-    send: { width: 30, height: 22, radius: 11, inset: 13.5 },
+    /** UNMEASURED, as above. */
+    rowRadius: 24.5,
+    button: 31,
+    send: { width: 30, height: 22, radius: 11 },
     timer: { width: 35, height: 19, radius: 9.5, fontSize: 16 },
-    append: { width: 62.5, height: 27, radius: 13.5 },
-    waveform: { leadingInset: 16, gap: 12, heightRatio: 0.75, barWidth: 2, barGap: 2, minBarHeight: 4 },
+    append: { width: 62.5, height: 27, radius: 13.5, labelLeft: 20, glyph: { left: 5.5, top: 8.5, width: 11.5, height: 10.5, inkWidth: 8.944, inkHeight: 9.188 } },
+    cancel: 35,
+    /** Not ChatKit: the measured macOS composer (`SPEC.md`, `macos-composer.tsx`), pane coordinates. */
+    composer: { fieldLeft: 49, fieldWidth: 530, leadingCentre: 24, bottom: 11 },
   },
 } as const;
 
-/** Timings. The first four are ChatKit's; the last two are borrowed, see the note above. */
+/** `CKUIBehavior`'s waveform constants, shared by both idioms. */
+export const audioRecorderWaveform = {
+  /** `waveformPowerLevelWidth` / `audioWaveformGapWidth`, so the pitch is 4. */
+  barWidth: 2,
+  barGap: 2,
+  /** `minimumWaveformHeight`. */
+  minBarHeight: 4,
+  /** `audioWaveformViewHeight` / row height: 39 of 52 and 36.75 of 49 both come out at 0.75. */
+  heightRatio: 0.75,
+  /** `audioRecordingViewButtonSpacing`: the waveform's leading inset when no play button precedes it. */
+  leadingInset: 16,
+  /** `audioRecordingViewDurationSpacing`: every other gap in the row. */
+  gap: 12,
+  /** The newest bars ramp in over this many segments, measured as `min(1, sqrt(k / 4))`. */
+  rampSegments: 4,
+} as const;
+
+/** Timings. All but the last three are ChatKit's. */
 export const audioRecorderMotion = {
   /** `audioRecordingViewTimeBetweenWaveformSegments`: one bar every 83.33 ms. */
   segment: 1000 / 12,
   /** `minAudioRecordingDuration` / `maxAudioRecordingDuration`, in seconds. */
   minDuration: 0.25,
   maxDuration: 60,
-  /** `AudioMessageRecordingView.stateChangeAnimationDuration` and `.stateChangeSpringDamping`. */
+  /** `AudioMessageRecordingView.stateChangeAnimationDuration` / `.stateChangeSpringDamping`. */
   stateChange: 600,
   stateChangeDamping: 0.86,
-  /** Reused from the measured iOS effects screen; nothing measures this row appearing. */
+  /** UNMEASURED: reused from the measured iOS effects screen. Nothing measures this row appearing. */
   enter: 260,
   exit: 200,
   ease: "cubic-bezier(0.32, 0.72, 0, 1)",
 } as const;
 
+/** `audioRecordingViewMinimumDBLevel` / `MaximumDBLevel`, the window a microphone's power maps onto. */
+export const audioRecorderPower = { minimumDb: -60, maximumDb: -10 } as const;
+
+/**
+ * ChatKit's own dB window as a 0..1 level, so a caller feeding real microphone power has the
+ * conversion the framework uses rather than inventing one.
+ */
+export function audioLevelForPower(decibels: number): number {
+  const { minimumDb, maximumDb } = audioRecorderPower;
+  return clamp01((decibels - minimumDb) / (maximumDb - minimumDb));
+}
+
 export type AudioRecorderState = "recording" | "stopped" | "playing";
+
+/** What comes off the row when you send it, and what `MessageAudio` needs to draw the balloon. */
+export type AudioTake = { levels: number[]; duration: number };
+
+/**
+ * The recorder's levels squared are its bar heights (`level² × 39`); `MessageAudio` scales its
+ * `peaks` linearly, so squaring here is what makes the balloon draw the same wave as the row it
+ * came from.
+ */
+export function audioTakeToPeaks(levels: number[]): number[] {
+  return levels.map(level => clamp01(level) * clamp01(level));
+}
 
 export type AudioRecorderProps = Omit<ComponentProps<"div">, "onChange" | "children"> & {
   platform?: Platform;
@@ -170,10 +263,11 @@ export type AudioRecorderProps = Omit<ComponentProps<"div">, "onChange" | "child
   /** False plays the exit and then calls `onExited`. */
   open?: boolean;
   onExited?: () => void;
+  /** The `x`, and also what a take shorter than `minAudioRecordingDuration` reports instead of stopping. */
   onCancel?: () => void;
-  onStop?: () => void;
-  onSend?: () => void;
-  /** The `+` inside the timer pill, which appends to the take. */
+  onStop?: (take: AudioTake) => void;
+  onSend?: (take: AudioTake) => void;
+  /** The `+` inside the duration pill, which appends to the take. */
   onAppend?: () => void;
   onPlayChange?: (playing: boolean) => void;
   onSeek?: (seconds: number) => void;
@@ -185,45 +279,45 @@ export type AudioRecorderProps = Omit<ComponentProps<"div">, "onChange" | "child
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
-/** m:ss, the way the framework's own label reads ("0:00", "0:12"). */
+/** m:ss. `floor` is a stopwatch, which is what the running timer is. */
 function clock(seconds: number): string {
   const whole = Math.max(0, Math.floor(seconds));
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
 
 /**
- * A stand-in take. Deterministic on purpose: no `Math.random` may reach a render, and the harness
- * screenshots this row. The shape is the one `message-audio.tsx` uses for its own stand-in peaks.
+ * m:ss for a finished take. `message-audio.tsx` rounds the length it prints on the balloon, so the
+ * pill has to round too or a 4.6 s take reads "0:04" here and "0:05" in the bubble it becomes.
  */
-function fallbackLevels(count: number): number[] {
-  return Array.from({ length: count }, (_, i) => {
-    const a = Math.sin(i * 0.7) * 0.5 + 0.5;
-    const b = Math.sin(i * 1.9 + 1.1) * 0.5 + 0.5;
-    return 0.35 + Math.min(1, a * 0.6 + b * 0.55) * 0.65;
-  });
+function clockRounded(seconds: number): string {
+  return clock(Math.round(Math.max(0, seconds)));
 }
 
 /**
- * The whole take, averaged down to the bars that fit, which is what the framework does once
- * recording stops (it holds between `waveformMinPowerLevelsCount` and `waveformMaxPowerLevelsCount`
- * levels for a balloon). Averaging, not sampling, so the summary does not flicker with the bucket.
+ * A deterministic stand-in take. Integer seeding and none of the transcendental functions:
+ * ECMAScript does not require `Math.sin` to be correctly rounded, so a server and a browser can
+ * disagree in the last ULP, and React reports that as a hydration mismatch. `Math.imul` is exact and
+ * `+ - * /` are IEEE 754 exact, so this produces bit-identical levels in every engine.
  */
-function resample(levels: number[], count: number): number[] {
-  if (count <= 0) return [];
-  if (levels.length === 0) return Array.from({ length: count }, () => 0);
-  return Array.from({ length: count }, (_, i) => {
-    const from = Math.floor((i * levels.length) / count);
-    const to = Math.max(from + 1, Math.floor(((i + 1) * levels.length) / count));
-    let sum = 0;
-    for (let j = from; j < to; j++) sum += levels[j] ?? 0;
-    return sum / (to - from);
-  });
+export function audioRecorderFallbackTake(count: number): number[] {
+  let seed = 0x9e3779b9;
+  let value = 0.55;
+  const levels: number[] = [];
+  for (let i = 0; i < count; i++) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    value += (seed / 4294967296 - 0.5) * 0.55;
+    // Reflect rather than clamp, so a long take does not flatten against either end.
+    if (value < 0.34) value = 0.68 - value;
+    if (value > 1) value = 2 - value;
+    levels.push(value);
+  }
+  return levels;
 }
 
 /**
- * A damped spring as a `linear()` easing, so the state change can be a single seekable timeline.
- * The damping ratio is the framework's 0.86; the frequency is not stored anywhere, so this picks
- * the one that settles to 0.1% exactly at the framework's 600 ms, which is a fit, not a reading.
+ * A damped spring as a `linear()` easing, so the state change is one seekable timeline. The damping
+ * ratio is the framework's 0.86; the frequency is not stored anywhere, so this picks the one whose
+ * envelope has decayed to 0.1% at the framework's 600 ms. A fit, not a reading.
  */
 function springEasing(damping: number, steps = 24): string {
   const omega = -Math.log(0.001) / damping;
@@ -259,74 +353,93 @@ function usePrefersReducedMotion() {
   return useSyncExternalStore(subscribeReducedMotion, () => reducedMotionQuery()?.matches ?? false, () => false);
 }
 
-/* Glyphs. Every box below is the ink the framework's own 17 pt symbol renders at 8x, measured. */
+/* ------------------------------------------------------------------ glyphs */
+/* Every outline below is fitted to the ink box and the coverage of the framework's own symbol image,
+   rasterised at 8x. The width and height attributes are the ink box, and each `<svg>` is `shrink-0`
+   so a flex parent cannot squash it out of proportion. */
 
-/** `xmark`, ink 13.5 square, 1.5 of stroke with round caps. */
-function XmarkGlyph({ size = 13.5 }: { size?: number }) {
+/** `xmark` 16 medium: ink 13 x 13, coverage 55.3471, which a 1.68 stroke on a 13 box reproduces. */
+function XmarkGlyph() {
   return (
-    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 13.5 13.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-      <path d="M0.75 0.75 12.75 12.75M12.75 0.75 0.75 12.75" />
+    <svg aria-hidden="true" className="block shrink-0" width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth="1.68" strokeLinecap="round">
+      <path d="M0.84 0.84 12.16 12.16M12.16 0.84 0.84 12.16" />
     </svg>
   );
 }
 
-/** `stop.fill`, a 14 square with a 1.5 corner (fitted to the rendered coverage at two depths). */
+/** `stop.fill` 17 regular: ink 14 x 14, coverage 180.3853, i.e. a 13.52 square with a 1.69 corner. */
 function StopGlyph() {
   return (
-    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
-      <rect x="0" y="0" width="14" height="14" rx="1.5" />
+    <svg aria-hidden="true" className="block shrink-0" width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+      <rect x="0.24" y="0.24" width="13.52" height="13.52" rx="1.69" />
     </svg>
   );
 }
 
-/** `play.fill`, ink 12.5 x 14, its corners rounded by ~1.3 (the stroke rounds the joins). */
+/** `play.fill` 17 regular: ink 12.5 x 14, coverage 101.8686, i.e. a triangle inset by a 1.93 round join. */
 function PlayGlyph() {
   return (
-    <svg aria-hidden="true" width="12.5" height="14" viewBox="0 0 12.5 14" fill="currentColor" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round">
-      <path d="M0.65 0.9 11.2 7 0.65 13.1Z" />
+    <svg aria-hidden="true" className="block shrink-0" width="12.5" height="14" viewBox="0 0 12.5 14" fill="currentColor" stroke="currentColor" strokeWidth="1.93" strokeLinejoin="round">
+      <path d="M0.965 0.965 11.535 7 0.965 13.035Z" />
     </svg>
   );
 }
 
-/** `pause.fill`, two 4.25 x 14 bars 2 apart, corner ~1.2. */
+/** `pause.fill` 17 regular: ink 10.5 x 14, coverage 110.7490, i.e. two 4.1 bars 2.3 apart, corner 1.5. */
 function PauseGlyph() {
   return (
-    <svg aria-hidden="true" width="10.5" height="14" viewBox="0 0 10.5 14" fill="currentColor">
-      <rect x="0" y="0" width="4.25" height="14" rx="1.2" />
-      <rect x="6.25" y="0" width="4.25" height="14" rx="1.2" />
+    <svg aria-hidden="true" className="block shrink-0" width="10.5" height="14" viewBox="0 0 10.5 14" fill="currentColor">
+      <rect x="0" y="0" width="4.1" height="14" rx="1.5" />
+      <rect x="6.4" y="0" width="4.1" height="14" rx="1.5" />
     </svg>
   );
 }
 
-/** `plus`, 14 across each way at 1.5 of stroke. */
-function PlusGlyph() {
+/**
+ * `plus` 17 regular: ink 14 x 14, coverage 37.4529, which a 1.4442 stroke across a 14 box
+ * reproduces. The duration pill draws it into the framework's own 11.5 x 10.5 image box, so it is
+ * scaled there rather than redrawn.
+ */
+function PlusGlyph({ width = 14, height = 14 }: { width?: number; height?: number }) {
   return (
-    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-      <path d="M0.75 7H13.25M7 0.75V13.25" />
+    <svg aria-hidden="true" className="block shrink-0" width={width} height={height} viewBox="0 0 14 14" preserveAspectRatio="none" fill="none" stroke="currentColor" strokeWidth="1.4442" strokeLinecap="round">
+      <path d="M0.7221 7H13.2779M7 0.7221V13.2779" />
     </svg>
   );
 }
 
-/** `arrow.up` Bold, ink 13.5 x 16: 2.44 of stem, arms 5.28 across per 5.88 down. */
+/**
+ * `arrow.up` 17 **bold**: ink 13.5 x 16, coverage 68.9608, stem stroke measured at 2.4098 and arms
+ * at 45 degrees. Not the same drawing as the composer's send pill, which is a bigger arrow in a
+ * bigger pill; they agree only on the stroke weight.
+ */
 function ArrowUpGlyph() {
   return (
-    <svg aria-hidden="true" width="13.5" height="16" viewBox="0 0 13.5 16" fill="none" stroke="currentColor" strokeWidth="2.44" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M1.47 7.1 6.75 1.22 12.03 7.1M6.75 1.22V14.78" />
+    <svg aria-hidden="true" className="block shrink-0" width="13.5" height="16" viewBox="0 0 13.5 16" fill="none" stroke="currentColor" strokeWidth="2.4098" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1.205 6.75 6.75 1.205 12.295 6.75M6.75 1.205V14.795" />
     </svg>
   );
 }
 
-const vars =
-  // iOS glass, copied from `ios-composer.tsx` (measured), and the framework's own recording colours.
-  "[--ar-glass:rgba(255,255,255,0.9)] [--ar-rim:none] [--ar-shadow:0_6px_36px_4px_rgba(0,0,0,0.065)] [--ar-round-shadow:0_5px_20px_6px_rgba(0,0,0,0.055)] " +
-  "[--ar-red:#ff383c] [--ar-ink:rgba(0,0,0,0.85)] [--ar-glyph:#1a1919] [--ar-wave:rgba(0,0,0,0.5)] [--ar-fill:rgba(118,118,128,0.12)] " +
-  "dark:[--ar-glass:rgba(28,28,28,0.9)] dark:[--ar-rim:inset_0_0_0_1px_rgba(255,255,255,0.09)] dark:[--ar-shadow:none] dark:[--ar-round-shadow:none] " +
-  "dark:[--ar-red:#ff4245] dark:[--ar-ink:rgba(255,255,255,0.85)] dark:[--ar-glyph:#f4f3f4] dark:[--ar-wave:rgba(255,255,255,0.55)]";
+/* ------------------------------------------------------------------ theme */
+/* One variable per painted thing, defined in both styles for both platforms. `--ar-shadow` carries
+   the rim and the drop shadow together: `none` is not a legal entry in a comma-separated shadow
+   list, so splitting them drops the whole declaration wherever one half is absent. */
+
+const iosVars =
+  // Glass, rim and shadow copied from the measured `ios-composer.tsx`; the rest is ChatKit's.
+  "[--ar-glass:rgba(255,255,255,0.9)] [--ar-shadow:0_6px_36px_4px_rgba(0,0,0,0.065)] [--ar-round-shadow:0_5px_20px_6px_rgba(0,0,0,0.055)] " +
+  "[--ar-red:#ff383c] [--ar-label:rgba(0,0,0,0.847)] [--ar-wave:rgba(0,0,0,0.498)] [--ar-play-fill:rgba(118,118,128,0.12)] [--ar-pill-fill:rgba(116,116,128,0.08)] " +
+  "dark:[--ar-glass:rgba(28,28,28,0.9)] dark:[--ar-shadow:inset_0_0_0_1px_rgba(255,255,255,0.09)] dark:[--ar-round-shadow:inset_0_0_0_1px_rgba(255,255,255,0.09)] " +
+  "dark:[--ar-red:#ff4245] dark:[--ar-label:rgba(255,255,255,0.847)] dark:[--ar-wave:rgba(255,255,255,0.549)] dark:[--ar-play-fill:rgba(118,118,128,0.24)] dark:[--ar-pill-fill:rgba(116,116,128,0.08)]";
 
 const macVars =
-  // macOS field fill, rim and shadow, copied from `macos-composer.tsx` (measured).
-  "[--ar-glass:#ffffff] [--ar-rim:none] [--ar-shadow:0_5px_25px_rgba(0,0,0,0.07)] [--ar-round-shadow:0_5px_25px_rgba(0,0,0,0.07)] [--ar-glyph:#010101] " +
-  "dark:[--ar-glass:#232323] dark:[--ar-rim:inset_0.774px_0.774px_0_0_#424242,inset_-0.774px_-0.774px_0_0_#424242] dark:[--ar-shadow:0_5px_25px_rgba(0,0,0,0.05)] dark:[--ar-round-shadow:0_5px_25px_rgba(0,0,0,0.05)] dark:[--ar-glyph:#f1f1f1]";
+  // Field fill, rim and shadow copied from the measured `macos-composer.tsx`; the rest is ChatKit's.
+  "[--ar-glass:#ffffff] [--ar-shadow:0_5px_25px_rgba(0,0,0,0.07)] [--ar-round-shadow:0_5px_25px_rgba(0,0,0,0.07)] " +
+  "[--ar-red:#ff383c] [--ar-label:rgba(0,0,0,0.847)] [--ar-wave:rgba(0,0,0,0.498)] [--ar-play-fill:rgba(118,118,128,0.12)] [--ar-pill-fill:rgba(116,116,128,0.08)] " +
+  "dark:[--ar-glass:#232323] dark:[--ar-shadow:inset_0.774px_0.774px_0_0_#424242,inset_-0.774px_-0.774px_0_0_#424242,0_5px_25px_rgba(0,0,0,0.05)] " +
+  "dark:[--ar-round-shadow:inset_0.774px_0.774px_0_0_#424242,inset_-0.774px_-0.774px_0_0_#424242,0_5px_25px_rgba(0,0,0,0.05)] " +
+  "dark:[--ar-red:#ff4245] dark:[--ar-label:rgba(255,255,255,0.847)] dark:[--ar-wave:rgba(255,255,255,0.549)] dark:[--ar-play-fill:rgba(118,118,128,0.24)] dark:[--ar-pill-fill:rgba(116,116,128,0.08)]";
 
 type Geometry = {
   waveLeft: number;
@@ -339,6 +452,36 @@ type Geometry = {
   send: number;
   play: number;
 };
+
+/**
+ * A clock that runs on `requestAnimationFrame` while `active`, reporting seconds. `quantum` rounds
+ * what it reports down to a multiple of that many seconds, so the recording row re-renders at
+ * ChatKit's own twelve segments a second instead of at the display's refresh rate; the slide between
+ * those frames is a Web Animation, not a re-render.
+ */
+function useRunningClock(active: boolean, quantum: number, cap: number): number {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    if (!active) {
+      // Not synchronous in the effect body: a frame later, so the lint rule and React both allow it.
+      const reset = requestAnimationFrame(() => setSeconds(0));
+      return () => cancelAnimationFrame(reset);
+    }
+    const started = performance.now();
+    let frame = 0;
+    const step = (now: number) => {
+      const elapsed = Math.min(cap, (now - started) / 1000);
+      // At the cap, report the cap itself rather than the segment below it, so a caller watching for
+      // `maxAudioRecordingDuration` actually sees it.
+      const value = elapsed >= cap || quantum <= 0 ? elapsed : Math.floor(elapsed / quantum) * quantum;
+      setSeconds(previous => (previous === value ? previous : value));
+      if (elapsed < cap) frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [active, quantum, cap]);
+  return seconds;
+}
 
 export function AudioRecorder({
   platform: platformProp,
@@ -366,13 +509,15 @@ export function AudioRecorder({
   const platform = platformProp ?? contextPlatform;
   const ios = platform === "ios";
   const m = audioRecorderMetrics[platform];
+  const w = audioRecorderWaveform;
   const motion = audioRecorderMotion;
   const reduced = usePrefersReducedMotion();
 
   const rowWidth = width ?? m.composer.fieldWidth;
-  const take = useMemo(() => (levels?.length ? levels : fallbackLevels(60)), [levels]);
+  const take = useMemo(() => (levels?.length ? levels : audioRecorderFallbackTake(60)), [levels]);
   const duration = durationProp ?? take.length / 12;
   const recording = state === "recording";
+  const playing = state === "playing";
 
   const root = useRef<HTMLDivElement>(null);
   const strip = useRef<HTMLDivElement>(null);
@@ -383,97 +528,114 @@ export function AudioRecorder({
   const playButton = useRef<HTMLButtonElement>(null);
   const laidOut = useRef<AudioRecorderState | null>(null);
   const exited = useRef(false);
-  /** The callback lives in a ref so an inline arrow cannot restart the exit it just reported. */
-  const exitedCallback = useRef(onExited);
+  /** Callbacks live in a ref so an inline arrow cannot restart the timeline it just reported on. */
+  const latest = useRef({ onExited, onStop, onCancel });
   useEffect(() => {
-    exitedCallback.current = onExited;
+    latest.current = { onExited, onStop, onCancel };
   });
 
   /**
-   * The clock, for a caller that passes neither a position nor a seek. The elapsed time is stamped
-   * with the run it belongs to, so a new run reads as zero during render instead of needing the
-   * effect to write zero into state before the first tick lands.
+   * The clock, for a caller that passes neither a position nor a seek. While recording it advances a
+   * segment at a time, which is the cadence ChatKit adds bars at; while playing it advances every
+   * frame, so the playhead is smooth. Recording is capped at `maxAudioRecordingDuration`.
    */
   const live = progress === undefined && positionProp === undefined;
-  const run = `${live}|${open}|${state}`;
-  const [tick, setTick] = useState({ run: "", seconds: 0 });
-  const ticking = tick.run === run ? tick.seconds : 0;
-  useEffect(() => {
-    if (!live || !open) return;
-    if (state !== "recording" && state !== "playing") return;
-    const started = performance.now();
-    const id = window.setInterval(() => {
-      const seconds = (performance.now() - started) / 1000;
-      setTick({ run, seconds: Math.min(seconds, duration) });
-    }, motion.segment);
-    return () => window.clearInterval(id);
-  }, [live, open, state, duration, motion.segment, run]);
+  const running = live && open && (recording || playing);
+  const ticking = useRunningClock(running, recording ? motion.segment / 1000 : 0, recording ? motion.maxDuration : duration);
 
-  const position = Math.max(0, Math.min(duration, positionProp ?? (progress !== undefined ? clamp01(progress) * duration : ticking)));
+  const position = Math.max(0, Math.min(recording ? motion.maxDuration : duration,
+    positionProp ?? (progress !== undefined ? clamp01(progress) * duration : ticking)));
+
+  /** `maxAudioRecordingDuration`: ChatKit stops the take itself at 60 s. */
+  const cappedRef = useRef(false);
+  useEffect(() => {
+    if (!running || !recording) { cappedRef.current = false; return; }
+    if (position < motion.maxDuration || cappedRef.current) return;
+    cappedRef.current = true;
+    latest.current.onStop?.({ levels: take.slice(0, Math.round(motion.maxDuration * 12)), duration: motion.maxDuration });
+  }, [running, recording, position, motion.maxDuration, take]);
 
   const geometry = useMemo(() => {
+    const inset = (size: number) => (m.rowHeight - size) / 2;
     const build = (which: AudioRecorderState): Geometry => {
       const isRecording = which === "recording";
-      const trailing = isRecording ? m.button.inset + m.button.size : m.send.inset + m.send.width;
-      const timerWidth = isRecording ? m.timer.width : m.append.width;
+      const trailing = isRecording ? inset(m.button) + m.button : inset(m.send.height) + m.send.width;
+      const timerWidth = which === "stopped" ? m.append.width : m.timer.width;
       return {
-        waveLeft: isRecording ? m.waveform.leadingInset : m.button.inset + m.button.size + m.waveform.gap,
-        waveRight: trailing + m.waveform.gap + timerWidth + m.waveform.gap,
-        timerRight: trailing + m.waveform.gap,
+        waveLeft: isRecording ? w.leadingInset : inset(m.button) + m.button + w.gap,
+        waveRight: trailing + w.gap + timerWidth + w.gap,
+        timerRight: trailing + w.gap,
         timerWidth,
-        timerHeight: isRecording ? m.timer.height : m.append.height,
-        timerRadius: isRecording ? m.timer.radius : m.append.radius,
+        timerHeight: which === "stopped" ? m.append.height : m.timer.height,
+        timerRadius: which === "stopped" ? m.append.radius : m.timer.radius,
         stop: isRecording ? 1 : 0,
         send: isRecording ? 0 : 1,
         play: isRecording ? 0 : 1,
       };
     };
     return { recording: build("recording"), stopped: build("stopped"), playing: build("playing") };
-  }, [m]);
+  }, [m, w]);
 
   const pose = geometry[state];
   const waveWidth = Math.max(0, rowWidth - pose.waveLeft - pose.waveRight);
-  const waveHeight = m.rowHeight * m.waveform.heightRatio;
-  const pitch = m.waveform.barWidth + m.waveform.barGap;
+  const waveHeight = m.rowHeight * w.heightRatio;
+  const pitch = w.barWidth + w.barGap;
+  /** ChatKit fills the box with bars on a 4 pt grid anchored to its trailing edge. */
+  const barCount = Math.max(1, Math.floor((waveWidth - w.barWidth) / pitch) + 1);
 
   /**
-   * While recording the strip carries the whole take and scrolls under the box's right edge, so the
-   * bar for "now" is always flush with it and the ones still to come are clipped. Once it stops, the
-   * take is averaged down to the bars that fit and the whole of it is in view.
+   * The bars. While recording they are the take itself, newest at the trailing edge, the newest four
+   * scaled by `min(1, sqrt(k / 4))` and the slots ahead of the take drawn as the half-opacity track.
+   * Once stopped the take is resampled up to the bars that fit by nearest neighbour, and the played
+   * part is `max(1, floor(fraction × count))` of them.
    */
-  const bars = recording ? take : resample(take, Math.max(1, Math.floor((waveWidth + m.waveform.barGap) / pitch)));
-  const played = duration > 0 ? position / duration : 0;
-  const stripOffset = (take.length - 1) * pitch;
+  // A hair of slack, so a clock that lands on 5.999999 segments still counts six of them.
+  const segments = Math.max(0, (position * 1000) / motion.segment);
+  const newestBar = Math.floor(segments + 1e-6);
+  const phase = Math.min(1, Math.max(0, segments - newestBar));
+  const fraction = duration > 0 ? clamp01(position / duration) : 0;
+  const playedCount = Math.max(1, Math.floor(fraction * barCount));
+  const bars = useMemo(() => {
+    if (!recording) {
+      return Array.from({ length: barCount }, (_, index) => {
+        const level = take[Math.floor((index * take.length) / barCount)] ?? 0;
+        return { level, scale: 1, opacity: index < playedCount ? 1 : 0.5 };
+      });
+    }
+    return Array.from({ length: barCount }, (_, slot) => {
+      const index = newestBar - (barCount - 1 - slot);
+      const written = index >= 0 && index < take.length;
+      const back = Math.max(0, segments - index);
+      return {
+        level: written ? take[index] : 0,
+        scale: written ? Math.min(1, Math.sqrt(back / w.rampSegments)) : 1,
+        // The bar being written is at 0 and the track ahead of the take at 0.5: both measured.
+        opacity: written ? Math.min(1, back) : 0.5,
+      };
+    });
+  }, [recording, barCount, take, playedCount, segments, newestBar, w.rampSegments]);
 
   /**
-   * The scroll. One linear timeline: the offset is `(N - 1) * pitch - 48 * t`, which is linear in
-   * time because the framework adds a bar every 83.33 ms at a pitch of 4. That makes it seekable to
-   * an exact frame, and it needs no measurement of the box, since the strip hangs off its right edge.
+   * The slide. ChatKit lays every bar on the 4 pt grid and steps it once a segment; this runs one
+   * linear Web Animation of a single segment on repeat, so between two of its frames the strip
+   * slides instead of jumping, and at every whole segment it is exactly ChatKit's frame. Its
+   * dependencies deliberately exclude the position: the animation carries the time, and restarting
+   * it twelve times a second is what killed this animation before. A seeked or reduced-motion row
+   * builds no timeline and wears the same offset as an inline transform instead, so a scrubbed
+   * checkpoint is a pure function of its props.
    */
   useLayoutEffect(() => {
     const element = strip.current;
-    if (!element || !recording) return;
-    const total = duration * 1000;
-    const to = stripOffset - (total / motion.segment) * pitch;
-    if (reduced || total <= 0) {
-      const at = stripOffset - (position * 1000 / motion.segment) * pitch;
-      element.style.transform = `translateX(${at}px)`;
-      return () => { element.style.transform = ""; };
-    }
+    if (!element || !recording || reduced || !live) return;
     const animation = element.animate(
-      [{ transform: `translateX(${stripOffset}px)` }, { transform: `translateX(${to}px)` }],
-      { duration: total, easing: "linear", fill: "both" },
+      [{ transform: "translateX(0px)" }, { transform: `translateX(${pitch}px)` }],
+      { duration: motion.segment, easing: "linear", iterations: Infinity },
     );
-    if (progress !== undefined || positionProp !== undefined) {
-      // Seeked, not played: a scrubbed checkpoint has to land on the same frame every run.
-      animation.pause();
-      animation.currentTime = Math.max(0, Math.min(total, position * 1000));
-    }
     return () => animation.cancel();
-  }, [recording, duration, stripOffset, pitch, position, progress, positionProp, reduced, motion.segment]);
+  }, [recording, reduced, live, pitch, motion.segment]);
 
   /**
-   * The state change. It is a transient override of the layout the render already put in place (no
+   * The state change. A transient override of the layout the render already put in place (no
    * `fill`), so the end of it is the settled row rather than a copy of it, and `transition` seeks it
    * instead of playing it. Which direction it runs is read from the props during render.
    */
@@ -511,6 +673,8 @@ export function AudioRecorder({
   /**
    * Entrance and exit, one timeline run forwards or backwards. `open` is read during render, so the
    * closing pose gets its committed frames before `onExited` lets the caller unmount the row.
+   * `progress` seeks the timeline rather than jumping it to its end, so a harness can checkpoint the
+   * row mid-dismissal.
    */
   useEffect(() => {
     const element = root.current;
@@ -520,7 +684,7 @@ export function AudioRecorder({
     const finish = () => {
       if (exited.current) return;
       exited.current = true;
-      exitedCallback.current?.();
+      latest.current.onExited?.();
     };
     // Scrubbing is inspection, not a dismissal: a seeked exit poses the row and reports nothing.
     const reports = closing && progress === undefined;
@@ -532,14 +696,15 @@ export function AudioRecorder({
     }
     const away = { opacity: 0, transform: "scale(0.97)" };
     const settled = { opacity: 1, transform: "scale(1)" };
+    const duration = closing ? motion.exit : motion.enter;
     const animation = element.animate(closing ? [settled, away] : [away, settled], {
-      duration: closing ? motion.exit : motion.enter,
+      duration,
       easing: closing ? "ease-out" : motion.ease,
       fill: "both",
     });
     if (progress !== undefined) {
       animation.pause();
-      animation.currentTime = closing ? motion.exit : motion.enter;
+      animation.currentTime = clamp01(progress) * duration;
       return () => animation.cancel();
     }
     if (!closing) return () => animation.cancel();
@@ -559,8 +724,17 @@ export function AudioRecorder({
     onSeek(clamp01((clientX - rect.left) / rect.width) * duration);
   };
 
-  const timeText = recording || state === "playing" ? clock(position) : clock(duration);
+  /** One segment of scrub, which is the finest step the waveform can show. */
+  const seekStep = motion.segment / 1000;
+  const takeNow = (): AudioTake => ({
+    levels: recording ? take.slice(0, Math.max(1, Math.round(position * 12))) : take,
+    duration: recording ? position : duration,
+  });
+
+  const timeText = recording ? clock(position) : playing ? clock(position) : clockRounded(duration);
   const circle = "absolute flex items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff]";
+  const buttonInset = (m.rowHeight - m.button) / 2;
+  const sendInset = (m.rowHeight - m.send.height) / 2;
 
   const row = (
     <div
@@ -569,9 +743,10 @@ export function AudioRecorder({
       style={{
         width: rowWidth,
         height: m.rowHeight,
-        borderRadius: m.rowHeight / 2,
+        // UNMEASURED: nothing stores the radius the entry view gives the row. Drawn as a capsule.
+        borderRadius: m.rowRadius,
         background: "var(--ar-glass)",
-        boxShadow: "var(--ar-rim), var(--ar-shadow)",
+        boxShadow: "var(--ar-shadow)",
         backdropFilter: ios ? "blur(24px)" : undefined,
         WebkitBackdropFilter: ios ? "blur(24px)" : undefined,
       }}
@@ -580,18 +755,19 @@ export function AudioRecorder({
         ref={playButton}
         type="button"
         data-slot="play"
-        aria-label={state === "playing" ? "Pause audio message" : "Play audio message"}
-        aria-pressed={state === "playing"}
+        aria-label={playing ? "Pause audio message" : "Play audio message"}
+        aria-pressed={playing}
         aria-hidden={recording}
         tabIndex={recording ? -1 : undefined}
-        onClick={() => onPlayChange?.(state !== "playing")}
+        onClick={() => onPlayChange?.(!playing)}
         className={circle}
         style={{
-          left: m.button.inset, top: (m.rowHeight - m.button.size) / 2, width: m.button.size, height: m.button.size,
-          background: "var(--ar-fill)", color: "var(--ar-ink)", opacity: pose.play, pointerEvents: recording ? "none" : undefined,
+          left: buttonInset, top: buttonInset, width: m.button, height: m.button,
+          background: "var(--ar-play-fill)", color: "var(--ar-label)", opacity: pose.play,
+          pointerEvents: recording ? "none" : undefined,
         }}
       >
-        {state === "playing" ? <PauseGlyph /> : <PlayGlyph />}
+        {playing ? <PauseGlyph /> : <PlayGlyph />}
       </button>
 
       <div
@@ -602,65 +778,86 @@ export function AudioRecorder({
         tabIndex={recording ? undefined : 0}
         aria-label={recording ? undefined : "Playback position"}
         aria-valuemin={recording ? undefined : 0}
-        aria-valuemax={recording ? undefined : Math.round(duration)}
-        aria-valuenow={recording ? undefined : Math.round(position)}
+        aria-valuemax={recording ? undefined : duration}
+        aria-valuenow={recording ? undefined : position}
         aria-valuetext={recording ? undefined : clock(position)}
         onPointerDown={event => { if (!recording && onSeek) { event.currentTarget.setPointerCapture(event.pointerId); seek(event.clientX); } }}
         onPointerMove={event => { if (event.buttons === 1) seek(event.clientX); }}
         onKeyDown={event => {
           if (recording || !onSeek) return;
-          if (event.key === "ArrowRight") { event.preventDefault(); onSeek(Math.min(duration, position + 1)); }
-          if (event.key === "ArrowLeft") { event.preventDefault(); onSeek(Math.max(0, position - 1)); }
+          const step = event.shiftKey ? 1 : seekStep;
+          if (event.key === "ArrowRight") { event.preventDefault(); onSeek(Math.min(duration, position + step)); }
+          if (event.key === "ArrowLeft") { event.preventDefault(); onSeek(Math.max(0, position - step)); }
+          if (event.key === "Home") { event.preventDefault(); onSeek(0); }
+          if (event.key === "End") { event.preventDefault(); onSeek(duration); }
         }}
         className="absolute overflow-hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff]"
         style={{ left: pose.waveLeft, right: pose.waveRight, top: (m.rowHeight - waveHeight) / 2, height: waveHeight }}
       >
-        {/* Anchored to the box's trailing edge: while recording, the newest bar's right edge is that
-            edge and the rest of the take is clipped to its right until the scroll brings it in. */}
+        {/* Anchored to the box's trailing edge, which is where ChatKit puts the newest bar and what
+            leaves the measured few points of hole at the leading edge. */}
         <div
           ref={strip}
           data-slot="waveform-bars"
           className="absolute flex items-center"
-          style={{ right: 0, top: 0, height: waveHeight, gap: m.waveform.barGap, transform: recording ? `translateX(${stripOffset}px)` : undefined }}
+          style={{ right: 0, top: 0, height: waveHeight, gap: w.barGap, transform: recording ? `translateX(${phase * pitch}px)` : undefined }}
         >
-          {bars.map((level, index) => {
-            const reached = recording || (bars.length > 0 && index / bars.length < played);
-            return (
-              <span
-                key={index}
-                aria-hidden="true"
-                style={{
-                  width: m.waveform.barWidth,
-                  height: Math.max(m.waveform.minBarHeight, level * level * waveHeight),
-                  borderRadius: m.waveform.barWidth / 2,
-                  background: recording ? "var(--ar-red)" : "var(--ar-wave)",
-                  opacity: reached ? 1 : 0.5,
-                }}
-              />
-            );
-          })}
+          {bars.map((bar, index) => (
+            <span
+              key={index}
+              aria-hidden="true"
+              style={{
+                width: w.barWidth,
+                height: Math.max(w.minBarHeight, bar.level * bar.level * waveHeight * bar.scale),
+                borderRadius: w.barWidth / 2,
+                background: recording ? "var(--ar-red)" : "var(--ar-wave)",
+                opacity: bar.opacity,
+              }}
+            />
+          ))}
         </div>
       </div>
 
       <div
         ref={timerBox}
         data-slot="timer"
-        className="absolute flex items-center justify-center"
+        className="absolute"
         style={{
           right: pose.timerRight, top: (m.rowHeight - pose.timerHeight) / 2, width: pose.timerWidth, height: pose.timerHeight,
-          borderRadius: pose.timerRadius, background: recording ? "transparent" : "var(--ar-fill)",
-          gap: 4, fontFamily: fontStack, fontSize: m.timer.fontSize, color: recording ? "var(--ar-red)" : "var(--ar-ink)",
+          borderRadius: pose.timerRadius,
+          // Measured: the pill carries a fill only once the take is stopped.
+          background: state === "stopped" ? "var(--ar-pill-fill)" : "transparent",
+          fontFamily: fontStack, fontSize: m.timer.fontSize,
+          color: recording ? "var(--ar-red)" : "var(--ar-label)",
           fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap",
         }}
       >
-        {!recording && onAppend ? (
-          <button type="button" data-slot="append" aria-label="Record more" onClick={onAppend}
-            className="flex items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff]"
-            style={{ width: 11.5, height: 11.5, color: "inherit" }}>
-            <PlusGlyph />
+        {state === "stopped" ? (
+          // ChatKit's `AudioMessageRecordingAppendButton` holds one button that fills the pill, so
+          // the whole pill appends to the take, not just the `plus`.
+          <button
+            type="button"
+            data-slot="append"
+            aria-label={`Record more, ${timeText}`}
+            onClick={onAppend}
+            className="absolute inset-0 rounded-[inherit] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff]"
+            style={{ color: "inherit", font: "inherit", fontVariantNumeric: "tabular-nums" }}
+          >
+            {/* The framework's own image box for the `plus`, and the ink the 14 x 14 symbol becomes
+                once scaled into it. */}
+            <span aria-hidden="true" className="absolute flex items-center justify-center"
+              style={{ left: m.append.glyph.left, top: m.append.glyph.top, width: m.append.glyph.width, height: m.append.glyph.height }}>
+              <PlusGlyph width={m.append.glyph.inkWidth} height={m.append.glyph.inkHeight} />
+            </span>
+            <span aria-hidden="true" className="absolute flex items-center justify-center"
+              style={{ left: m.append.labelLeft, top: 0, bottom: 0, width: m.timer.width }}>
+              {timeText}
+            </span>
           </button>
-        ) : null}
-        <span role="timer" aria-label={recording ? "Recording time" : "Audio message length"}>{timeText}</span>
+        ) : (
+          // No accessible name of its own: a name on a live region replaces the value it reads out.
+          <span role="timer" className="absolute inset-0 flex items-center justify-center">{timeText}</span>
+        )}
       </div>
 
       <button
@@ -670,10 +867,14 @@ export function AudioRecorder({
         aria-label="Stop recording"
         aria-hidden={!recording}
         tabIndex={recording ? undefined : -1}
-        onClick={onStop}
+        onClick={() => {
+          // `minAudioRecordingDuration`: a take shorter than a quarter second is a cancel, not a stop.
+          if (position < motion.minDuration) onCancel?.();
+          else onStop?.(takeNow());
+        }}
         className={circle}
         style={{
-          right: m.button.inset, top: (m.rowHeight - m.button.size) / 2, width: m.button.size, height: m.button.size,
+          right: buttonInset, top: buttonInset, width: m.button, height: m.button,
           background: "color-mix(in srgb, var(--ar-red) 19%, transparent)", color: "var(--ar-red)",
           opacity: pose.stop, pointerEvents: recording ? undefined : "none",
         }}
@@ -688,10 +889,10 @@ export function AudioRecorder({
         aria-label="Send audio message"
         aria-hidden={recording}
         tabIndex={recording ? -1 : undefined}
-        onClick={onSend}
+        onClick={() => onSend?.(takeNow())}
         className="absolute flex items-center justify-center focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff]"
         style={{
-          right: m.send.inset, top: (m.rowHeight - m.send.height) / 2, width: m.send.width, height: m.send.height,
+          right: sendInset, top: sendInset, width: m.send.width, height: m.send.height,
           borderRadius: m.send.radius, background: "#0088ff", color: "#ffffff",
           opacity: pose.send, pointerEvents: recording ? "none" : undefined,
         }}
@@ -707,11 +908,14 @@ export function AudioRecorder({
       data-slot="cancel"
       aria-label="Cancel audio message"
       onClick={onCancel}
-      className="flex shrink-0 items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff]"
+      className="absolute flex items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff]"
       style={{
-        width: ios ? audioRecorderMetrics.ios.composer.leading : audioRecorderMetrics.macos.composer.leading,
-        height: ios ? audioRecorderMetrics.ios.composer.leading : audioRecorderMetrics.macos.composer.leading,
-        background: "var(--ar-glass)", boxShadow: "var(--ar-rim), var(--ar-round-shadow)", color: "var(--ar-glyph)",
+        // Centred on the measured centre of the `+` it replaces, bottom edge on the composer's
+        // measured baseline. See the note above: ChatKit's own 8.5 could not be placed.
+        left: m.composer.leadingCentre - m.cancel / 2,
+        bottom: m.composer.bottom,
+        width: m.cancel, height: m.cancel,
+        background: "var(--ar-glass)", boxShadow: "var(--ar-round-shadow)", color: "var(--ar-label)",
         backdropFilter: ios ? "blur(24px)" : undefined, WebkitBackdropFilter: ios ? "blur(24px)" : undefined,
       }}
     >
@@ -719,41 +923,18 @@ export function AudioRecorder({
     </button>
   );
 
-  if (!ios) {
-    const mac = audioRecorderMetrics.macos;
-    return (
-      <div
-        ref={root}
-        data-slot="audio-recorder"
-        data-state={state}
-        data-platform="macos"
-        role="group"
-        aria-label="Audio message"
-        className={cn("absolute inset-x-0 bottom-0 select-none", macVars, className)}
-        style={{ height: mac.composer.bottom + mac.rowHeight + 10, fontFamily: fontStack, ...style }}
-        {...props}
-      >
-        <div className="absolute" style={{ left: mac.composer.leadingInset, bottom: mac.composer.bottom }}>{cancel}</div>
-        <div className="absolute" style={{ left: mac.composer.left, bottom: mac.composer.bottom }}>{row}</div>
-      </div>
-    );
-  }
-
-  const composer = audioRecorderMetrics.ios.composer;
   return (
     <div
       ref={root}
       data-slot="audio-recorder"
       data-state={state}
-      data-platform="ios"
-      role="group"
-      aria-label="Audio message"
-      className={cn("relative isolate flex w-full items-end select-none", vars, className)}
-      style={{ padding: `0 ${composer.padding}px ${composer.padding}px ${composer.padding}px`, fontFamily: fontStack, ...style } as CSSProperties}
+      data-platform={platform}
+      className={cn("absolute inset-x-0 bottom-0 isolate select-none", ios ? iosVars : macVars, className)}
+      style={{ height: m.composer.bottom + m.rowHeight, fontFamily: fontStack, ...style } as CSSProperties}
       {...props}
     >
       {cancel}
-      <div style={{ marginLeft: composer.leadingGap }}>{row}</div>
+      <div className="absolute" style={{ left: m.composer.fieldLeft, bottom: m.composer.bottom }}>{row}</div>
     </div>
   );
 }

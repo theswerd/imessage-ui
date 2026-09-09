@@ -136,6 +136,21 @@ export type Palette = {
  * Not measured, and not in SPEC.md either: `macos.*.sms` (no macOS capture holds a green bubble; the
  * only green in any of them is the plus-menu app icons), `macos.light.edited`, and both `ios.*.separator`
  * values. Treat them as placeholders, not as measurements.
+ *
+ * `macos.light` is now confirmed against a macOS light capture, not carried over from the dark one.
+ * /lab/list?platform=macos&theme=light over 0 90 630 500 of conversation-pane-light.png scores 4.17%
+ * with interior mean signed -0.10 (-0.4, -0.0, 0.2) and no tint. Per value, over that region:
+ *   - `imessage`: the bubble fill agrees with the capture within 0.5/255 on every clean row of the ramp,
+ *     device y 240 to 1140 (mean row error 0.0 to 0.5 in R and G, 0.5 in B), so both endpoints and
+ *     `screenHeight: 640` are right. Rows 190-220 are the only misses and they are the capture's tapback.
+ *   - `background`: #ffffff exactly, at every probe more than 31pt from the pane's leading edge.
+ *   - `incoming`: the link preview fill reads (233,233,235) in the capture and in our render, every row.
+ *   - `secondaryLabel`: the "Delivered" label's darkest pixel is (128,128,128) in both.
+ * `bubbleMetrics.macos` holds too: `edgeInset` 20.0 on all six bubbles, `maxWidth` 382.5 on both wrapped
+ * ones, line pitch 29.97/30.06 device px in the capture against 29.99/30.06 in ours.
+ *
+ * The 4.17% is entirely outside these files. See the report on that lab row: 30% of it is the ❤️ tapback
+ * the fixture omits, the rest is glyph weight from `-webkit-font-smoothing: antialiased` in globals.css.
  */
 export const palettes: Record<Platform, { light: Palette; dark: Palette }> = {
   ios: {
@@ -155,7 +170,14 @@ export const palettes: Record<Platform, { light: Palette; dark: Palette }> = {
     dark: {
       background: "#000000",
       imessage: { top: "#589af7", bottom: "#3d8ef7", screenHeight: 874 },
-      sms: { top: "#53e678", bottom: "#31c355", screenHeight: 874 },
+      // Dark green is NOT the light ramp. Fitted over 1131 rows of core green pixels - green by a
+      // wide margin, eroded by one pixel so no rim or glyph edge is in it, and with anything under
+      // G 195 dropped so a bubble behind a long-press dim cannot pull it - across conv2-dark,
+      // tapback-love-dark, longpress-dark and select-mode-dark: R 47.91 -> 52.42, G 218.80 ->
+      // 197.39, B 90.82 -> 88.84 over the 874 pt screen, rms 0.40 / 0.53 / 0.44. Only green ramps;
+      // red and blue are nearly flat and sit 35 and 30 levels below their light-mode selves at the
+      // top of the screen, which is why the light ramp read washed out here.
+      sms: { top: "#30db5b", bottom: "#34c559", screenHeight: 874 },
       incoming: { top: "#262629", bottom: "#262629", screenHeight: 874 },
       incomingText: "#ffffff",
       outgoingText: "#ffffff",

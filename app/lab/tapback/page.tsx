@@ -4,7 +4,10 @@ export const metadata = { title: "Tapback lab" };
 
 /**
  * Pixel lab for the tapback UI, rendered at native geometry for `scripts/measure/compare.ts`.
- * /lab/tapback?scene=balloon|longpress|macos-menu&theme=light|dark&progress=0..1
+ * /lab/tapback?scene=balloon|longpress|longpress-first|longpress-two-line|longpress-last|longpress-selected|incoming-balloon|longpress-incoming|macos-balloon|macos-menu&theme=light|dark&progress=0..1
+ *
+ * Every iOS scene draws the full screen — status bar, nav bar, thread, composer — so a whole-frame
+ * diff against its capture means something; each carries the clock its own capture shows.
  */
 export default async function TapbackLabPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const query = await searchParams;

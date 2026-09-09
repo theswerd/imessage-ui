@@ -52,32 +52,84 @@ export const macosBalloonRim = 0.5;
  * CSS variables the tapback UI reads (with fallbacks to the light iOS values). Spread on a frame
  * next to `paletteVars`. Glass fills were solved from the captures: the pill over the dimmed white
  * list is #ededef and over the dimmed green bubble ≈#b4efc6 (brighter than the dimmed content, hence
- * the brightness term); over the dimmed black list it is #1f1e21. The dim itself is rgba(22,18,44,0.21).
+ * the brightness term); over the dimmed black list it is #1f1e21.
+ *
+ * The dim is one material in both themes at alpha 0.21 over ≈(22, 21.5, 42), and it is measured, not
+ * guessed: `longpress-ok-light.png` is `conv3-light.png` with one message pressed, so regressing one
+ * capture on the other over the clean rows gives it directly - slope 0.7895/0.8067/0.7889, residual
+ * rms 0.17/0.29/0.26 per channel. `conv2-dark.png` -> `longpress-ok-selected-dark.png` returns alpha
+ * 0.217/0.210/0.213 over (22.5, 19.1, 42.3), i.e. the same dim. The (22,18,44) this used to carry
+ * rendered white as (206,205,210) where every light capture reads (206,206,210).
+ *
+ * The two themes then carry different green channels (22 light, 21 dark) because no single 8-bit
+ * value serves both in Chrome, which quantizes the 0.21 alpha to 54/255 = 0.211765 before
+ * compositing. Green 21.5 lands half a level either side of a rounding boundary at both ends of the
+ * range: over white it composites to 205.55, and the light captures read 206 (G 22 gives 205.66, G 21
+ * gives 205.45); over black it composites to 4.55, and the dark captures read 4 (G 21 gives 4.45,
+ * G 22 gives 4.66). R 22 and B 42 clear their boundaries at both ends and need no such split. Over
+ * `longpress-ok-light.png` the light nudge takes the frame's interior from -0.9 to -0.1 mean signed
+ * green and 1.30 to 1.15 levels of mean absolute error; over `longpress-dark.png` holding dark at 21
+ * keeps it at 1.21 rather than 1.46. `messageActionsDim`'s fallback carries the dark value.
  *
  * `--im-menu-glass` was refitted against the captures rather than guessed. Because the tint, the
  * alpha and the brightness term all trade off against each other, only two things are actually
  * determined by a capture: the constant the material contributes, and how much of the backdrop
  * survives it. Both were solved by rendering the menu twice at a fixed alpha and filter, once with a
  * black tint and once with a white one, which makes the output linear in the tint, and then solving
- * for the tint that lands on the capture. rgba(241,243,244,0.8) is what
- * `longpress-ok-light.png` and `longpress-incoming-light.png` agree on, over two very different
- * backdrops - a green bubble and a grey one. It takes the menu's interior from 11.9 levels of mean
- * absolute error to 3.6, and the region from 1.16% mismatched to 1.02%.
+ * for the tint that lands on the capture.
  *
- * The dark value is NOT fitted, because the two dark long-press labs do not reconstruct their
- * captures: `longpress-dark` has a bubble at x 370 y 480 that the capture does not, and
- * `longpress-last` renders its pressed bubble somewhere the capture does not. Any fit over those is
- * a fit to the wrong backdrop. Same for `longpress-two-line-light`, which disagrees with the other
- * two light captures by 7 levels. Fix the scenes first, then refit.
+ * The solve runs on the menu's lower 55% only. Above that the menu laps the message it was opened
+ * on, and there NO tint at this alpha can reach the capture: at y 610 of `longpress-ok-light.png` the
+ * glass reads (181,238,198) over a dimmed bubble the filter turns into ≈(84,238,128), so at alpha 0.8
+ * the tint would have to be (-59,218,14). Native carries far more of the bubble's colour through than
+ * a flat fill plus `wash` can, and that is a `context-menu.tsx` / `message-actions.tsx` question
+ * (the `tint` gradient the menu already supports and the overlay never passes), not a material one.
+ * Ours runs +18 R / +12 B over that band and matches to 1-3 levels everywhere below it.
+ *
+ * The light value was confirmed first, against the old 0.16 shadow: with `longpress-two-line`
+ * reconstructing, ok / incoming / two-line solve to (240.0,243.6,243.7), (240.2,240.8,244.0) and
+ * (241.2,244.4,244.7), i.e. rgba(241,243,244,0.8) holds and two-line, which used to sit seven levels
+ * off, now agrees with the other two. The number in the table below is 4 levels lower than that only
+ * because the shadow underneath it changed; see the next paragraph.
+ *
+ * Both values are then re-solved at the measured shadow, because `context-menu.tsx` paints
+ * `menu-shadow` INSIDE the menu, under the glass, so the glass's own backdrop carries it and the
+ * tint absorbs whatever it contributes. Taking the shadow from 0.16 to the measured 0.098 lightens
+ * that backdrop and drops the solved tint by 4 levels; the slope is 64.5 tint levels per unit of
+ * shadow alpha, so a `context-menu.tsx` that masked its own shape out of the shadow (which is what
+ * native draws - a drop shadow is not visible under the menu) would want ≈(231,233,234) instead.
+ * At 0.098 the three light captures solve to (236.2,239.9,239.9), (236.3,236.9,240.0) and
+ * (237.2,240.5,240.7): rgba(237,239,240,0.8), residuals 1.75 / 1.84 / 1.52 levels.
+ *
+ * Dark is rgba(20,22,23,0.8), fitted the same way now that the dark scenes reconstruct:
+ * `longpress-first` -> `longpress-dark.png` (19.4,22.2,22.7), `longpress-last` ->
+ * `longpress-last-bubble-dark.png` (20.2,20.5,23.2) and `longpress-selected` ->
+ * `longpress-ok-selected-dark.png` (20.4,21.8,23.9), i.e. three captures inside 1.7 levels of each
+ * other. It takes the same band from 2.76/2.45/2.43 levels of mean absolute error to 1.61/1.31/1.36.
+ * The rgba(20,25,25,0.8) it used to carry was 3 levels green-heavy.
+ *
+ * `--im-menu-shadow` is the menu's drop shadow, and 0.098 is measured, not the 0.16 the component
+ * defaults to. `longpress-ok-light.png` divided by `conv3-light.png` and the dim gives the shadow's
+ * alpha directly on every pixel around the menu; fitting a Gaussian to the ring below and beside it
+ * returns alpha 0.0992, sigma 17.52 pt, offset 7.00 pt down (rms 0.0025 alpha), and
+ * `longpress-incoming-light.png` over `incoming-light.png` returns 0.0971 / 17.18 / 7.00. It is a
+ * pure black shadow: the three channels' alphas agree to 0.001. NOTE for `context-menu.tsx`: its
+ * `blur(11px)` is a sigma of 11 and needs to be 17.4 for the falloff to match - the shadow reaches
+ * 41 pt below the menu in the capture and 28 in ours. The alpha is right either way (fitting it at
+ * the wrong sigma returns 0.1012), so this value stands on its own.
+ *
+ * The dark theme's shadow is UNVERIFIED: every dark capture puts the menu over a near-black ground,
+ * where a black shadow at any alpha is invisible. It carries the light value rather than the
+ * component's unmeasured 0.16.
  */
 export function tapbackVars(theme: "light" | "dark", platform: Platform = "ios"): Record<string, string> {
   const ios: Record<string, string> = theme === "light" ? {
-    "--im-dim": "rgba(22,18,44,0.21)", "--im-glass": "rgba(229,229,231,0.69)", "--im-glass-filter": "blur(9px) brightness(1.32) saturate(1.35)", "--im-glass-solid": "#ededef", "--im-glass-rim": "rgba(255,255,255,0.55)",
-    "--im-glass-shadow": "0 6px 24px rgba(0,0,0,0.10)", "--im-picker-icon": "#aeaeb2", "--im-menu-glass": "rgba(241,243,244,0.8)", "--im-menu-glass-filter": "blur(9px) brightness(1.32) saturate(1.35)", "--im-menu-bg": "#edeff1", "--im-menu-text": "#000000",
+    "--im-dim": "rgba(22,22,42,0.21)", "--im-glass": "rgba(229,229,231,0.69)", "--im-glass-filter": "blur(9px) brightness(1.32) saturate(1.35)", "--im-glass-solid": "#ededef", "--im-glass-rim": "rgba(255,255,255,0.55)",
+    "--im-glass-shadow": "0 6px 24px rgba(0,0,0,0.10)", "--im-picker-icon": "#aeaeb2", "--im-menu-glass": "rgba(237,239,240,0.8)", "--im-menu-glass-filter": "blur(9px) brightness(1.32) saturate(1.35)", "--im-menu-bg": "#edeff1", "--im-menu-text": "#000000", "--im-menu-shadow": "rgba(0,0,0,0.098)",
     "--im-menu-separator": "rgba(0,0,0,0.12)", "--im-menu-destructive": "#ff3b30", "--im-tapback-own": tapbackColors.own, "--im-tapback-ring": tapbackColors.selectedRing,
   } : {
-    "--im-dim": "rgba(22,18,44,0.21)", "--im-glass": "rgba(38,37,39,0.8)", "--im-glass-filter": "blur(9px) saturate(1.6)", "--im-glass-solid": "#1f1e21", "--im-glass-rim": "rgba(255,255,255,0.10)",
-    "--im-glass-shadow": "0 6px 24px rgba(0,0,0,0.5)", "--im-picker-icon": "#8e8e93", "--im-menu-glass": "rgba(20,25,25,0.8)", "--im-menu-glass-filter": "blur(9px) saturate(2)", "--im-menu-bg": "#121316", "--im-menu-text": "#ffffff",
+    "--im-dim": "rgba(22,21,42,0.21)", "--im-glass": "rgba(38,37,39,0.8)", "--im-glass-filter": "blur(9px) saturate(1.6)", "--im-glass-solid": "#1f1e21", "--im-glass-rim": "rgba(255,255,255,0.10)",
+    "--im-glass-shadow": "0 6px 24px rgba(0,0,0,0.5)", "--im-picker-icon": "#8e8e93", "--im-menu-glass": "rgba(20,22,23,0.8)", "--im-menu-glass-filter": "blur(9px) saturate(2)", "--im-menu-bg": "#121316", "--im-menu-text": "#ffffff", "--im-menu-shadow": "rgba(0,0,0,0.098)",
     "--im-menu-separator": "rgba(255,255,255,0.15)", "--im-menu-destructive": "#ff453a", "--im-tapback-own": tapbackColors.ownDark, "--im-tapback-theirs": "#262629", "--im-tapback-ring": tapbackColors.selectedRingDark,
   };
   if (platform === "ios") return ios;

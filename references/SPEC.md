@@ -507,3 +507,1533 @@ Two rules that matter for both fidelity and testability:
   element already gone, and the dismissal is never seen.
 - A balloon only pops in for a reaction applied in this session. Reactions already on a message when
   the conversation opens are simply there, so `Tapback animateIn` is off by default.
+
+## Transcript status lines (the centred grey text that is not a bubble)
+
+`registry/imessage/system-message.tsx`. A group rename, a join, a leave, the group photo and
+background, an unsent message, a kept attachment, a failed group edit, and the unknown-sender notice.
+Lab: `/lab/system-message?scene=notice|run|family`.
+
+**Correction to line 164 above.** The "iOS extra states" entry calls the unknown-sender notice
+"the centered 12pt notice". It is **11 pt**. Line 1's ink in `incoming-light.png` spans device x
+67–1137, i.e. 357.0 pt of advance for 65 characters; 12 pt needs ≈389 and would not fit the 370
+column at all. ChatKit agrees (below). The 11 in `unknownSenderMetrics` was always right.
+
+### Measured from `references/ios/captures/incoming-light.png` / `-dark.png` (402×874 @3x)
+
+The only frame in the repo holding any member of this family. Full-width non-white row scan:
+
+| reading | value | how |
+|---|---|---|
+| line pitch | **13.3333** | baselines 40 device rows apart (ink count falls 525→128 between rows 2188/2189 and 82→24 between 2228/2229); the x-height bands open on rows 2170 and 2210, also 40 apart |
+| font size | **11** | 357.0 pt of advance over 65 characters, and the 370 column reproduces the capture's break ("…it may" / "be spam.") to the word |
+| colour | **#8a8a8e / #8d8d93** | darkest ink in the capture is exactly (138,138,142); ChatKit carries `UIColor.secondaryLabel`, which is (60,60,67, 0.6) over white = (138,138,142.2) and (235,235,245, 0.6) over black = (141,141,147) |
+| column | **370** = 402 − 2×16 | the measured edge inset |
+| space above | **16.1667** | bubble body bottom 702.6667 (its full-width run ends after device row 2108, only the tail survives into 2109); line 1's baseline 729.6667 less the 10.6348 ascent and the 0.1891 half-leading of a 13.3333 box puts the line box top at 718.8334 |
+| tracking | **0.12** | fitted, not assumed: sweeping `/lab/system-message?scene=notice&ls=…` and taking the band's MSE against the capture gives 0.10→468.6, 0.11→431.5, 0.115→423.9, **0.12→418.7**, 0.13→424.1, 0.14→462.9 |
+
+The x-height arguments elsewhere in this repo (5.83 here, 6.0 in `ios-notices.tsx`, 6.33 from a plain
+threshold) are all anti-aliasing-inflated: `-[UIFont xHeight]` for this font is **5.79**. Width is the
+argument that establishes the size; x-height is not.
+
+### Read out of ChatKit 26.5 (Catalyst probe, both idioms)
+
+`clang -target arm64-apple-ios26.0-macabi`, `dlopen` the iOSSupport ChatKit,
+`-[UIDevice userInterfaceIdiom]` swizzled, `CKUIBehaviorPhone` / `CKUIBehaviorMac` instantiated:
+
+| reading | iOS | macOS |
+|---|---|---|
+| `transcriptRegularFontAttributes` | .SFNS-Regular **11**, natural line height 13.0, centred, no min/max line height, no line spacing | identical |
+| `transcriptEmphasizedFontAttributes` | .SFNS-**Medium**, `UIFontWeightTrait` 0.23 = CSS **500** | identical |
+| `transcriptGroupModificationError{Regular,Emphasized}FontAttributes` | .SFNS-**Light** (trait −0.4 = CSS 300) / .SFNS-Medium, both `systemRedColor` | identical |
+| `-[CKGroupActionChatItem textAlignmentInsets]` | top **3**, bottom **3** | top **2.5**, bottom **2** |
+| `-[CKGroupActionChatItem hasSelectableText]` | **NO** | **NO** |
+| `transcriptMessageStatusFont` ("Delivered") | .SFNS-Semibold 11 | .SFNS-Medium 9 |
+| `transcriptStatusItemEdgeInsets` | all zeros | all zeros |
+
+Three things this settles that the kit had wrong. The emphasised run is weight **500**, not the 600
+borrowed from the "Delivered" label. **macOS status text is 11/13, the same as iOS** — the 9 pt this
+family used to take is `transcriptMessageStatusFont`, which is the one transcript metric that does
+scale on the Mac. And `select-none` is a reading, not a preference.
+
+`textAlignmentInsets` is the item's own padding, inside whatever the layout puts between items — so
+the notice's measured 16.1667 above decomposes as 3 (the item) + 13.1667 (the layout).
+
+### Wording
+
+Every sentence is a ChatKit format string, verbatim from `ChatKit.framework/Resources/ChatKit.loctable`
+(`plistlib`, no probe needed), kept as templates in `statusTemplates`. `#…#` marks the emphasised run;
+the localisations prove it is emphasis markup and not a token, because the delimiters wrap a
+translated verb phrase (`es` "#Has denominado# la conversación “%@”.", `de` "#Du# hast…",
+`ja` "#あなた#が…"). Two consequences: **"You" is emphasised** (every `GROUP_YOU_*` string wraps it),
+and **the added or removed participant is not** — only the actor is inside `#…#`, so
+"**You** added Sam Rivera to the conversation." bolds the first half.
+
+**A missed call is not a transcript line.** ChatKit's string tables contain no `Missed*` string;
+"Missed Call" and "Missed FaceTime" live in FaceTime.app's `Recents.loctable`, and "Missed Video Call"
+exists nowhere on the system. A call in a transcript is the FaceTime card (`facetime-card.tsx`,
+`state="missed"`). **A tapback is not one either** — the six verbs come from `IMSharedUtilities.loctable`
+("%@ loved “%@”", "You loved “%@”"), which is the notification and sidebar-preview format, carries no
+`#…#` at all, and has no ChatKit status string behind it; a tapback in the transcript is a balloon.
+
+### Still unverified for this surface
+
+- **`gapAbove` for the group lines, on both platforms.** ChatKit keeps the item's own padding in
+  `textAlignmentInsets` but the spacing *between* items in
+  `-[CKChatItem layoutItemSpacingWithEnvironment:…]`, which needs a live layout environment;
+  `transcriptStatusItemEdgeInsets` is all zeros. No committed capture shows a group conversation on
+  either platform. iOS borrows the notice's measured 13.1667; macOS reuses the measured 11.5
+  between-cluster gap less the item's 2.5 top pad. The open route is an iOS-simulator capture of a
+  real group event (seed the booted simulator's `Library/SMS/sms.db` with `item_type` 1/2/3/6 rows,
+  then `xcrun simctl io booted screenshot`); it was attempted for this section and the sandbox
+  declined the write to the Messages database.
+- **`macos.lineHeight` 13** is ChatKit's natural line height, not a rasterised pitch: no macOS capture
+  holds a two-line status sentence, so unlike iOS's 13.3333 it has no capture behind it.
+- **`macos.letterSpacing` 0** — nothing to fit against.
+- **`errorColor` on iOS** (#ff3b30 / #ff453a) is Apple's published iOS systemRed. `systemRedColor` is
+  a `UIDynamicCatalogSystemColor`, so the Catalyst probe resolves it on the host and returned the
+  macOS pair (#ff383c / #ff4245) under both idioms; only the macOS pair is a reading.
+- **The arrival motion** (`systemMessageMotion`, 260 ms, 6 pt rise) is invented. Nothing captures a
+  status line arriving and ChatKit exposes no duration for one. It is one Web Animations animation on
+  the row, so `animateIn={{ progress }}` seeks it.
+
+### Fidelity
+
+| Lab | Reference | Region (pt) | Mismatch |
+|---|---|---|---|
+| `/lab/system-message?scene=notice` | `ios/incoming-light.png` | 0 712 402 40 | 3.70% |
+| `/lab/system-message?scene=notice&theme=dark` | `ios/incoming-dark.png` | 0 712 402 40 | 3.89% |
+
+Interior mean signed error 0.00 in both, largest interior blob 0.0%: the whole remainder is glyph
+anti-aliasing.
+
+## The macOS details inspector (`registry/imessage/macos-details.tsx`)
+
+**No capture in this repo shows this pane**, and until one exists nothing in this section is a
+reading off a macOS frame. `references/macos/captures/*.png` are all crops of window x 330–960 with
+no inspector open. The one capture of *any* details view anywhere in the repo is
+`references/ios/captures/details-light.png` / `-dark.png` (402×874 @3x), which is the **phone idiom
+of the same view controller**; it is used below only for structure, never for macOS geometry.
+
+Everything else was read out of the frameworks on this machine with the Catalyst probe the rest of
+this file already uses: `clang -target arm64-apple-ios26.0-macabi`, dlopen
+`ChatKit.framework` **and** `CommunicationDetails.framework`, swizzle `-[UIDevice userInterfaceIdiom]`
+to 5 so `+[CKUIBehavior sharedBehaviors]` vends `CKUIBehaviorMac` and `theme` vends `CKUIThemeMac`.
+Probe cross-checks that it is reading Mac values, all already measured elsewhere in this file and all
+agreeing: `balloonTextFont` 13, `balloonContiguousSpace` 3, `conversationListContactImageDiameter` 40,
+`defaultConversationListWidth` 320, `_transcriptBackgroundColor` #ffffff / #1e1e1e.
+
+### What the live view actually is
+
+`CKDetailsViewController` is **ABSENT** from ChatKit 26.5. The shipping view is
+`CommunicationDetails.DetailsViewController`, whose ivars are `headerView`,
+`detailsPageViewController`, `tabs`, `selectedTab`, `backgroundVisualEffectView`; and
+`Header.HeaderView`'s are `avatarView`, `contactCardHeaderView`, `quickActionsContainerPool`,
+`horizontalTabsHostingView`, `isHeaderBlurVisible`, `hasScrolledPastTopEdge`,
+`headerInterpolationProgress`. So the pane is **one pinned header (avatar, name, quick actions, tab
+strip) over a paged tab body**, with a top-edge blur (`PlatformTopEdgeBlurView`) that appears once the
+body scrolls. Its tab classes are `DetailsInfoTab`, `DetailsPhotosTab`, `DetailsLinksTab`,
+`DetailsAttachmentsTab`, `DetailsLocationsTab`, `DetailsWalletTab`, `DetailsBackgroundsTab`, and its
+strip is `DetailsTabBarView` / `SegmentedTabControl` / `TabSegmentView` / `SelectionView`.
+
+ChatKit's *cells* do still ship and still carry the metrics: `CKDetailsChatOptionsCell`,
+`CKDetailsChatOptionsCheckboxCell`, `CKDetailsSharedWithYouCheckboxCell`,
+`CKDetailsSegmentedControlCell`, `CKDetailsSearchResultsTitleHeaderCell`, `CKDetailsMapViewCell`,
+`CKDetailsAddMemberStandardCell`, `CKDetailsGroupHeaderCell`.
+
+### Geometry, from `CKUIBehaviorMac`
+
+| Value | Selector |
+|---|---|
+| column **300** wide, user-resizable **280–400** | `defaultInspectorColumnWidth`, `minInspectorColumnWidth`, `maxInspectorColumnWidth` |
+| content inset **16** | `searchDetailsLeadingAndTrailingMaxPadding`; `searchDetailsResultsInsets` leading/trailing |
+| body scroll inset **12** top, **16** bottom | `searchDetailsResultsInsets` = t12 l16 b16 r16 (an `NSDirectionalEdgeInsets`) |
+| section margin **10** above and below | `searchDetailsSectionMarginInsets` = t10 l0 b10 r16 |
+| section heading **16** above, **−2** leading | `detailsSectionHeaderPaddingAbove`, `detailsSectionHeaderPaddingLeading` |
+| title header top padding 12 (see caveat) | `searchResultsTitleHeaderDetailsTopPadding` |
+| contact photo **Ø 37**, cut-out **Ø 41**, cut-out radius **20.5** | `detailsAvatarDiameter` = `detailsViewContactImageDiameter`, `detailsAvatarCutoutDiameter`, `detailsAvatarCornerRadius` |
+| photo→name **12**, name→subtitle **1** | `detailsContactAvatarLabelSpacing`, `detailsGroupHeaderCellInterTextVerticalSpacing` |
+| group photo stack **58** wide for two, **72** for three | `detailsAvatarPancakeViewWidth2Avatars`, `…3Avatars` |
+| quick action **Ø 32** | `detailsAddButtonDiameter` — the only circular details-view button diameter the framework vends; `CommunicationDetails.QuickActionView` is Swift and has none of its own |
+| **12** between quick actions | the l6 + r6 of `detailsContactCellButtonEdgeInsets` (t8 l6 b8 r6). **A transfer**: those insets belong to `CKDetailsContactCell`'s trailing buttons, whose box is `detailsContactCellButtonWidth`/`Height` 25 × 25, not to the quick actions. `detailsCellLabelPadding` independently gives the same 12 |
+| glyph→label **12** | `detailsCellLabelPadding` |
+| photo grid gap **10**, tile radius **8** | `searchPhotosInterItemSpacingDetailsView`, `searchPhotosCellZKWAndDetailsCornerRadius` |
+| link / document row radius **8** | `searchLinksCellCornerRadius` = `searchAttachmentsCellCornerRadius` |
+| row height **40**, option row **44** | `detailsContactCellMinimumHeight`; `+[CKDetailsChatOptionsCell estimatedHeight]` = `+[CKDetailsSharedWithYouCell estimatedHeight]` = `+[CKDetailsAddMemberStandardCell preferredHeight]` |
+| Hide Alerts / Send Read Receipts / Shared With You are **16 × 16 checkboxes**, not switches | `CKDetailsChatOptionsCheckboxCell`, `CKDetailsSharedWithYouCheckboxCell`; a `UISwitch` built under the Mac idiom reports `style` 1 (`UISwitchStyleCheckbox`) and `intrinsicContentSize` 16 × 16 |
+| popover width in details **260**, preferred content size **320 × 480**, map **196** tall | `popOverWidthInDetailsView`, `detailsPreferredContentSizeWidth`/`Height`, `detailsViewMapHeight` |
+| group disclosure `chevron.forward.circle` / `chevron.down.circle` at **17 pt**, ink 16.9985 square | `detailsGroupHeaderCellChevronForwardName`/`…DownName`, `detailsGroupHeaderCellChevronFont` |
+
+Two caveats recorded rather than applied:
+
+- `searchDetailsSectionMarginInsets`'s **l0 / r16** is dropped. The scroll box already carries 16 on
+  both sides from `searchDetailsResultsInsets`, and applying r16 again would inset every section's
+  trailing edge to 32.
+- `detailsSectionHeaderPaddingAbove` **16** and `searchResultsTitleHeaderDetailsTopPadding` **12** are
+  both "above the title". The component applies the 16 (the selector that names *this* view's section
+  header) and records the 12. Which one ships is unresolved without a capture.
+- `detailsAvatarPancakeViewOverlapOffset` is **13.5** and reconciles with neither pancake step
+  (58 − 37 = 21 for two faces, (72 − 37)/2 = 17.5 for three, i.e. overlaps of 16 and 19.5). The two
+  width selectors are the more specific reading and are what the component uses.
+
+### Type
+
+The framework's details fonts are `detailsGroupHeaderCellTitleFont` **.SFNS-Regular 17**,
+`detailsGroupHeaderCellSubtitleFont` **.SFNS-Regular 15**, `searchDetailsHeaderFont`
+**.SFNS-Regular 13**. The 17 is not what macOS 26 renders: `conversationListSenderFont` is likewise 17
+(semibold) where this file measures that surface at **13** semibold off `conversation-pane-*.png`,
+while `balloonTextFont` 13 and `searchDetailsHeaderFont` 13 are already Mac-scale and agree with their
+captures. So the 17-family details fonts are iOS sizes left in the Mac behaviour object, and the
+shipping sizes are the framework value × the measured **13/17 = 0.7647**:
+
+| Element | Size | Where it comes from |
+|---|---|---|
+| Contact name | **13 / 700** | 17 × 13/17; the weight is this file's measured header-pill name ("13pt bold … 13px/700 reproduces that ink exactly"), the same contact one surface away |
+| Subtitle | **11.4706 / 400** | `detailsGroupHeaderCellSubtitleFont` 15 × 13/17; Regular is the framework's |
+| Section heading, See All, row title | **13 / 400** | `searchDetailsHeaderFont`, verbatim |
+| Row second line | **11.4706 / 400** | as the subtitle |
+| Letter-spacing | **0** everywhere | this file's macOS chrome fits ("Search" 13px/500 ink 41.55, the pill name 13px/700, "Freestyle" 11px/400 ink 47.0) all land native ink with no tracking; the −0.4 measured for macOS is *bubble body text*, which this pane has none of |
+
+### Glyphs — the details view draws SF Symbols at 17 pt
+
+A point-size sweep pins all three `detailsView*Image` selectors to **17 pt Regular**: 17 is the only
+size at which `phone.fill` is {19.5, 17.5}, `video.fill` is {24, 15.5} and `message.fill` is
+{22.5, 18} at once, which are exactly the sizes those three selectors return. That also settles the
+envelope, which has no ChatKit selector: `envelope.fill` at 17 pt is {24.5, 16.5}.
+
+Each image was drawn into a 16x bitmap and traced on the alpha 0.5 isoline. The ink boxes agree with
+the images' own `contentInsets`:
+
+| Image | Image box | Ink box | Ink origin |
+|---|---|---|---|
+| `detailsViewPhoneImage` = `phone.fill` @17 | 19.5 × 17.5 | **15.4988 × 15.4990** | (2.0002, 1.0007) |
+| `detailsViewFaceTimeVideoImage` = `video.fill` @17 | 24 × 15.5 | **20.5000 × 13.5000** | (2.5000, 1.0000) |
+| `detailsViewMessagesImage` = `message.fill` @17 | 22.5 × 18 | **19.4988 × 15.9993** | (1.5005, 1.0005) |
+| `envelope.fill` @17 | 24.5 × 16.5 | **20.5000 × 14.5000** | (2.0000, 1.0000) |
+| `macToolbarDetailsImage` = `info.circle` @`macToolbarImagePointSize` 22 | 26 × 25 | **21.9995 × 21.9995** | (2.0002, 1.5002) |
+| `chevron.forward.circle` / `chevron.down.circle` @17 (`detailsGroupHeaderCellChevronForwardName` / `…DownName`, at `detailsGroupHeaderCellChevronFont` 17) | 20 × 19 | **16.9985 × 16.9985** | (1.5007, 1.0007) |
+
+Draw each with its `viewBox` set to the ink box, so `width`/`height` paint the measured ink. A
+viewBox that is not the ink box scales the drawing: the previous file put a 23-unit box on the info
+glyph and painted every copy of it 22/23 = 4.3% small.
+
+### Colours, from `CKUIThemeMac` resolved through a light and a dark `UITraitCollection`
+
+| Token | Light | Dark | Selector |
+|---|---|---|---|
+| label | rgba(0,0,0,0.8471) | rgba(255,255,255,0.8471) | `primaryLabelColor` |
+| secondary | rgba(0,0,0,0.4980) | rgba(255,255,255,0.5490) | `secondaryLabelColor` = `detailsContactCellSubTitleColor` |
+| tertiary | rgba(0,0,0,0.2588) | rgba(255,255,255,0.2471) | `tertiaryLabelColor` = `detailsContactCellChevronColor` |
+| tint | #0088ff | #0091ff | `appTintColor` = `detailsSeeAllButtonTextColor` = `iosMacDetailsButtonColor` |
+| control fill | rgba(0,0,0,0.098) | rgba(255,255,255,0.098) | `detailsAddButtonBackgroundColor` |
+| destructive | #ff383c | #ff4245 | `background_sendButtonColor` |
+
+`CKUIThemeMac` has **no** `detailsSeparatorColor` and no `separatorColor` (probe: ABSENT), and
+`detailsBackgroundColor` is nil.
+
+### The panel's shape: **there is no divider**
+
+The macOS 26 sidebar is measured in "macOS Chrome" as a *floating panel* — inset 8 from the window's
+left, top and bottom, continuous corner (`border-radius: 22px; corner-shape: superellipse(1.4)`, best
+circle 17.75), 1 pt rim #ffffff / #424242, fill #fafafa / #1b1b1b over a window ground of #f8f8f8 /
+#1c1c1c — and explicitly has "no divider line"; the pane resumes 2 past it (panel 8–328, pane from
+330). `macos-details.tsx` mirrors that shape to the trailing edge, so the pushed conversation's
+trailing inset is `8 + width + 2` = **310** at the default 300. The shape is measured; that the
+inspector uses it is judgement, and it is the only judgement in the panel's chrome. Rendered and read
+back at 2x: panel x 652–952, y 8–632; conversation right edge 650.
+
+### Copy, verbatim from the loctables
+
+`ChatKit.loctable`: "Hide Details" (`HIDE_DETAILS_VIEW`), "Info" (`CONTACT_INFO_SHORT`, also
+`INFO_BUTTON_TITLE`), "Photos" (`PHOTOS_MENU_ITEM_TITLE`), "Links" (`LINKS`), "Documents"
+(`SEARCH_ATTACHMENTS_TITLE`), "Locations" (`SEARCH_LOCATIONS_TITLE`), "Wallet"
+(`SEARCH_WALLET_TITLE`), "See All Photos / Links / Attachments / Locations / Passes" (`SEE_ALL_*_TITLE`),
+"Hide Alerts" (`DETAILS_VIEW_HIDE_ALERTS_TOGGLE_TITLE`), "Send Read Receipts" (`READ_RECEIPTS`),
+"Shared With You" (`SHARED_WITH_YOU_TITLE`), "Create New Contact" (`CREATE_NEW_CONTACT`), "Add to
+Existing Contact" (`ADD_TO_EXISTING_CONTACT`), "Block Contact" (`BLOCK_CONTACT`), "Delete and Block
+Conversation" (`DELETE_AND_BLOCK_CONVERSATION`), "Delete Conversation…"
+(`DELETE_CONVERSATION_ELLIPSIS`), "Leave this Conversation" (`LEAVE_CONVERSATION`), "%lu PERSON" /
+"%lu PEOPLE" (`DETAILS_VIEW_GROUP_COUNT_TEXT`).
+`CommunicationDetails.loctable`: "Call", "FaceTime", "Mail", "Message", "Screen Sharing", "Add",
+"Create New Contact", "Add to Existing Contact", "Block Contact", "Show Contact Card".
+
+### Still unverified for this surface
+
+Everything here is a choice. None of it is quoted as measured anywhere.
+
+- **The whole tab strip.** That there *is* one is established (`DetailsTabBarView`,
+  `SegmentedTabControl`, `TabSegmentView`, `AnyTabItem`, `DetailsPageViewController`, seven
+  `Details*Tab` classes, and ChatKit's own `CKDetailsSegmentedControlCell`). Its pixels are not:
+  those types are Swift, they carry a `styleGuide` struct no ObjC probe can reach, and their
+  `init(frame:)` is `fatalError`, so they cannot even be instantiated and measured. The component
+  draws it 24 tall, radius 7, 10 of horizontal padding, 2 between segments, 13 pt, selected segment on
+  the control fill. Five invented numbers.
+- **Gap under a section heading** (8), **row horizontal padding** (6), **grid columns** (3),
+  **Info-tab preview caps** (2 photo rows, 3 link/document rows), **checkbox corner** (3.5), and the
+  **top-edge blur band** (12).
+- **Hover fill** (6% black / 8% white) and the **overlay scrim** (10% / 28% black).
+- **The panel's drop shadow.** This file records the sidebar's as a *ground ramp* (#f8f8f8 → #f4f4f4),
+  not a CSS shadow, so the inspector's `-10px 0 22px rgba(0,0,0,0.05)` is invented.
+- **The presentation.** A scan of all 28 `*duration*` selectors on `CKUIBehaviorMac` returns nothing
+  inspector- or details-named, and no capture records the pane moving. 300 ms in on
+  `cubic-bezier(0.32, 0.72, 0, 1)`, 250 ms out. Nothing staggers, which is itself a choice: an
+  AppKit/Catalyst inspector column slides as one piece.
+- **Whether the Hide Details button belongs inside the panel.** The component puts an `info.circle`
+  at the panel's top trailing corner; native most likely leaves the toggle in the window's own
+  toolbar. `HIDE_DETAILS_VIEW` is the string either way.
+- **Locations, Wallet/Passes and Backgrounds tabs** are not built at all, though
+  `DetailsLocationsTab` / `DetailsWalletTab` / `DetailsBackgroundsTab`, `SEE_ALL_LOCATIONS_TITLE`,
+  `SEE_ALL_PASSES_TITLE` and `detailsViewMapHeight` 196 all exist. Neither is the Info tab's
+  `FaceTimeSection`, `HandleSelection`, `KeyTransparency` / `EncryptionStatusFooter`
+  (`DETAILS_VIEW_ENCRYPTION_FOOTER_IMESSAGE`) or `DownloadPurgedAttachmentsView`.
+
+### How to get the capture that would settle all of it
+
+Messages is a Catalyst app on this Mac, so one 2x screenshot closes most of this section:
+
+1. size the Messages window to 960×640, the geometry every other macOS number here was measured at;
+2. Conversation ▸ **Show Details** (the menu item's `AXMenuItemCmdChar` is `I` with
+   `AXMenuItemCmdModifiers` 2, i.e. ⌥⌘I);
+3. `screencapture -o -l<windowid>` and drop the PNG in `references/macos/captures/`;
+4. diff it:
+
+```
+PLAYWRIGHT_BROWSERS_PATH=/private/tmp/imessage-playwright-browsers \
+  bun scripts/measure/compare.ts \
+    'http://localhost:3100/lab/macos-details?scene=window&theme=light' \
+    references/macos/captures/<that>.png 2 960 640 /tmp/out
+```
+
+`scene=panel` crops to the panel's own box (its width × 624 at window (952 − w, 8)) so the header, the
+tab strip and the rows can be diffed without the window around them.
+
+### Fidelity
+
+| Lab | Reference | Mismatch |
+|---|---|---|
+| `/lab/macos-details?scene=window` | none exists | — |
+
+No row can be filled in until a capture of this pane is committed. `scripts/measure/hairline-scan.ts`
+on `?scene=window&theme=light` at 2x reports 89 runs, all ≤ 12.5 pt and all of them glyph strokes —
+no seam anywhere near the 624 pt the panel's edge would produce.
+
+## The Tapback Details platter (`registry/imessage/tapback-details.tsx`)
+
+**No capture of this surface exists on either platform.** Every number below comes from ChatKit 26.5,
+read on 2026-09-08 from two copies of the same framework:
+
+- a Mac Catalyst probe — `clang -target arm64-apple-ios26.0-macabi`, `dlopen` of
+  `/System/iOSSupport/System/Library/PrivateFrameworks/ChatKit.framework/ChatKit`, `-[UIDevice
+  userInterfaceIdiom]` swizzled to 0 or 5, then `objc_msgSend` on the getters named below;
+- the on-disk simulator copy at
+  `/Library/Developer/CoreSimulator/Volumes/iOS_23A343/…/iOS 26.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/ChatKit.framework/ChatKit`,
+  whose symbol table is intact, so `nm -a` and `otool -tV -p '-[Class selector]'` disassemble it.
+
+### Which surface this is
+
+ChatKit calls it the **voting view**. Tapping a tapback badge runs
+`-[CKChatController(ClickyOrbConformance) _votingViewForChatItem:containingViewController:]`, which
+allocates a `CKAttributionViewAccessoryView` (a `_UIContextMenuAccessoryView` wrapping the SwiftUI
+`ChatKit.CKTapbackAttributionView`, driven by `ChatKit.TapbackAttributionViewModel` with its
+`_tapbackItems`, `_selectedItem` and `_itemPlatterMaskState`). So this platter and the card in
+`references/ios/captures/longpress-ok-selected-{light,dark}.png` are the **same view family**: that
+capture is its collapsed, single-reactor form, which `message-actions.tsx` already implements as
+`TapbackDetails`. The expanded form — tallies, named cells, a close button — is what
+`registry/imessage/tapback-details.tsx` builds, and nothing captures it.
+
+Re-measured on `longpress-ok-selected-light.png` and `-dark.png` (3x, both give the same numbers):
+the collapsed card's edges are x 416.5–788.5 px and y 197.5–563.5 px, i.e. **124.0 × 122.0 pt**, which
+is `-[CKUIBehavior attributionViewHeight]` 132 less `attributionViewAdditionalTopOffset` 4 and
+`attributionViewMinPadding` 6. (`message-actions.tsx` records 124 × 121, 1 pt shorter; both readings
+sit inside the rim's own anti-aliasing and that file's number is the one in use.) The white/`#484848`
+balloon inside it flood-fills to x 528–677, y 225–398 px = **50.0 × 58.0 pt**, a Ø50 circle with its
+trail pointing down, and its fill is `-[CKUITheme attributionViewBackgroundColor]` = #FFFFFF light /
+#464646 dark.
+
+### There is no Catalyst point scale
+
+`ChatKit.StyleSupport`'s class constants are **idiom-independent**: probing at idiom 0 and idiom 5
+returns the same value for every one of them. Only `CKUIBehavior` differs by idiom, and its idiom
+pairs land on measured captures 1:1, with no 0.77 anywhere:
+
+| `CKUIBehavior` getter | Phone | Mac | Measured counterpart in this file |
+|---|---|---|---|
+| `conversationListContactImageDiameter` | 45 | 40 | iOS row avatar Ø45; macOS sidebar avatar Ø40 |
+| `conversationListSummaryFont` | 15 | 12 | iOS row preview 15pt; macOS row preview 12pt |
+| `balloonTextFont` | 17 | 13 | iOS bubble text 17pt; macOS bubble text 13pt |
+
+Any macOS number obtained by scaling a ChatKit constant is wrong.
+
+### The platter
+
+| Value | Selector | iOS | macOS |
+|---|---|---|---|
+| Height | `-[CKUIBehavior messageAcknowledgementVotingViewHeight]` | 72 | 80 |
+| Max width | `-messageAcknowledgementVotingViewMaxWidth` | 400 | 500 |
+| Min padding from the presenting edge | `-messageAcknowledgementVotingViewMinPadding` | 8 | 6 |
+| Corner radius | `+[ChatKit.StyleSupport votingViewPlatterCornerRadius]` | 34 | 34 |
+| Horizontal padding | `+votingViewHorizontalPadding` | 24 | 24 |
+| Item spacing | `+votingViewItemSpacing` | 24 | 24 |
+| Additional top inset | `+votingViewAdditionalTopInset` | 4 | 4 |
+| End fade width | `+votingViewBlurWidth` | 88 | 88 |
+| Close button left padding | `+votingViewCloseButtonLeftPadding` | 22 | 22 |
+| Cell width | `+votingViewCellWidth` | 64 | 64 |
+| Avatar | `+votingViewAvatarDiameter` | 44 | 44 |
+| Reaction badge frame | `+votingViewAvatarViewGlyphFrameWidth` / `…Height` | 20 | 20 |
+| Avatar to name | `+votingViewAvatarToTextSpacing` | 4 | 4 |
+| Name label height | `+votingViewAvatarViewLabelHeight` | 18 | 18 |
+| Name font | `-[CKUIBehavior avatarNameFont]` | SFNS Regular 12 | 16 |
+| Count font | `-messageAcknowledgmentVoteCountFont` | SFNS Regular 12 | 16 |
+| Tally box | `+votingViewExpandedTallyWidth` / `…Height` | 27 | 27 |
+| Tally to count | `+votingViewTallyLabelSpacing` | 0 | 0 |
+| Names before "Others" | `-messageAcknowledgmentVotingStackSize` | 4 | 4 |
+
+4 + 44 + 4 + 18 = 70 fits the 72 iOS height with 2 to spare and the 80 macOS height with 10. ChatKit
+does not say where that slack goes; the component top-aligns and leaves it at the bottom.
+
+### Colours
+
+`-[CKUITheme messageAcknowledgmentVotingTextColor]` (and `-attributionCountViewFontColor`, which
+matches it) returns rgba(0,0,0,0.498) light / rgba(255,255,255,0.549) dark on **both** `CKUITheme` and
+`CKUIThemeMac`. Those are byte-identical to `+[UIColor secondaryLabelColor]` resolved in the same
+Catalyst process, i.e. the colour *is* secondaryLabel and the probe returns its **macOS** resolution.
+So macOS keeps rgba(0,0,0,0.498) / rgba(255,255,255,0.549) and iOS uses iOS's own secondaryLabel,
+rgba(60,60,67,0.6) / rgba(235,235,245,0.6) — the trap `sticker-picker.tsx` already documents.
+
+Other values read out and **not** used by the component, recorded here so nobody has to probe again:
+`messageAcknowledgmentPickerBackgroundColor` and `attributionViewBackgroundColor` #FFFFFF / #464646,
+`messageAcknowledgmentGrayColor` #808080 / rgba(255,255,255,0.549), `messageAcknowledgmentRedColor`
+#FA5E96 both themes, `messageAcknowledgmentWhiteColor` and `messageAcknowledgmentBalloonBorderColor`
+#FFFFFF both themes.
+
+### How much of a glyph frame the artwork fills
+
+ChatKit draws a classic tapback as an image inset inside its frame — `-[CKTapbackGlyphView
+platterEdgeInsets]` is 4 all round on both idioms — so a 27 frame is not 27 of ink. The ratio comes
+from ChatKit's own balloon-and-inset pair checked against this file's measured ink:
+
+| | Balloon (`messageAcknowledgmentTranscriptBalloonSize`) | Glyph inset (`…TranscriptGlyphInset`) | Glyph frame | Measured heart ink | Ratio |
+|---|---|---|---|---|---|
+| iOS | 36 | 4 | 28 | 18.34 (`tapback-love-light.png`) | 0.6550 |
+| macOS | 29 | 3 | 23 | 14.64 (`tapback-love-*-2x.png`) | 0.6365 |
+
+ChatKit's balloon size and the captured circle agree independently through the knockout rim: macOS
+27.98 + 2 × 0.51 = 29.00 exactly, iOS 34.0 + 2 × 1.0 = 36. So the tally's ink is 27 × the ratio
+(17.69 iOS, 17.19 macOS) and the avatar badge's is 20 × the ratio (13.10 iOS, 12.73 macOS).
+
+### Presentation
+
+`-[CKFullScreenBalloonViewControllerPhone votingViewTargetFrame]` disassembles to
+`CGRect(x: leading system layout margin, y: max(attributionViewMinPadding, preferredTapbackLayoutFrame.origin.y),
+width: preferredTapbackLayoutFrame.width − (leading + trailing margins), height: attributionViewHeight)`.
+So on iPhone the platter is presented **inside the full-screen balloon overlay, anchored near the top
+at the message it belongs to** — not as a bottom sheet — and it shrink-wraps inside that box up to
+its max width. `attributionViewShouldCenterInTranscript` is false on both idioms.
+
+### Still unverified for this surface
+
+- Whether `votingViewItemSpacing` 24 applies between cells as well as between tallies. The component
+  applies it everywhere; ChatKit only says "item spacing". `votingViewCellWidth` 64 already carries
+  10 pt of gutter each side of the Ø44 avatar, which is the argument for the other reading.
+- Where the 20 square badge sits on the avatar **vertically**. Horizontally it is arithmetic —
+  64 = 44 + 20, so its trailing edge is the cell's and half of it laps the avatar — but ChatKit gives
+  the frame's size and nothing about its origin. The component bottom-aligns it with the avatar.
+- The close button's size. ChatKit gives it a left padding of 22 and no size; the component uses the
+  tally's own 27 box.
+- Whether the tallies are vertically centred on the avatars' band (what the component does) or on the
+  whole 66 pt content box.
+- Where the platter's leftover height goes (2 pt on iOS, 10 on macOS).
+- Every duration and curve. The component borrows `message-actions.tsx`'s own entrance for the
+  sibling attribution card (200 ms on `cubic-bezier(0.2, 0.95, 0.3, 1)` from `translateY(-8px)
+  scale(0.9)`) and the measured `messageActionsTiming.exit` of 220 ms to `scale(0.72)`. ChatKit's own
+  `-[CKUIBehavior tapbackDismissalDuration]` = 0.5 s (the picker's) and
+  `+[ChatKit.StyleSupport tapbackStartingScaleX/Y]` = 0.3 (the balloon's pop-in, already
+  `tapbackAppear`'s) are recorded on `tapbackDetailsPlatterMotion` and not used.
+- That a tally filters the cells. `TapbackAttributionViewModel` carries a `_selectedItem`, so one
+  tally being selected is the framework's idea; that selecting it narrows the cells is this kit's.
+- A collapsed state. `votingViewExpandedTally…` and `ACCESSIBILITY_EXPANDED_TAPBACK_FORMAT` both say
+  "expanded", so one exists; no capture shows it and the component does not invent one.
+
+### Lab
+
+`/lab/tapback-details?scene=ios|ios-one|ios-many|macos|platter|platter-macos|platter-many&theme=light|dark&progress=0..1&filter=type:love`.
+The iOS scenes place the platter by ChatKit's own rule, reading the rendered balloon's top rather
+than typing a number in. `hairline-scan.ts` on `?scene=ios-one` at 3x reports **0 runs**; on
+`?scene=platter` it reports one 5 pt run at y 30.33, which is an edge inside the 👍 emoji's own
+artwork and not a shape seam. No mismatch ratio can be quoted for this surface: there is nothing to
+diff it against.
+
+## iOS photo picker (`registry/imessage/photo-picker.tsx`)
+
+Measured 2026-09-08 from `references/ios/captures/photo-picker-light.png` (iOS 26.0, iPhone 17 Pro,
+402x874 at 3x), which is the only capture of this surface in the repo: light, collapsed, nothing
+selected. There is no dark capture, no selected tile, no expanded sheet, no Albums or Search, and
+nothing anywhere showing a selection sitting in the composer.
+
+**Correction to line 164.** That line records the picker's grid as "tiles approx 126 pt, 4 pt gaps,
+radius 12". All three are wrong and the third is wrong by a factor of five. Measured: tiles
+**129.364 x 129.5633**, gaps **1.6207** (4.862 device px, not the 12 device px "4 pt" claims), tile
+radius **2.3** (6.9 device px, not 36). `group-details.tsx` line 66, `group-details.tsx` line 110 and
+`ios-details.tsx` line 54 all cite "radius 12 measured on photo-picker-light.png" and carry the error
+into their own photo strips; they need the same correction. Line 164 is not rewritten here because
+this file is append-only for this session.
+
+### Panel
+
+| Part | Value | How |
+|---|---|---|
+| Inset, left/right/bottom | 5.3333 (16 px) | white run x 16-1189; bottom-most white row 2605 of 2622 |
+| Width / height / top at 402x874 | 391.3333 / 383.6667 / 485 | grid top 1455 px, panel bottom 2606 px |
+| Fill | `#ffffff` | flat over the whole empty area below the grid |
+| Top corner | superellipse n 2.204 R 39.0 (rms 0.84 px); best circle 36.1667 (rms 0.94) | 109 sub-pixel boundary points |
+| Bottom corner | superellipse n 2.204 R 57.5833 (rms 0.90 px); best circle 53.5 (rms 1.27) | 183 points. 57.58 + 5.33 = 62.9, the display radius |
+| Shadow / scrim | none | the blurred backdrop reads a flat 244-246 up to the panel edge |
+| Composer above it | field bottom 463.6667, panel top 485, so a 21.3333 gap | and the composer stays **whole**: `+`, "iMessage" placeholder and mic all drawn, unlike the plus-menu state at line 162 |
+
+### Grid
+
+Three columns flush to the panel on three sides, **1.6207 (4.862 px)** between tiles on both axes
+(three independent seam fits: 4.870, 4.859 across, 4.858 down). Tiles **129.364 x 129.5633** - the
+columns average 388.09 device px and the rows 388.69, a real 0.6 px difference that repeats in both
+rows, so the component keeps the aspect rather than squaring the tile. Tile corner **2.3**: nine
+corners that meet clean white were each fitted as a rounded rect against sub-pixel coverage, with the
+photo colour taken from a plane fitted to the tile's own interior; sRGB blending beats linear (mean
+rms 0.168 against 0.207) and the nine radii come out 6.55-7.97 device px, median 6.87, rms-weighted
+mean 6.94.
+
+### Grabber
+
+**35 x 4.6667**, top **5.0** below the panel, centred, capsule. A five-parameter 2D area fit over
+2640 capture pixels returns 105.000 x 14.000 device px at top 15.000, centred on x 603.000 against a
+panel centre of 603.000, rms 0.028 of coverage; the width and height hold at exactly 105 and 14 for
+every corner radius the fit is given. Rows 1469 and 1484 carry zero ink at every x sampled, so the
+pill is 14 device px tall with no rim to subtract.
+
+This **supersedes the `{36, 5}`** that `photo-picker.tsx` and `sticker-picker.tsx` carried from
+`-[_UIGrabber intrinsicContentSize]`. A Catalyst probe confirms the framework value is real
+(`_UIGrabber` is 36 x 5, `cornerRadius` 2.5, subviews full-bleed) and that
+`-[CKAppGrabberView layoutSubviews]` puts one at **y 5.0** centred in a 391.3333-wide header - so the
+*top* matches the capture exactly and the *size* does not: 36 x 5 rasterises to 108 x 15 against a
+measured 105 x 14, and 105/108 = 0.972 while 14/15 = 0.933, so it is not a scaled `_UIGrabber`
+either. `sticker-picker.tsx` line 118 still cites the old number and should be corrected to
+35 x 4.6667 at radius 2.3333, top 5.0.
+
+### Selection badge (PhotosUICore, not a capture)
+
+No capture shows a selected tile. A Catalyst probe (`clang -target arm64-apple-ios26.0-macabi`,
+dlopen `PhotosUICore`, `-[UIDevice userInterfaceIdiom]` swizzled to Phone) gives the whole badge:
+
+- `+[PXSelectionBadgeUIViewTile preferredSize]` = **26 x 26**.
+- `-[PUPhotosGridCell layoutSubviews]` at a 129.364 x 129.5633 cell puts it at
+  `{99.864, 100.0633, 26, 26}`: **3.5 trailing, 3.5 bottom**. With 22 of ink in a 26 box, the visible
+  disc is **5.5** from the tile's trailing and bottom edges.
+- The badge is a `UIImage` whose `CGImage` is 52 x 52 at scale 2. Read at that native size: the alpha
+  edge is hard and the disc spans exactly 44 of 52 px in both axes, so the ink is **O 22.0**; the
+  white rim integrates to 3.0898 px = **1.5449**, leaving a blue disc of **O 18.9102**; the blue is
+  exactly `rgb(0 136 255)`, the kit's own measured iOS blue.
+- The check is a round-capped, round-joined polyline. A seven-parameter least-squares fit against the
+  white coverage of 928 pixels of that image, supersampled 8 x 8, gives stroke **1.4248** and
+  vertices **(-4.408, 0.941) (-1.334, 4.670) (3.957, -3.645)** from the badge centre, rms 0.0125.
+  The component's SVG diffed against that same badge composited on white, at dpr 2 over the 26 pt
+  box, is **1.26%** (34 px of 2704), all of it on the check's anti-aliased edges.
+
+An **unselected** tile carries no badge at all. That is a measurement, from the capture: nothing is
+selected there and no tile shows an empty ring, unlike the Photos app's select mode.
+
+### Still unverified for this surface
+
+- **The dark palette.** The Catalyst probe cannot stand in for a dark capture: under Catalyst the
+  colour catalog is the macOS one whatever the idiom trait says. `+[UIColor systemBackgroundColor]`
+  resolves dark to `#1e1e1e` where iOS is `#000000`, and `secondarySystemBackgroundColor` resolves
+  light to `#ececec` where iOS is `#f2f2f7`. The panel is `#ffffff` in light, which is both
+  `systemBackground` and `secondarySystemGroupedBackground`, and those two disagree in dark
+  (`#000000` against `#1c1c1e`), so even the right token is undecided. `#1c1c1e` panel, `#2c2c2e`
+  tile and 30% white grabber are guesses.
+- **Both durations and both curves.** 380 ms in and 220 ms out are the long-press menu's measured
+  pair, borrowed the way `ios-plus-menu.tsx` and `sticker-picker.tsx` borrow them; the curves are
+  invented. Nothing records this panel moving. The panel translates and does not fade: the away pose
+  is `height + inset`, which puts the panel's top exactly on the screen's bottom edge (verified in
+  the browser: 874.016 at progress 0 on an 874 screen).
+- **The expanded detent** - its 703.6667 height, the 24 pt drag strip, the halfway snap, and
+  everything the header draws (the "Recents" title, the Albums button, and where the search row
+  sits). The search row's own 44 / 34 / SF Medium 17 and its `tertiarySystemFill` are framework
+  values, re-read here as `rgb(118 118 128 / 0.12)` light and `/ 0.24` dark.
+- **The composer attachment chip** (`PhotoPickerAttachments`). Nothing captures a selection in the
+  composer and ChatKit only offers `-[CKUIBehaviorPhone entryViewAttachmentHorizontalOffset]` = -5
+  and `entryViewAttachmentVerticalOffset` = 0, which place such a thing without sizing it. Its 56
+  box, 12 radius, 6 gap and 20 remove button are invented.
+- **The ordered badge's 13 pt number**, and the 150 ms the badge scales in over.
+
+### Lab
+
+`/lab/photo-picker?scene=screen|panel|badge&theme=light|dark&progress=0..1|live&detent=collapsed|expanded&selected=<ids>&open=0|1&count=<n>`.
+
+`scene=screen` reconstructs the capture at 402x874; `scene=panel` is the panel alone on the
+backdrop's own grey; `scene=badge` is a 26 pt box holding only the selection badge, for the diff
+against PhotosUICore's own image described above. The tiles are the registry's gradient
+placeholders, never Apple's sample photographs, so only the regions both sides draw the same way
+carry a meaningful ratio:
+
+| Region (pt) | What it tests | Mismatch |
+|---|---|---|
+| 0 810 402 64 | the 5.3333 inset, both bottom corners, the panel's bottom edge | **0.00%** |
+| whole frame | nothing: the grid is placeholders against photographs | 23.80%, not comparable |
+
+The grabber cannot be diffed - it sits over a photograph in the capture and over a gradient in the
+lab - so it is verified by re-running its own 2D fit on the render instead: the rendered pill
+measures **105.000 x 14.000 device px at top 15.000, centred on 603.000**, identical to the capture.
+The rendered gap seam measures 4.852 device px against the capture's 4.844 on the same estimator.
+`hairline-scan.ts` on `?scene=panel&progress=1` at 3x reports **0 runs**.
+
+## iOS group conversation details
+
+`registry/imessage/group-details.tsx`, lab `/lab/group-details`. Long form, with the probe source and
+its two renders, in `references/group-details.md` and `references/group-details/`.
+
+**No capture in this repo shows a group.** `references/ios/captures` holds 41 iOS frames and none of
+them is a group conversation: `details-light.png` / `details-dark.png` are the *one-to-one* details
+screen, and `grouped-light.png` is named for message clustering and is a two-person thread. So this
+surface has no mismatch ratio, and every number is one of three things.
+
+**Shared with the measured one-to-one screen** — imported from `ios-details.tsx`, not restated:
+`iosDetailsMotion`, `iosDetailsMorph`, `iosDetailsCollapse`, `IosSwitch`, `subpixel`. Back circle Ø44
+at (16, 62); photo slot Ø80 at (161, 62); name box top 146.15 at 28px/33px bold; action circles Ø54
+with centres on y 222.667 on a 74 pt pitch (three of them measure x 127 / 201 / 275); cells x 16–386,
+radius 26 continuous, 20 apart, first top 269.6667; row inset 16; text row 52; the 1 pt separator as
+the last point of the row *above* a boundary; the fills and colours; σ18 under a 49% / 59% scrim.
+
+**Read out of ChatKit 26 by rendering it and measuring the render.** `references/group-details/probe.m`
+is an iOS app that dlopens the simulator runtime's own ChatKit, lays the real cells out at the
+measured 370 pt cell width, dumps every frame to `chatkit-tree.txt` and is screenshotted at 402 × 874
+pt @3x as `chatkit-cells-{light,dark}.png`:
+
+- **The details header photo is the Snowglobe stack, not the pancake.** A Ø80 `CKAvatarView` given
+  three contacts draws faces at x 9.667–47.667, y 32.333–61.333 and x 22.667–46.333, which is
+  `group-avatar.tsx`'s `snowglobeSlots(3)` scaled to 80 to within a third of a point, over a
+  full-diameter plate measuring #f4f5f5 on white and #1f1f20 on black. `CKDetailsAvatarPancakeView` —
+  Ø37 heads on 13.333 steps in a 41 pt box behind opaque Ø41 cut-outs — is
+  `CKDetailsGroupHeaderCell._avatarView`, a row cell with a collapsed-state configuration; the header
+  photo is `CKGroupPhotoCell._groupView`. `detailsAvatarPancakeViewWidth3Avatars` is 72, not 64.
+- Participant row 64 (`+[CKDetailsContactsStandardTableViewCell preferredHeight]`), avatar Ø37 at 8,
+  name at 8 + 37 + 12 in **17 semibold at the full label colour**, and the cell's own hairline inset
+  to that name column (65 in this screen's 16 pt geometry).
+- Add row 44, button Ø37 at rgba(118,118,128,0.12 / 0.24) — measured #efeff0 on white and #323236 on
+  the cell's #1c1c1e — with a plus of **13.6667 × 13.6667 pt of ink on a 1.4444 stroke**. Its label is
+  **"Add Contact"** (`ADD_CONTACT`), which is what the cell renders.
+- `+[CKDetailsGroupCountCell preferredHeight]` 22, `+[CKDetailsShowMoreContactsCell preferredHeight]`
+  44, `CKDetailsGroupNameCell` = `_phoneButton` + `_facetimeVideoButton` only.
+- The contact cell's own chevron measures 7.00 × 12.00 pt of ink at #c5c5c7. It is **not** used: the
+  only chevron measured off a capture here is the nav bar's 4.67 × 12.67 at 2.6 stroke, #bdbdbd /
+  #5d5d5d, which `ios-details.tsx` already paints on the same kind of row.
+
+**Unmeasured**: every duration; the section order (participants, Hide Alerts, shared content,
+destructive last — `ios-details.tsx`'s own order); the shared-content cells and the 110 photo tile;
+the group-count subtitle's position (opt-in, so the default header is the measured one); centring an
+even number of action circles about x 201; swipe-to-remove a participant, which is not built.
+
+**Two device-pixel facts the lab does prove.** The first cell's fill starts on device row **809**
+(269.6667 × 3), the row `details-light.png` starts it on — the old scroller was an absolutely
+positioned box that Blink snapped to 270.0. And the hairline between the first two participant rows
+occupies device rows **997–999**, the last point above the 333.6667 boundary, which is the captures'
+convention (`details-light.png`: rows 1234–1236 for a boundary at 412.33). `hairline-scan.ts` on
+`/lab/group-details?scene=settled` at 3x reports **0 runs**, and with six cells the entrance's last
+animation ends at 352 ms against `iosDetailsMotion.enter` = 360.
+
+**Correction to the older "Details" line in "iOS extra states" above.** That line records the
+one-to-one screen as "avatar Ø80 centered at (201, 103), name 26pt bold, three round glass buttons
+… Ø52 at x 127/201/274 y 222, grouped cells (radius 24, x 16–386)". Four of those are stale.
+`ios-details.tsx`, which SPEC's own fidelity table records at 0.08% against that same capture, uses
+centre **(201, 102)**, circles **Ø54** at x **127 / 201 / 275** with centres on y **222.667**, and
+radius **26**. The component is right and the prose is not; it is left in place rather than edited
+because that section belongs to another surface's notes.
+
+## The audio recorder (`registry/imessage/audio-recorder.tsx`)
+
+Recording a voice message: the composer's field becomes a row with a live waveform, a running timer
+and a stop button; stopping swaps the stop for a play control, a duration pill that appends to the
+take, and a send pill.
+
+**No capture on either platform shows this surface, and none could be made.** The iOS 26.0 simulator
+is installed and its Messages composer's mic button is visible in `references/ios/captures/conv3-light.png`
+at x≈353, but reaching the recording state needs a tap, and this project forbids sending pointer
+events to the user's Mac. So the whole surface was read out of **ChatKit 26.5** instead, with a Mac
+Catalyst probe whose **full source and full output are committed in `references/audio-recorder.md`**.
+Everything in this section is reproducible by compiling and running that file.
+
+### How the probe reads it
+
+`dlopen` ChatKit; swizzle `-[UIDevice userInterfaceIdiom]` so `+[CKUIBehavior sharedBehaviors]` vends
+the Phone or the Mac behaviour (`+testOverrideClearSharedBehaviors` between the two); stub
+`+[IMService iMessageService]`, which `ChatKit.AudioMessageRecordingView.init(frame:)` force-unwraps
+and which is nil outside Messages; then **build the real view** with
+`-[CKAudioMessageRecordingView initWithFrame:service:]`, feed it known levels through
+`-addToWaveformWithIntensity:`, walk `-setState:` and read every subview's frame, radius, colour,
+font and symbol image back. Its four states are 0 empty, **1 recording, 2 stopped, 3 playing**.
+
+Two traps: build a *fresh* view per state (repeated `-setState:` accumulates segment views, 44 become
+90), and never force the frame height — `-sizeThatFits:` returns **52 on Phone and 49 on Mac**, and
+forcing 52 on Mac turns its 36.75 waveform into 39 and its 62.5 × 27 pill into 66.5 × 29.
+
+### `CKUIBehavior`
+
+| Selector | Phone | Mac |
+|---|---|---|
+| `audioRecordingViewButtonSpacing` | 16 | 16 |
+| `audioRecordingViewDurationSpacing` | 12 | 12 |
+| `audioRecordingViewPadding` | 18 | 18 |
+| `audioRecordingViewTimeBetweenWaveformSegments` | 0.0833333 | 0.0833333 |
+| `audioRecordingViewMinimumDBLevel` / `MaximumDBLevel` | −60 / −10 | −60 / −10 |
+| `waveformPowerLevelWidth` / `audioWaveformGapWidth` | 2 / 2 | 2 / 2 |
+| `audioWaveformHeight` / `audioWaveformViewHeight` | 35 / 39 | 35 / 39 |
+| `minimumWaveformHeight` | 4 | 4 |
+| `minAudioRecordingDuration` / `maxAudioRecordingDuration` | 0.25 / 60 | 0.25 / 60 |
+| `audioMessagePeakAnimationDuration` | 0.5 | 0.5 |
+| `waveformMinPowerLevelsCount` / `MaxPowerLevelsCount` | 25 / 50 | 25 / 50 |
+| `audioBalloonTimeFont` | SF Regular **13** | SF Regular **16** |
+| `entryViewConcentricPadding` | **28** | **11** |
+| `entryViewCoverMinHeight` | **40** | **30** |
+| `entryViewPlusButtonToTextFieldPadding` | **12** | **10** |
+| `entryViewEmojiButtonToTextFieldPadding` | 10 | 10 |
+| `entryViewLeftInsetForRecordedAudioCancelButton` | 8.5 | 8.5 |
+
+The last four corroborate the composer measurements above from a second, independent source: iOS's
+28 of padding, its measured 12 gap from the `+` to the field and its 40-tall field, and macOS's 11
+above the pane bottom, its measured 10 gap and its ~30-tall field, are all ChatKit constants.
+
+`waveformMinPowerLevelsCount` 25 / `MaxPowerLevelsCount` 50 govern the **balloon's** waveform, not
+this view: the recording view draws every bar that fits its box (45 in 181.5, 104 in 415).
+
+### The row, from the built view
+
+`sizeThatFits` → **52 tall on Phone, 49 on Mac**. Every child is vertically centred, and — this
+reproduces all twelve measured child frames exactly — **each child's leading or trailing inset equals
+its own vertical inset**, `(rowHeight − size) / 2`. Every gap is `audioRecordingViewDurationSpacing`
+12, except the waveform's leading inset while recording, which is `audioRecordingViewButtonSpacing`
+16 because there is no play button beside it.
+
+| | leading | waveform | trailing chain | closes on |
+|---|---|---|---|---|
+| Phone recording | 16 | **181.5** | 12 + timer 29.5 + 12 + stop 34 + 9 | 294 |
+| Phone stopped | 9 + play 34 + 12 | **109** | 12 + pill 61 + 12 + send 30 + 15 | 294 |
+| Phone playing | 9 + play 34 + 12 | **140.5** | 12 + timer 29.5 + 12 + send 30 + 15 | 294 |
+| Mac recording | 16 | **415** | 12 + timer 35 + 12 + stop 31 + 9 | 530 |
+| Mac stopped | 9 + play 31 + 12 | **348** | 12 + pill 62.5 + 12 + send 30 + 13.5 | 530 |
+| Mac playing | 9 + play 31 + 12 | **375.5** | 12 + timer 35 + 12 + send 30 + 13.5 | 530 |
+
+- circles Ø **34** Phone / **31** Mac, radius half, inset 9;
+- send `CKGlassSendButton` **30 × 22 radius 11**, inset 15 / 13.5;
+- the duration pill `ChatKit.AudioMessageRecordingAppendButton` is **29.5 × 16 r8** (Mac 35 × 19 r9.5)
+  while recording and while playing, and **61 × 26 r13** (Mac **62.5 × 27 r13.5**) once stopped, where
+  its label sits at (21.5, 5, 29.5, 16) / (20, 4, 35, 19) and the `plus` is drawn into an
+  **11.5 × 10.5** image box at (7, 8) / (5.5, 8.5). The whole pill is one button: it appends;
+- the waveform view is **0.75 of the row** — 39 in the 52, which is `audioWaveformViewHeight`, and
+  36.75 in the 49 — vertically centred, top 6.5 / 6.125.
+
+### The waveform
+
+Bars **2 wide, radius 1, pitch 4**, vertically centred, the strip anchored to the box's **trailing**
+edge, so `count = floor((W − 2) / 4) + 1` and the leftover `W − 2 − (count − 1) × 4` is a hole at the
+**leading** edge (3 in a 109 box: measured, not a defect).
+
+**`height = level² × audioWaveformViewHeight`, floored at 4.** Feeding a ramp and reading the
+segments back gives every value exactly:
+
+| level | 0.1 | 0.2 | 0.3333 | 0.4 | 0.4444 | 0.5 | 0.6 | 0.6667 | 0.75 | 0.8 | 0.9 | 1.0 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| bar | 4 | 4 | 4.3333 | 6.24 | 7.7037 | 9.75 | 14.04 | 17.3333 | 21.9375 | 24.96 | 31.59 | 39 |
+
+It scales to the **view** height 39, not to `audioWaveformHeight` 35; a full-scale bar fills the box
+edge to edge. Everything below level 0.3203 clamps to 4.
+
+While recording, the newest bars ramp in: a bar `k` segments back is scaled by **`min(1, √(k/4))`**,
+and the `k = 0` bar is additionally at opacity 0. Measured at level 0.8 (`level² × 39` = 24.96):
+k = 0 → 4 (the clamp), 1 → 12.48, 2 → 17.6494, 3 → 21.6160, 4 → 24.96, 5 → 24.96, i.e. 0, 0.5,
+0.70711, 0.86603, 1, 1. Slots ahead of the take are drawn at the minimum height and 0.5 opacity.
+
+Once stopped the take is resampled **up** to the bars that fit by **nearest neighbour**, bar `j`
+taking level `floor(j × n / count)`: 5 levels in a 27-bar box measured as runs of 6, 5, 6, 5, 5. The
+played part is **`max(1, floor(fraction × count))`** bars, checked at nine positions from 0 to 1
+(1, 3, 6, 10, 13, 16, 20, 23, 27 of 27).
+
+### Colours, `-resolvedColorWithTraitCollection:` in both styles
+
+| | light | dark |
+|---|---|---|
+| recording bars, timer ink, stop glyph | `#FF383C` | `#FF4245` |
+| stopped / playing bars | `rgba(0, 0, 0, 0.498)` | `rgba(255, 255, 255, 0.549)` |
+| bars not yet played | ×0.5 opacity | ×0.5 opacity |
+| play button fill | `rgba(118, 118, 128, 0.12)` | `rgba(118, 118, 128, **0.24**)` |
+| play glyph, stopped pill ink, cancel glyph | `rgba(0, 0, 0, 0.847)` | `rgba(255, 255, 255, 0.847)` |
+| stop button fill | `rgba(255, 56, 60, 0.19)` | `rgba(255, 56, 60, 0.19)` — the same |
+| stopped pill fill | `rgba(116, 116, 128, 0.08)` | `rgba(116, 116, 128, 0.08)` — the same |
+| pill fill while recording or playing | none | none |
+| send | `#0088ff` with white | `#0088ff` with white |
+
+### Glyphs
+
+Each control's own symbol image, rasterised as a template at 8x:
+
+| control | symbol | image | ink | coverage |
+|---|---|---|---|---|
+| stop | `stop.fill` 17 regular | 18 × 16 | 14 × 14 | 180.3853 |
+| play | `play.fill` 17 regular | 15 × 16 | 12.5 × 14 | 101.8686 |
+| pause | `pause.fill` 17 regular | 14.5 × 16 | 10.5 × 14 | 110.7490 |
+| append | `plus` 17 regular | 18 × 16 | 14 × 14 | 37.4529 |
+| send | `arrow.up` 17 **bold** | 17.5 × 19 | 13.5 × 16 | 68.9608 |
+| cancel | `xmark` **16 medium** | 17 × 16 | 13 × 13 | 55.3471 |
+
+The cancel `xmark` was identified by sweeping every point size from 14 to 20 against all nine
+weights: 16 medium is the only configuration that hits 17 × 16 / 13 × 13 / 55.3471 exactly.
+
+Outlines fitted to both the ink box and the coverage: `stop.fill` a 13.52 square with a 1.69 corner;
+`play.fill` a triangle inset by a 1.93 round join; `pause.fill` two 4.1 bars 2.3 apart with a 1.5
+corner; `plus` a 1.4442 stroke across the 14 box; `arrow.up` a **2.4098** stem with arms at 45°;
+`xmark` 1.68. The arrow's 2.4098 is the same weight `conv3-light.png` gives the composer's send pill
+(2.41 measured there) but not the same drawing — that pill is 38 × 28 and this one 30 × 22.
+
+The `xmark` is the one fit where the two measures disagree: its rows integrate to 4.9588 of ink, i.e.
+1.7532 of stroke at 45°, while its total coverage wants 1.68. 1.68 is drawn.
+
+### The cancel button, `CKGlassCancelAudioRecordingButton`
+
+`-sizeThatFits:` → **41 × 41 radius 20.5** on Phone, **35 × 35 radius 17.5** on Mac; a circle, glass
+(its configuration's background colour is transparent — the material is a `UIGlassEffect`), glyph box
+17 × 16 centred, ink 84.7% label.
+
+### Motion
+
+`AudioMessageRecordingView`'s Swift ivars, read at their offsets: `stateChangeAnimationDuration`
+**0.6**, `stateChangeSpringDamping` **0.86**, `minimumWaveformWidth` **30**.
+
+### Still unverified for this surface
+
+- **Where the row sits in the composer.** `entryViewLeftInsetForRecordedAudioCancelButton` is 8.5 on
+  both idioms, which is neither iOS's measured 28 of composer padding nor macOS's measured 9 to the
+  `+`, so its frame of reference could not be established and the component does not use it. It
+  instead centres the cancel circle on the **measured** centre of the `+` it replaces (iOS x 48;
+  macOS pane x 24) and gives the row the **measured** field box (iOS x 80–374; macOS pane x 49–579),
+  both resting on the composer's measured bottom (iOS y 846, macOS pane y 629) because every other
+  element of both composers is bottom-aligned there. That puts the iOS row at y 794–846 and the macOS
+  row at pane y 580–629, and leaves a gap of 11.5 / 7.5 between the circle and the row. Derived from
+  measurements; not measured.
+- **The row's corner radius.** `-[CKAudioMessageRecordingView cornerRadius]` is 0 until the entry view
+  sets it and the framework stores nothing that says what. Drawn as a capsule, 26 / 24.5.
+- **The row's fill, rim and shadow**, which are copied from the two measured composer files.
+- **The entrance and the exit** (260 / 200 ms on the measured `cubic-bezier(0.32, 0.72, 0, 1)` of the
+  iOS effects screen — a reuse, not a measurement of this).
+- **The spring's frequency.** UIKit derives it from the 0.6 / 0.86 pair above and stores it nowhere,
+  so the `linear()` easing samples the spring whose envelope has decayed to 0.1% at 0.6 s. A fit.
+- **Whether the strip slides between segments.** ChatKit lays every bar on the 4 pt grid, so its model
+  steps 4 pt twelve times a second; whether its display link interpolates cannot be read from a view
+  that never runs. The component slides by `4 × frac(t / segment)`, which is the smallest continuous
+  interpolation of the measured layout and is exactly ChatKit's frame at every whole segment.
+- **The gestures.** Press-and-hold to record, swipe-up to cancel and slide-to-lock have no
+  measurement and no framework constant that describes them; they belong to the composer's mic button
+  rather than to this row. What ChatKit *does* specify, and the component now honours, is
+  `maxAudioRecordingDuration` (60 s auto-stop) and `minAudioRecordingDuration` (a take under 0.25 s
+  reports `onCancel`, not `onStop`).
+- **`audioMessagePeakAnimationDuration` 0.5** belongs to the balloon's peak animation, not to this
+  view; it is recorded above and deliberately unused.
+
+### One number this settles elsewhere
+
+`audioBalloonTimeFont` is named for the **balloon's** time label and reads SF Regular **13 on Phone
+and 16 on Mac**. `message-audio.tsx` currently guesses 13 iOS / **11** macOS for that label and is
+listed as provisional above. If the probe reading applies there, the macOS 11 is 5 pt low. That file
+is not this component's to change; the reading is recorded here so whoever owns it can act on it.
+
+### Lab
+
+`/lab/audio-recorder?platform=ios|macos&state=recording|stopped|playing&theme=light|dark&t=<seconds>`,
+plus `run=1` (drop the seek and let the row run its own clock), `open=0` and `enter=<0..1>` (pose the
+exit), `from=<state>&tprog=<0..1>` (pose the state change), and `guides=1` (outline the measured
+composer field the row has to land on). iOS renders 402 × 874, macOS the 630 × 640 conversation pane,
+both at the composer's measured position, so a future capture drops straight onto it with
+`compare.ts` and the composer band as the crop: iOS `0 780 402 94`, macOS `0 570 630 70`.
+
+No mismatch ratio can be quoted for this surface: there is nothing to diff it against. What *is*
+checked is the rendered geometry against ChatKit's own frames — row, waveform, timer, play, stop,
+send, bar count and leading gap, across three states and both platforms, all within 0.06 px, with the
+bar heights within 0.014 px of `level² × viewHeight × min(1, √(k/4))` and the played count exact.
+
+## Group avatar (`registry/imessage/group-avatar.tsx`)
+
+**This surface now has a capture, and it did not before.** Nothing in `references/ios/captures` or
+`references/macos/captures` shows a group conversation — `grouped-light.png` is message *grouping*
+in a two-person thread, `details-light.png` is a one-to-one details screen — so it was captured on
+purpose. `references/group-avatar/snowglobe-light.png` and `snowglobe-dark.png` are
+`xcrun simctl io booted screenshot` of the iPhone 17 Pro simulator on iOS 26.0 (1206 × 2622 = 402 × 874
+pt at 3x, this repo's own iOS capture geometry) running a throwaway app that `dlopen`s the simulator
+runtime's `ContactsUICore` and `ChatKit` and lays out real `CKAvatarView`s over `CNMutableContact`
+fixtures. Every circle, monogram, gradient and blur in them is Apple's code in a live window.
+`material-swatches-{light,dark}.png` beside them are nine flat colours half-covered by a bare
+`.systemThinMaterial` plate. They are *not* screenshots of Messages — the simulator cannot hold an
+iMessage group — they are the same view Messages instantiates. Layout, the file list and how to
+re-take them: `references/group-avatar.md`.
+
+### The stack
+
+`CKAvatarView` is a `CNAvatarView`; ContactsUICore lays the faces out through
+`+[CNUIAvatarLayoutManager layoutConfigurationsForType:2 withItemCount:n]`
+(`SnowglobeAvatarLayoutConfigurations`; type 3 is the group typing indicator's reordering of the same
+circles). Each entry has `x`, `y`, `size` and `baseSize` 88, and
+`-itemFrameInContainingBounds:isRTL:` is
+`(midX + x·s − d/2, midY + y·s − d/2, d, d)` with `s = bounds/88`, `d = size·s`; `isRTL:YES` negates
+x and nothing else. `+maxAvatarCountForType:` says 10, but 8, 9, 10 and 11 all return the same seven
+configurations, so **seven faces is the cap**. Both tables are transcribed verbatim in the component
+and now covered by unit tests against the framework frames at bounds 88 and against a live
+`CKAvatarView` at Ø60/Ø45/Ø40 (agreement to 3 decimal places).
+
+Three claims the file used to carry were wrong and are corrected:
+
+- **The faces never overlap.** Minimum centre-to-centre clearance, in base-88 units: 1.598 (n=2),
+  2.446 (n=3), 2.040 (n=4–6), 2.071 (n=7) — 1.09 / 1.67 / 1.39 / 1.41 pt at Ø60. The "ring" between
+  the faces is the plate showing through; nothing strokes it.
+- **The largest face is at the back.** A live `CKAvatarView` builds a `ContactsUICore.SnowglobeUIView`
+  holding one `AvatarUIView` per person, added in table order with `zPosition` 0 on every one — so
+  entry 0, the largest, paints first. (`-[CNUIAvatarLayoutItemConfiguration updateLayer:…]` does set
+  `zPosition` to `−index`; a group photo does not run that path.) It never showed, because they do
+  not overlap.
+- **RTL** is expressible as `inset-inline-start`: a face at physical left L in a box of S with
+  diameter d lands at `S − L − d` under mirroring, which is what that property does. Verified in
+  Chrome at dpr 3: the n=3 Ø60 stack reads left 7.156 / 33.750 / 17.031 in LTR and 24.219 / 4.438 /
+  25.250 inside a `dir="rtl"` container, against the framework's 24.205 / 4.432 / 25.227 — the
+  difference is Chrome's 1/64 LayoutUnit quantisation.
+
+### The frosted plate
+
+`SnowglobeUIView` inserts a `UIVisualEffectView` as subview 0 filling the box, behind every face, with
+`UIBlurEffect material=20`. `+[UIBlurEffect effectWithStyle:]` reports material 20 for
+`.systemThinMaterial` (26 ultra-thin, 6 regular, 5 thick, 3 chrome), so that is the material. The
+view's frame is square but it is **masked to a circle**: `scripts/measure/outline.py` on the Ø60
+two-face stack over `#3478f6` in `snowglobe-light.png` returns bbox 60.00 × 60.00 pt, radius ~29.5 pt
+on all four corners. One contact never builds a `SnowglobeUIView`, so **a single face has no plate**.
+
+Colour, mean of 762 clean samples per cell (inside the disc, 3 pt clear of its edge and of every
+face), cross-checked against the bare-material swatches to under 1/255:
+
+| background | light | dark |
+|---|---|---|
+| `#ffffff` | `#f4f4f5` | `#7d7d7d` |
+| `#000000` | `#8d8e8e` | `#1f1f1f` |
+| `#3478f6` | `#a2c7ff` | `#264a8f` |
+| `#e9e9eb` | `#ededee` | `#737373` |
+| `#1c1c1e` | `#9d9d9e` | `#2a2a2a` |
+
+A flat translucent fill fitted to the achromatic ends — `rgba(237,237,237,0.596)` light,
+`rgba(49,49,49,0.632)` dark — is exact on `#ffffff` and `#000000`, misses `#e9e9eb` by 1.2/255 and
+`#1c1c1e` by 4.0/255 (light; 1.7 and 0.9 dark), and misses `#3478f6` by up to 14/255 light and 22/255
+dark in blue, because the material also lifts saturation. It is not a `saturate()` either: solving per
+channel against the blue row gives s = 1.01 (R), 5.04 (G) and ≥1.26 (B), i.e. a per-channel luminance
+curve CSS has no primitive for. The component takes the fit as its default and exposes
+`--im-ga-plate` so a surface that knows its background can pin the measured colour.
+
+An offline `-[CALayer renderInContext:]` of the same tree renders the plate as an unrounded `#f9f9f9`
+square — a `UIVisualEffectView` outside a live window never installs its backdrop filters. That render
+is an artefact; the simulator capture is the reading. `macos-sidebar.tsx`'s note that the plate is
+"not reproduced" and that its appearance is unmeasured can now be closed.
+
+### `avatar.tsx`, confirmed and one bug
+
+Fitting a straight line down the Ø60 single-face circle (116 rows, glyph pixels dropped) returns
+**`#a9c2e1` → `#747fb9`** in light with a max residual of 0.89/255 and **`#575368` → `#302649`** in
+dark with 0.78 — the four endpoints `avatar.tsx` records, now confirmed against a capture it had never
+been diffed on. The Ø6.8 face in the seven-face stack spans the same range in its own box, so the
+gradient is per circle and does not stretch across the stack.
+
+**Bug in `avatar.tsx`:** it declares `--av-top`/`--av-bottom` in the inline `style` and then tries to
+override them with `dark:[--av-bottom:…]`, which an inline declaration always beats — so any `Avatar`
+rendered directly keeps the light gradient in dark mode. It has never shown because
+`ios-nav-bar.tsx`, `ios-conversation-list.tsx` and `ios-details.tsx` each draw their own circle.
+Measured: the dark lab diff was 12.55% before and 1.00% after `group-avatar.tsx` started handing the
+pair in through `style` as `var()` references. That file's own fix is to make the two declarations
+`var(--…, light)` references instead of literals.
+
+### Diameters and the transcript gutter, per behaviour object
+
+| | Phone | Pad | Mac |
+|---|---|---|---|
+| `groupAvatarViewSize` | 60 | 60 | 60 |
+| `conversationListContactImageDiameter` | 45 | 45 | 40 |
+| `conversationListContactImageTrailingSpace` | 12 | 12 | 6 |
+| `transcriptContactImageDiameter` | 32 | 34 | 28 |
+| `contactPhotoBalloonMargin` | 7 | 7 | 7 |
+| `transcriptGroupTypingContactImageDiameter` | 44 | 48 | 42 |
+| leading gutter (`diameter + margin`) | 39 | 41 | **35** |
+| `scrollInNewMessageAnimationDuration` | 0.300 | 0.300 | 0.300 |
+
+`+[CKChatItemLayoutUtilities avatarSupplementaryItemForChatItem:layoutEnvironment:]`, run under each
+idiom in turn, returns an `NSCollectionLayoutSupplementaryItem` of `.absolute(32/34/28)` square at
+`zIndex` 1, `containerAnchor` `edges = 6` (`NSDirectionalRectEdge.leading | .bottom`) and
+`absoluteOffset = (−32/−34/−28, 0)`. **The offset tracks the diameter**, so nothing there is hardcoded
+to the phone, and the previous file's flat 32/39 was a macOS error of 4 pt per avatar.
+`-[CKTranscriptAvatarSupplementaryView initWithFrame:]` builds its `CKAvatarView` at exactly
+`(0, 0, d, d)` whatever frame the view is given. The anchor is why a cluster carries one avatar, on
+its last (tailed) bubble, bottom flush with the balloon.
+
+The iOS **details** header is a different stack: `CKDetailsAvatarPancakeView`, diameter 37, cut-out
+41, overlap 13.5, widths 58 and 72 for two and three — `group-details.tsx` draws it.
+`registry.json`'s description of `group-avatar` still says it covers "the details header"; it does
+not, and that line wants correcting.
+
+`+[CNUIAvatarLayoutManager avatarBadgeRectForAvatarInRect:badgeType:isRTL:]` for a 60 box: type 0
+`(39, 0, 21, 21)`, type 1 `(45, 0, 15, 15)`, type 2 `(45, 4.5, 51, 51)`, type 3 empty. Recorded only;
+nothing draws a badge.
+
+### Lab and diff
+
+`/lab/groupavatar?scene=snowglobe&theme=light|dark` reconstructs the capture at native geometry — same
+screen, same bands, same stack origins, same seven contacts in the same order. Cropping past the
+simulator's status bar and Dynamic Island (`55 55 347 500`):
+
+| | geometry | interior mean signed | interior max abs | interior blobs |
+|---|---|---|---|---|
+| light | 1.10% | −0.05 | 3.33 | none |
+| dark | 1.00% | −0.00 | 2.33 | none |
+
+Every remaining pixel is edge: about 120 circle outlines and the monogram glyph edges, at 3x. The
+fills, the plate colours, the face centres and the face diameters land inside 3.33/255 of Apple's own
+render. `hairline-scan.ts` finds 0 hairline runs.
+
+`?scene=gutter&platform=ios|macos&progress=0..1` draws the transcript gutter and scrubs the hand-off.
+No capture backs that one — it is the supplementary-item anchor drawn out — but the rendered geometry
+is checked: iOS avatar 32 × 32 at the row's leading edge, balloon at 39, gap 7, bottoms flush, typing
+face 44; macOS 28 × 28, balloon at 35, gap 7, bottoms flush, typing 42.
+
+### Still unmeasured on this surface
+
+The **easing** of the sender-avatar hand-off (the duration is a framework constant; the curve is
+`ease-in-out`, UIView's default, and marked as a placeholder). What the stack does when a
+**participant is added or removed** — `CNAvatarView` exposes
+`-performTransitionAnimationWithStartHandler:completion:` and no duration. Which participants occupy
+which **slots** in a real conversation and whether "you" is excluded. Whether the plate reads through
+the iOS **nav bar's** own material, which is not a flat colour.
+
+## iOS photo viewer (`image-viewer-chrome-dark.png`, `image-viewer-fit-dark.png`)
+
+Added 2026-09-08. This surface had no capture and no entry in this document until now; the full
+working note is `references/image-viewer.md`.
+
+Messages has no photo browser of its own: tapping a photo presents QuickLook through
+`ChatKit.CKQLPreviewController`. That class ships in the **iOS simulator runtime**
+(`/System/Library/PrivateFrameworks/ChatKit.framework`), so a throwaway simulator app can `dlopen`
+it, present it over its own `QLPreviewItem`s, and be screenshotted with `xcrun simctl io`. Both
+captures below were taken that way on a private iPhone 17 Pro / iOS 26.0 (23A343) device at
+402×874 @3x, alongside a walk of the live view hierarchy logging every frame in window coordinates —
+so the geometry is read off the runtime and the screenshot only confirms it.
+
+### The chrome is three glass circles, not two bars
+
+| Element | Measurement |
+|---|---|
+| Ground | #000000, opaque, in both themes (`PUBlackOneUpInterfaceTheme -photoBrowserChromeVisibleBackgroundColor` / `-photoBrowserChromeHiddenBackgroundColor`). Every pixel outside the fitted photo in `image-viewer-fit-dark.png` is exactly (0,0,0) |
+| Safe area | `UIWindow.safeAreaInsets` = {62, 0, 34, 0}. **Not** the 54 the status bar's ink occupies (see "Conversation view chrome"): the layout inset is 62, and there is a 34 home-indicator inset the conversation captures never showed |
+| Nav bar | frame 0, 62, 402, 54; its `_UIBarBackground` spans 0, 0, 402, 116 — the bar plus `barsAreaVerticalOutset` 10 |
+| Close button | Ø44 glass disc at (342, 62), `accessibilityLabel` "close". The same slot as the conversation's back button, "a 44pt circle centered (38, 84)", mirrored. There is **no** "Done" text button |
+| Title | none. `CKQLPreviewController` sets `navigationItem.title` to the preview item's title and the iOS 26 bar draws no title view; no text appears anywhere in the chrome |
+| Bottom bar | container 0, 798, 402, 76; button row 28, 798, 346, 48 |
+| Reply button | Ø48 glass disc at (28, 798), `accessibilityLabel` "reply", action `replyTapped:`, image `arrowshape.turn.up.left` (symbol box 21.333 × 17.333, ink 21.67 × 19.67). Disabled when the delegate says so |
+| Share button | Ø48 glass disc at (326, 798), `accessibilityLabel` "Share", action `_actionButtonTapped:` (QuickLook's own), image `square.and.arrow.up` (symbol box 19 × 22, ink 18.67 × 24). Same slot as the list's compose button, "Ø48 centered (350, 822)" |
+| Toolbar order | `[reply, flexible space, share]`. Nothing else, in a build with no chat item |
+| Glass | over a (0,0,0) ground the disc interior reads #131313 = white at 7.45%; the outer edge peaks at 52/255 = a rim of white at ~14% over that fill. Glyph ink #f3f3f3. A disabled glyph peaks at 90/255 = 0.32 of the enabled ink. The blur radius is unmeasurable: the ground behind the discs is flat |
+| Close glyph | X, ink 16.67 × 17.0 centred on its disc; each diagonal is 9.5 device px across a row, so at 45° the stroke is 9.5/3/√2 = 2.24 |
+| Status bar | shown (`PUOneUpSettings -allowStatusBar` = 1), white ink over the black ground, and it hides with the rest of the chrome |
+| Fit | the photo is fitted, never filled (`scaleToFitBehavior` 1, `minimumContentInset` 0). A 1200 × 1600 fixture in 402 × 874 lands at x 0, y 169.00, 402 × 536.00; measured 169.00–704.67 down the column at x 201 and 0–401.67 along the row at y 437 |
+| Chrome auto-hide | real, not theoretical: in the capture runs the chrome was up at 1.4 s and gone by 2.6 s with no input (`chromeAutoHideDelay` 3 s, `persistChromeVisibility` 0) |
+
+### PhotosUI values, read at the phone idiom
+
+`PUOneUpSettings` is idiom-dependent and its `+sharedInstance` latches the idiom at first access, so a
+plain Catalyst process reports **pad**. Every value below was read in a fresh process with
+`-[UIDevice userInterfaceIdiom]` swizzled before the first access.
+
+**`interpageSpacing` is 40 at idiom 0 (phone) and idiom 5 (mac), and 100 only at idiom 1 (pad).** The
+component previously carried 100, so the page pitch was 502 instead of 442 and the parallax, which
+divides that pitch by 12.5, was 40.16 off-centre instead of 35.36.
+
+| Setting | Value |
+|---|---|
+| `barsAreaVerticalOutset` | 10 |
+| `parallaxFactor` / `allowParallax` / `parallaxModel` | 12.5 / 1 / 1 |
+| `doubleTapZoomFactor` / `defaultZoomInFactor` | 2.5 / 6 |
+| `doubleTapZoomAreaExcludesBackground` / `…ExcludesBars` | 1 / 1 — a double tap on the letterbox or in a bar's area does not zoom |
+| `chromeAutoHideBehaviorOnZoom` | 2 (raw value measured; the enum's cases are not) |
+| `userNavigationMaximumDistance` | 2 — used as the page mount window |
+| `bounceDuration` / `bounceDelay` / `bounceSpringDamping` / `bounceInitialVelocity` | 0.5 / 0 / 1 / 100 — this is the snap back from an **overscrolled pan** and nothing else |
+| `finalFadeOutDuration` | 0.2 |
+| `pagingFrictionAdjustment` / `pagingSpringPullAdjustment` | 2 / 0 |
+| `allowStatusBar` / `allowScrubber` / `allowGIFPlayback` / `autoplayVideo` / `allowPlayButtonInBars` | 1 / 1 / 1 / 0 / 0 |
+| `PUTilingViewSettings springAnimationDuration` | 0.3 — the open zoom, the exit, and **every** settle of the photo's transform |
+| `PUTilingViewSettings transitionDuration` / `transitionChromeDelay` | 0.2 / 0 |
+| `PUTilingViewSettings interactiveTransitionBackgroundDimming` | **0.5** — the ground dims to 50% under a drag-to-dismiss; it does not fade away |
+| `CKUIBehaviorPhone tapbackDismissalDuration` | 0.5 |
+
+### Method bodies (lldb against the loaded image)
+
+- `-[CKQLPreviewController updateBarButtonItems]` is one instruction, `ret`. ChatKit builds no bars at
+  all; QuickLook lays them out. `loadView` only sets `navigationBar.barStyle`.
+- `-fullScreenBalloonViewControllerPickerViewUsesBottomTail:` is not a constant: it compares
+  `CGRectGetMinY(tapbackButtonFrame)` against `CGRectGetMaxY(navigationBar.frame)` and returns 1 only
+  when the button is at or below the nav bar's bottom (or the frame is empty).
+- `-fullScreenBalloonViewControllerShouldShowReplyButton:` is `mov w0,#0; ret` — the balloon overlay
+  never shows a reply button. The toolbar's is a different button and does exist.
+- `-tapbackButtonFrameForFullScreenBalloonViewController:` forwards to
+  `-frameForAdditionalButtonWithActionName:`: the tapback control is a QuickLook additional button.
+- `-shouldShowTapbackPickerForFullScreenBalloonViewController:` forwards to the chat controller as
+  `previewController:shouldShowTapbackPickerForChatItem:`. **Reacting from inside the viewer is real**,
+  and it is decided per item.
+
+### Not measured on this surface
+
+- The **tapback and save buttons' slot in the bar and their glyphs**. `-tapbackTapped:`,
+  `-saveTapped:`, `-canCurrentPreviewItemQuickSave` and the axbundle's "Save photo" all exist, but
+  neither button is built without a `ckQLPreviewControllerDelegate` supplying a chat item, which a
+  probe outside Messages cannot do.
+- The chrome **over a bright photo**: iOS 26 glass inverts (plain QuickLook over white shows white
+  discs with dark glyphs) and nothing here models the inversion. The blur radius, likewise.
+- The **swipe and dismissal thresholds** and the scale the photo shrinks to on the way down.
+  `PUOneUpSettings` carries no dismissal threshold.
+- Where an **applied tapback balloon** sits on a full-screen photo, and its attribution.
+- The **whole macOS presentation**: same Catalyst binary and `interpageSpacing` 40 at idiom 5, but no
+  window capture, so the disc sizes and insets are carried over from iOS and the 16 pt top inset is
+  invented.
+- **Video, Live Photos, GIFs, the scrubber** — every setting for them was read; none is implemented.
+- **Edit/markup and a thumbnail tray.** Plain QuickLook's nav bar carries a left index-list platter;
+  ChatKit's build drops that platter entirely and neither capture shows a tray. The component has
+  neither, deliberately.
+
+### Known differences when diffing this surface
+
+`image-viewer-chrome-dark.png` carries two things the component must not draw: the simulator's own
+"◀ Messages" return-to-app breadcrumb (about x 26–180, y 76–104) and SpringBoard's home indicator
+(x 129–272, y 861–866). Diff the chrome bands on their own.
+
+| Lab | Reference | Region (pt) | Mismatch |
+|---|---|---|---|
+| `/lab/photoviewer?scene=fit` | `ios/image-viewer-fit-dark.png` | whole frame | **0.00%** |
+| `/lab/photoviewer?scene=chrome` | `ios/image-viewer-chrome-dark.png` | 0 790 402 60 (footer) | 0.33%, interior signed 0.00 |
+| `/lab/photoviewer?scene=chrome` | `ios/image-viewer-chrome-dark.png` | 330 52 62 64 (close) | 0.40%, interior signed 0.00 |
+| `/lab/photoviewer?scene=chrome` | `ios/image-viewer-chrome-dark.png` | whole frame | 0.13%, and the two blobs are the breadcrumb and the home indicator |
+
+Interior signed error of 0.00 on both bands means the disc fill, the rim and the ink are exact and the
+whole remainder is sub-pixel antialiasing on the glyph outlines.
+
+## iOS 26 sticker picker (`sticker-picker.tsx`)
+
+**Capture: `references/ios/captures/sticker-picker-light.png` (402x874 @3x, iOS 26.0, iPhone 17 Pro,
+light).** This one was not taken out of Messages. The picker's card is drawn out of process by
+`com.apple.StickerKit.StickerPickerService`, so the capture was made by standing the same remote view
+controller up in a throwaway simulator app:
+
+```objc
+UIViewController *vc = [[NSClassFromString(@"_UIStickerPickerViewController") alloc] init];
+[vc setValue:sourceView forKey:@"sourceView"];   // a stand-in for the composer's +
+((void(*)(id,SEL,CGRect))objc_msgSend)(vc, sel_getUid("setSourceRect:"), sourceView.bounds);
+[self addChildViewController:vc]; [self.view addSubview:vc.view];
+((void(*)(id,SEL))objc_msgSend)(vc, sel_getUid("presentCard"));
+```
+
+built with `clang -target arm64-apple-ios26.0-simulator`, installed with `xcrun simctl install`, and
+shot with `xcrun simctl io booted screenshot`. UIKit presents it through
+`_UIFormSheetPresentationController`, and that presentation is what the sheet numbers measure; the
+card's own contents are StickerKit's, the same ones Messages hosts. The backdrop is four flat 402x60
+bands (white, 50% grey, black, red) at y 100/160/220/280, which is how the dimming was solved.
+
+**This replaces what SPEC and the component used to assume.** The sticker picker is not the plus
+menu's own 322.67 x 460.67 glass box, it has no search field and no grabber, and its category strip is
+at the top rather than pinned to the bottom.
+
+### Sheet
+
+| Part | Value | How |
+|---|---|---|
+| Inset (left, right, bottom) | **3.1667** | sub-pixel coverage of the single transition pixel on each edge: 3.163 / 3.195 / 3.194 |
+| Top | **414.1667** | 414.122 on the centre column |
+| Size | **395.6667 x 456.6667** | 402 - 2x3.1667 and 874 - 414.1667 - 3.1667 |
+| Top corners | superellipse n 2.204, R **40.4167** (rms 0.70 device px) | 116 sub-pixel boundary points on the top-left arc; a free-n fit prefers n 2.80 / R 49.0 at rms 0.375 |
+| Bottom corners | superellipse n 2.204, R **60.3333** (rms 1.00) | 158 points. 62.9 (the iPhone 17 Pro display corner) - 3.1667 = 59.73, so the bottom is concentric with the device, exactly as `photo-picker.tsx`'s is |
+| Backdrop dim | **black at 0.20**, exact | the four known bands come back 255→204, 128→102, 0→0, (255,0,0)→(204,0,0), i.e. multiplied by 0.8 |
+| Glass | white at **0.569** over the blurred, dimmed backdrop | the card reads a flat 233 over a backdrop of 204 |
+
+The card is genuinely translucent: with a red band behind it the top of the card reads (230,222,222).
+
+### Header, strip, empty state
+
+| Part | Value |
+|---|---|
+| Header height | **63**; its row is centred on **31.3333** below the sheet's top (the title's ink y 439.0-452.0 and the close button both centre on 445.5) |
+| Title | "Stickers", ink x 170.0-232.0 centred on the screen's 201, 13.0 of ink height — 17pt semibold at tracking -0.2 reproduces it to 0.33 |
+| Close button | Ø **43.3333** centred (361.1667, 445.5), fill `tertiarySystemFillColor`; its X glyph is **16.3333** square. The disc's fill is only 4/255 off the card, so the Ø is a fit from the bottom edge and two chords, ±1 |
+| Strip | **43.3333** tall, directly under the header; first chip's left edge **9.6667** in from the sheet |
+| Chip | **43.3333** square, corner R **14.3333** (superellipse n 2.204, rms 0.68 device px over 40 points), pitch **51.3333** (43.3333 + 8) |
+| Chip / EDIT fill | **`rgba(118,118,128,0.12)`**, exact: over a card of (237,230,230) it predicts (222.8,216.6,217.8) and the capture reads (222,217,218). That is `+[UIColor tertiarySystemFillColor]` |
+| Category glyph | Ø **21.6667**, stroke **2.3333** |
+| Pack artwork | **23** tall (both packs occupy y 487.333-510.333 exactly); 30.67 wide is the aspect those two happen to have |
+| EDIT pill | **45 x 20** at x 223.5-268.5, y 488.83-508.83, i.e. **13.3333** after the last category rather than the strip's 8 |
+| Selected glyph | **`#000000`** (`labelColor`) |
+| Everything else | **`rgba(60,60,67,0.6)`** (`secondaryLabelColor`): the unselected smiley's core reads (130,128,132) against a predicted (129.2,129.2,133.4) |
+| Empty state | headline ink y 628.3333-645.0 and 189.33 wide; body lines y 656.3333-669.6667 (158.67 wide) and 676.0-689.3333 (145.0). The block is **not** centred in the content area — it sits 36.83 above that centre |
+
+There is **no hairline** anywhere on this card: `scripts/measure/hairline-scan.ts` reports 0 runs on
+the reconstruction, and none is visible in the capture.
+
+### ChatKit, read natively on iOS
+
+The same throwaway app `dlopen`s `/System/Library/PrivateFrameworks/ChatKit.framework/ChatKit` inside
+the iOS 26 runtime, where the idiom really is `.phone` and `+[CKUIBehavior sharedBehaviors]` really
+vends `CKUIBehaviorPhone` — no Catalyst swizzle involved, so none of this depends on the swizzle
+holding.
+
+| Value | Selector |
+|---|---|
+| grid inset `{8,8,8,8}`, gaps 4, cell **72.5 x 72.5**, cell corner 8 | `attachmentBrowserGridSectionInset`, `attachmentBrowserGridInterItemSpacing`, `attachmentBrowserGridMinimumLineSpacing`, `attachmentBrowserDefaultSizeForSquare`, `stickersCellCornerRadius` |
+| a landed sticker is **48 x 48** | `stickerReactionSize`, and `emojiStickerTranscriptBalloonSize` agrees |
+| landed rotation **3 to 10 degrees** | `minStickerReactionRotation` / `maxStickerReactionRotation` |
+| stacked landings overlap **0.25** across, **0.35** down, odd rows inset **9.6**, transcript padding 0.75, text balloons +5 | `stickerReaction*` |
+| preview ceilings 300 / 160 / 96, emoji tapback scale 0.8125 | `stickerDropPreviewMaxDimension`, `stickerInlinePreviewMaxDimension`, `emojiStickerInlinePreviewMaxDimension`, `emojiTapbackScaleFactor` |
+| `stickerPopoverSize` 393 x 680, `browserViewControllerSheetDetentStyle` 0 | quoted for the record: neither describes the phone sheet the capture measures |
+
+### The drag, measured off the live class
+
+`-[CKBrowserDragStickerView animateScaleDown]` was called on a real instance and the animation read
+back off its layer: a `CASpringAnimation` on `transform.scale.xy`, **fromValue 1, toValue
+0.7142857142857143**, `duration` 0.91, `speed` **0.8** (so **1137.5 ms** of wall clock), `fillMode`
+forwards, `timingFunction` **(0.14028 0.004662; 0.57534 0.96737)** — the same function
+`+[CKBrowserDragStickerView springAnimationWithKeyPath:speed:]` installs (damping 400, stiffness 300,
+mass 2; overdamped, so `settlingDuration` comes back FLT_MAX and the 0.91 is the whole of it).
+
+So **there is no lift**. The same instance reports `initialSize` {72,72}, `rasterizedImageSize`
+{72,72}, `dragViewScaleUp` **1** and `initialScale` **1**: `dragViewScaleUp` is a rasterisation
+correction, not a lift factor, and the only scale ChatKit applies to a carried sticker is the shrink
+to 5/7. Anything that reads 1/0.714285 as a 1.4x lift has the sign backwards.
+
+`attachElasticEffectsForLocation:` builds five `CKElasticFunction`s (a tension/friction spring,
+`x'' = -T(x - input) - F x'`), read straight off the instance:
+
+| Channel | tension | friction | omega | zeta |
+|---|---|---|---|---|
+| position x, y | 550 | 20 | 23.45 rad/s | 0.426 |
+| rotation | 350 | 15 | 18.71 | 0.401 |
+| scale x, y | 350 | 20 | 18.71 | 0.535 |
+
+All three are underdamped, so a carried sticker lags the finger and overshoots. The class also carries
+`setUpPeelLayers`, `peelMaskLayer`, `meshLayer`, `perspectiveLayer` and `shineLayer`: the real drag
+peels the sticker off the sheet in 3D with a mesh warp and a shine, which this kit does not draw.
+
+### Still unverified for this surface
+
+- **The grid.** Recents was empty in every capture and switching category needs a tap into an
+  out-of-process card, so no frame shows a sticker cell. The component uses ChatKit's *attachment
+  browser* grid (inset 8, gap 4, cell 72.5 → five columns of 72.7333 across the measured width) and
+  says so; it is not a measurement of this card.
+- **Dark.** No dark capture of the card exists; every dark value is the iOS system pair of a measured
+  light one, and the glass is `ios-plus-menu.tsx`'s measured dark glass.
+- **The sheet's entrance and exit.** Nothing records them. 380 / 220 are the long-press menu's
+  measured open and exit, the same borrow `photo-picker.tsx` makes.
+- **The half-second before the shrink.** `animateScaleDown` is measured; the `dispatch_after` that
+  calls it is not, so `drag.scaleDelay` is judgement.
+- Which categories a device shows, and the type of the EDIT pill (11pt semibold at tracking 0.1
+  reproduces the measured ink to 1.3 of width).
+
+### Lab and diff numbers
+
+`/lab/ios-sticker-picker?scene=capture&theme=light` reconstructs the capture, backdrop bands included.
+
+| Region (pt) | What it checks | Mismatch |
+|---|---|---|
+| 0 820 402 54 | the 3.1667 inset and the R 60.3333 bottom corners | **0.19%**, interior signed 0.86 |
+| 0 405 402 30 | the 414.1667 top and the R 40.4167 top corners | **0.16%** geometry, with a tint: the glass cannot reproduce native's blur of the red band |
+| 0 414 402 63 | the header | **0.73%** |
+| 8 477 60 44 | the selected chip and its glyph | **0.70%** |
+| 218 477 60 44 | the EDIT pill | 1.93% |
+| 0 477 402 44 | the whole strip | 6.83% — the two pack tabs are placeholders, not Apple's artwork |
+
+A whole-frame number is dominated by the glass: the sheet blurs the four bands and Chromium renders
+every `backdrop-filter: blur()` radius on such an element alike, the same limit `ios-plus-menu.tsx`
+documents. Read the bands, not the frame.
+
+Note that the "Edit-in-place, and the sticker and Genmoji pickers, are not built" line in **Still
+unverified** above is now wrong about the sticker picker; it is left alone because that section
+belongs to another surface's notes.
+
+## Captures that had no lab (`app/lab/macos-pane`, `app/lab/crop`)
+
+A sweep of every lab/capture pair found captures nothing reconstructs. The four macOS conversation
+pane crops were the largest hole: `/lab/macos-chrome?scene=pane` draws the header and the composer
+over an **empty** pane and `/lab/list?platform=macos` draws the log with **no** header and **no**
+composer, so neither is a reconstruction of a capture, and every macOS bubble number above was being
+checked against half a scene. `/lab/macos-pane` closes that; `/lab/crop` gives the standalone crop
+files a page whose origin is their origin, which is the only way `compare.ts` can diff one.
+
+### The four pane captures are one conversation at three moments
+
+`conversation-pane-{light,dark,dark-2,light-partial}.png` are all crops of window x 330–960 of the
+same self chat, so one fixture serves all four and only the cut differs: `-light-partial` ends at
+"Blue for iMessage." (and starts at window y 150, hence 630 × 490), `-dark` at "Sounds good 👍",
+`-dark-2` runs to the end of the tail-test run, and `-light` is `-dark-2` plus a Love on "Second of
+two". Two things about that chat are read off the captures rather than derived, and both matter:
+
+- **Its gaps are all in-cluster.** Every measured gap in all four is 2.74–3.49 (plus the 4.76 hang
+  after a tailed bubble); the 11.5 between-cluster gap appears only on the two sides of the emoji-only
+  message. So the whole thread is one cluster and the fixture's steps are 2 s. Times that open a
+  cluster break put an 11.5 gap where the capture has 7.74 — worth 7.5 pt of accumulated drift at the
+  top of `-light-partial` and 2.75 points of mismatch on `-dark`.
+- **Its tails do not follow the 60 s rule**, exactly as this file warns for a self chat: "Ok" and
+  "Blue for iMessage." carry one with the next bubble 3 pt below, and "Every detail, down to the last
+  bubble." — a one-line bubble in the same position — carries none (blue runs at pane x 600 in
+  `-light-partial`: 21.0–52.0 with a tail, 126.5–153.0 without). The fixture states them.
+
+| Lab | Reference | Region (pt) | Mismatch | Interior signed |
+|---|---|---|---|---|
+| `/lab/macos-pane?scene=partial` | `macos/conversation-pane-light-partial.png` | whole frame 630×490 | **1.58%** | +0.29 |
+| `/lab/macos-pane?scene=partial` | same | 30 0 600 490 (past the sidebar shadow) | **1.66%** | +0.07 |
+| `/lab/macos-pane?scene=thread&theme=dark&text=Every+detail` | `macos/conversation-pane-dark.png` | whole frame 630×640 | **2.57%** | −0.15 |
+| `/lab/macos-pane?scene=tails&balloon=1` | `macos/conversation-pane-light.png` | whole frame | **3.19%** | +0.39 |
+| `/lab/macos-pane?scene=tails&theme=dark` | `macos/conversation-pane-dark-2.png` | whole frame | **3.51%** | +0.05 |
+| `/lab/macos-pane?scene=tails&theme=dark` | `macos/conversation-pane-dark-2.png` | 0 585 630 55 (composer) | 2.50% | +0.38 |
+| `/lab/macos-pane?scene=thread&theme=dark&text=Every+detail` | `macos/conversation-pane-dark.png` | 0 585 630 55 (composer) | **0.67%** | +0.33 |
+
+Bubble geometry agrees to ≤1 pt on every row of every frame (blue runs at pane x 600, ref vs ours,
+`-dark-2`: 85.0/117.0/149.0/350.5/382.0/433.5/494.5 against 85.0/117.5/149.0/351.0/383.0/434.0/495.0),
+and the interior means say the fills are right. What is left is glyph antialiasing, plus the four
+things below.
+
+### `composer-empty-and-typed-dark.png` needs no lab of its own
+
+It is a two-panel montage and both panels are **bit-exact** crops of frames this lab now
+reconstructs: the empty panel is `conversation-pane-dark-2.png` at device (0, 1170) and the typed
+panel is `conversation-pane-dark.png` at the same offset, i.e. pane y 585–640 of each. The two rows
+above measure it. The empty panel's 2.50% against the typed panel's 0.67% is the caret: native draws
+one, and a Chrome screenshot cannot (already noted in `macos-composer.tsx`). Nothing else in that
+band differs but placeholder antialiasing and the window's bottom-right corner.
+
+`references/ios/captures/tapback-balloon-4x.png` is the same story one platform over: it is a
+**bit-exact** 4× nearest-neighbour enlargement of `ios/tapback-love-light.png` at device (930, 1560)
+= pt (310, 520), 80 × 73.33, which is the box SPEC's tapback row already diffs at 300 520 102 80. It
+is a magnifying glass over a measured region, not an unmeasured capture.
+
+### `/lab/crop`: a page whose origin is a crop's origin
+
+`compare.ts` reads the reference from the same rectangle it clips the page to, so a standalone crop
+can only be diffed against a page that already starts where the crop starts. `/lab/crop` loads
+another lab in an iframe at its natural size and slides it, so the scene is still drawn by whichever
+lab owns it, in the same browser at the same DPR — nothing is redrawn. Verified: the wrapper against
+a direct render of the same scene is **max 1/255, mean 0.012** over 402 × 874 at 3x.
+
+Offsets were found by sliding the capture over a render and taking the minimum mean absolute error;
+each minimum is sharp because both sides carry the same hard glass edges.
+
+| Lab (via `/lab/crop`) | Reference | Offset / size | Mismatch | Interior signed |
+|---|---|---|---|---|
+| `/lab/tapback?scene=longpress-first` | `ios/tapback-bar-crop.png` | x 0, y 126.333, 402 × 160 @3 | **4.94%** | +0.74, blob 4.2% |
+| `/lab/tapback?scene=longpress-first` | `ios/context-menu-crop.png` | x 125, y 286.333, 276 × 200 @3 | **3.72%** | +0.62 (2.6, −1.8, 1.1), blob **19.0%** |
+| `/lab/tapback?scene=macos-menu` | `macos/ctxmenu-with-edit-light-2x.png` | x 6, y 0, 305 × 160 @2 | **10.24%** | +2.14 (3.8, 2.2, 0.4), blob 8.3% |
+
+`context-menu-crop.png` is 830 device px wide = 276.667 pt, and Chromium clips a screenshot to whole
+CSS px, so the diff covers the crop's left 828 of 830 columns. `ctxmenu-with-edit-light-2x.png` can
+only be diffed down to its Edit row, because the kit has no Edit row to draw (below).
+
+### What these labs found
+
+1. **The macOS header's scroll-edge effect blurs too far down.** Over `conversation-pane-dark-2.png`
+   the whole-frame interior mean is +0.05, but the band y 0–96 alone is 5.35% with a 3.9% blob at
+   pane x 457–586, y 20–44.5. Row by row (mean abs over pane x 410–620, then the two readings at
+   x 600): the error is 2–7 down to y 70, then **12.7 at 74, 26.7 at 78, 28.7 at 82, 40.8 at 86**,
+   17.9 at 90 and 10.2 at 94. At y 82 native shows bare pane between two bubbles — (31,33,34) — where
+   we paint (46,68,96): our blur smears one bubble across the 2.9 pt gap to the next and native's
+   does not. At y 86 native is already at full bubble colour (75,131,207) and we are still washed
+   (52,81,121). Then it reverses: by y 98 we are at the settled (83,152,247) while native still reads
+   (82,145,235), and at 102 (83,147,239) against that same (83,152,247), so the error climbs back to
+   22.0 and 30.8 before dying at 106. The alpha ramp `macHeaderMetrics.fadeStart 50 / fadeEnd 96` has
+   the right total but the wrong shape — native decays to nearly nothing by 86 and then carries a
+   faint tail past 104, and its **blur** is gone by 82 while ours holds full strength to 96. This is
+   the largest error in all four frames.
+2. **`MacMessagesApp` never paints the sidebar's shadow on the pane**, which "macOS Chrome" above
+   measures as #f3f3f3 at x 328 fading out by x 350. `/lab/macos-chrome?scene=pane` hand-draws it
+   inside the lab, so the shipping shell has never been checked for it. Over
+   `conversation-pane-light-partial.png` the strip 0 0 30 490 scores **0.00% mismatch and interior
+   mean +4.31 (4.3, 4.3, 4.3), max 13, with 42.0% of it one connected blob — the verdict line reads
+   TINT at a perfect ratio.** It is worth 0.08 points of the whole-frame number (1.66% → 1.58% when
+   the strip is included, because the strip's own pixels never trip pixelmatch) and it is the
+   cleanest example in this repo of a ratio that cannot see a uniform shift. In dark the same strip
+   is +0.33, which is why nobody noticed.
+3. **A reacted bubble starts a new cluster natively, and `buildRows` does not model it.**
+   `-dark-2` and `-light` differ only by the Love on "Second of two", and in `-light` the bubble
+   above it grows a tail. `continues()` in `message-list.tsx` never looks at `reactions`, so the kit
+   keeps them in one cluster. Stating the tail in the fixture took the light frame from 3.33% to
+   3.03% on its own.
+4. **The tapback slot is 3.2 pt short on macOS, because the slot's margin collapses with the row's.**
+   Read off the DOM of `/lab/macos-pane?scene=tails`, with and without `balloon=1`: "First of two"
+   sits at y 83.81–112.55 with "Second of two" at 115.55 (a 3.00 gap), and with the Love it is
+   59.81–88.55 with "Second of two" at 115.89 — a gap of **27.34**, which is `balloonSlot.macos
+   .marginTop` 27.4 alone. The row's own margin (3 in-cluster + the 4.76 tail hang) has vanished into
+   it. Native's gap is **30.58** (this file's own tapback-balloon row: body bottom 34.93 → next body
+   top 65.51, "the list opens 27.40 above the reacted bubble" on top of a 3.18 cluster gap), so the
+   right sum is cluster gap + slot with the tail hang **not** charged, and the kit reaches neither:
+   uncollapsed it would be 35.16, collapsed it is 27.34.
+5. **`/lab/tapback?scene=macos-menu` does not reconstruct the backdrop of the captures it is fitted
+   against.** Both `ctxmenu-light.png` and `ctxmenu-dark.png` have a blue bubble behind the
+   translucent menu (this file already says so, in the corner-fit caveat), and the lab paints a flat
+   #e6e6e6 / #2c2c2e. Inside the menu's top-left the capture reads **(205,230,255)** light and
+   **(23,46,85)** dark where the lab reads (246,247,249) and (31,34,40) — 41 and 45 levels — while
+   away from that corner the two agree to ≤2 levels at every probe (device (500,110): 248,249,251 vs
+   246,247,249; (300,400): 248,249,250 vs 246,247,249). So the glass itself is right and everything
+   ever measured over its top-left quadrant is measured over the wrong scene: the light frame's
+   interior mean is −1.71 overall with a **+4.49, 7.5%** blob covering exactly pt x 8–147.5,
+   y 4–124. The same missing backdrop is the whole of the `ctxmenu-with-edit` residual above (+3.8 R
+   against +0.4 B: the blue that should be showing through).
+6. **The kit has no Edit row.** `macosMessageMenu` in `context-menu.tsx` runs Tapback Details… /
+   Reply… / Attach Sticker… | Forward… / Copy | Delete… | Show Times; `ctxmenu-with-edit-light-2x.png`
+   has an **Edit** item in its own block between Attach Sticker… and Forward…, with a pencil glyph
+   `MenuIcon` does not draw. Until both exist that capture can only be diffed above the Edit row.
+7. **The iOS context menu's glass is green-deficient over a green bubble.** `context-menu-crop.png`
+   diffs at 3.72% with an interior mean of only +0.62 but **19.0% of the interior in one connected
+   blob**, at pt x 137–382, y 292.6–338.3 of the screen — the top of the menu, where native's glass
+   carries a clear green wash from the SMS bubble behind it and ours is neutral. The per-channel
+   split says the same thing: R +2.6, **G −1.8**, B +1.1.
+
+### Captures that still have no lab, and why
+
+- `macos/bubble-tails-4x.png` — a two-panel montage at 8 px/pt whose panels are **not** crops of any
+  committed frame (checked against all four pane captures at ÷4; no match). Its source looks like a
+  dark counterpart of `conversation-pane-light-partial.png` that was never committed, so the panels'
+  positions in pane coordinates are unknown and any pairing would be invented.
+- `macos/tapback-balloon-dark-4x.png` — same 4× nearest-neighbour form. Recovering its 2x source is
+  lossless (every 4 × 4 block is constant) but `compare.ts` has no downsample step, so it needs a
+  ÷4 pass before it can be diffed at all.
+- `macos/tapback-apply-frames-100-123.png` — 24 frames in one strip; a still lab cannot be one frame
+  of it, and the motion it holds is already transcribed under "macOS tapback motion".
+- `macos/ctxmenu-with-edit-light-2x.png` — only above its Edit row, see 6.
+
+## iOS search (`search-active-light.png`, `search-noresults-dark.png`, `motion/search-open.mov`, `motion/search-close.mov`)
+
+Measured 2026-09-08 on the same iPhone 17 Pro / iOS 26.0 simulator as the rest of `references/ios`.
+The state cannot be reached from a script by tapping, so it was opened with **⌘F** in Messages with the
+simulator's hardware keyboard connected — Messages registers that key command on iPhone and it is the
+only pointer-free way in. Full Keyboard Access (`simctl spawn booted defaults write
+com.apple.Accessibility FullKeyboardAccessEnabled -bool true`, then respring) is *not* needed for ⌘F;
+it was only used to clear the first-launch onboarding sheets.
+
+### The field does not move
+
+Diffing `search-active-light.png` against `list-light.png` over the bottom bar gives a difference box
+that starts at **x 224 px** — the caret. Every pixel left of it is identical: the pill at x 28–314,
+y 798–846, its glass fill and its `0 6px 36px spread 4` shadow, the magnifier, the "Search"
+placeholder, the mic, and the 12pt gap to the circle beside it. So on iPhone the search field stays a
+floating capsule at the bottom of the screen. It does not rise, it does not widen, and **there is no
+Cancel button**: the compose circle becomes a close button in place.
+
+| Part | Measurement |
+|---|---|
+| Pill, active | unchanged from the list: x 28–314 (286 wide), y 798–846, radius 24, same glass and shadow |
+| Trailing circle | unchanged Ø 48 glass circle centred (350, 822); its glyph becomes an ✕ whose **ink box is exactly 17.0 × 17.0 centred (349.833, 822.5)**, diagonal stroke ≈2.0 (a horizontal cut is 8.6 px of ink at 3x), in the compose glyph's own ink colour (#1a1919 light / #f4f3f4 dark) |
+| Caret | 2.0 × 22.0 at x 74.667, y 811–833 (centre 822.0), #0088ff light / #0091ff dark, drawn over the placeholder's leading edge. The placeholder does **not** move or fade when the field takes focus |
+| Mic | survives focus. It is replaced only once there is text |
+| Clear button | Ø **17.0** disc centred (284.5, 821.833) — the mic ink's own centre to within 0.17 — filled with the placeholder colour (#8a8a8e / #97979d), with a **knocked-out** ✕ in the pill's composited interior colour (#ffffff / #191919), ink 7.2pt across at ≈1.65 thick |
+| Typed text | starts at the placeholder's own origin (x 46.8 inside the pill) in the label colour, at the placeholder's weight: "Detail" and "Search" both measure 5 device px per stem at 3x |
+| Results area | the conversation list is replaced outright, with **no dim and no scrim** (`-[CKUIBehavior searchControllerObscuresConversationList]` is YES on the Phone behaviour). Every pixel above the bar in `search-active-light.png` is the page background |
+| Before a query | **blank**. There is no suggestions surface in the capture |
+
+### "No Results"
+
+UIKit's search content-unavailable view, not a ChatKit one: only the title is in `ChatKit.loctable`
+(`SEARCH_RESULTS_INDEXING_TITLE`), and "Check the spelling or try a new search." is not in the
+framework at all. From `search-noresults-dark.png`:
+
+| Part | Measurement |
+|---|---|
+| Magnifier | ink 45.3333 × 46.0, x 178.0–223.333, y 375.667–421.667. Ring outer Ø 37.3333 with a 4.0 stroke (centre-line radius 16.6667 about (18.6667, 18.6667) in the ink box); handle a 45° stroke ≈5.45 wide (horizontal cut 7.7) ending at the box's corner |
+| Title | "No Results", cap top 445.333, cap height **16.0** → 22pt (`searchIndexingTitleFont`, whose cap is 15.501, plus a third of a point of antialiasing each side), ink 108.0 wide. 22pt **bold** reproduces that width to 0.00; 22pt semibold is 2.7 narrow |
+| Subtitle | 15pt (`searchIndexingSubtitleFont`), ink y 473.0–486.333, **263.0 wide**, which 15pt regular reproduces to 0.33 |
+| Placement | all three centred on x 201; the block's ink centre is y **431.0** and the results area runs 62 (= 54 status bar + `additionalSearchResultTopPadding` 8) to 798 (the bar's top), whose centre is 430.0. So the block is centred in the results area, which is what pins both edges of that area |
+
+Our render lands the three ink boxes within a third of a point and diffs at **0.04%** over
+y 300–600 (`/lab/search?scene=noresults&theme=dark`).
+
+### Motion (`search-open.mov`, `search-close.mov`)
+
+`simctl io recordVideo` writes a frame only when the screen changes, so every frame carries its own
+timestamp and no frame rate has to be assumed. Both curves were traced by summing the blue-channel
+excess of the two avatars over a fixed column (proportional to the list's alpha, and translation
+invariant) and by following the avatars' ink box (their translation). The bar itself never moves in
+either direction; only the trailing circle's glyph changes.
+
+**Opening takes 267 ms.** The list fades where it stands and slides *up*; the avatars' diameter never
+changes, so there is no scale. On an even 16.7 ms grid:
+
+| t (ms) | 0 | 16.7 | 33.3 | 51.7 | 68.3 | 85 | 100 | 116.7 | 133.3 | 150 | 166.7 | 183 | 200 | 216.7 | 233.3 | 250 | 266.7 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| list alpha | 1.000 | 0.973 | 0.955 | 0.904 | 0.844 | 0.773 | 0.681 | 0.586 | 0.488 | 0.401 | 0.312 | 0.230 | 0.155 | 0.103 | 0.053 | 0.034 | 0.000 |
+| rise (pt) | 0 | 2.00 | 5.17 | 9.33 | 15.33 | 22.67 | 31.33 | 40.67 | 51.33 | 61.33 | 71.00 | — | — | — | — | — | — |
+
+The alpha is a symmetric S, half gone at 131 ms. The rise **accelerates** — 0.19 pt/ms over the first
+50 ms against 0.6 pt/ms over 120–170 — and is still accelerating at 172 ms (73.33 pt), where the list
+is under 30% opacity and can no longer be followed. Those samples fit `dy ∝ t^1.673` at 0.3 pt; the
+tail past 172 ms is that fit, not a measurement.
+
+**Closing takes 292 ms and is not the opening reversed.** The search surface is gone inside one
+recorded frame (under 3.3 ms) and the list appears at **alpha 0.858, 106.67 pt high**, then settles on
+an ease-in-out: fraction of the fall 0, 0.031, 0.119, 0.275, 0.431, 0.619, 0.794, 0.913, 0.988, 1.000
+at t 0, 43, 78, 113, 142, 173, 208, 240, 275, 292 ms, with alpha 0.858 → 1.000 over the same window.
+Reversing the opening's easing would start the exit almost stationary and is wrong twice over.
+
+The trailing circle's glyph is a crossfade with an overshoot: total ink inside the circle falls from
+the compose glyph's level to a minimum at **75 ms**, rises to a peak at **137 ms** that is 25% above
+the ✕'s resting ink, and settles by 267 ms. That is native's SF Symbol replace; the kit models the
+crossfade (out by 28.1%, in by 51.3%) and not the overshoot.
+
+### What the simulator cannot show
+
+**No capture of a search *result* exists and none can be taken.** The simulator's two conversations
+hold no messages and its Spotlight index is empty, so every query returns "No Results" — that is how
+`search-noresults-dark.png` was got. Every number for the Conversations / Messages / Photos / Links /
+Documents sections therefore comes from ChatKit 26.5 and nothing pins the composition.
+
+### ChatKit constants for this screen (read off `[[CKUIBehaviorPhone alloc] init]`)
+
+`additionalSearchResultTopPadding` 8 · `searchHeaderHeight` 44 · `searchHeaderFont` SF Semibold 20
+(line 23.5547, cap 14.0918) · `searchHeaderButtonFont` SF Regular 17 · `searchSectionMarginInsets`
+{0,16,0,16} · `searchLeadingAndTrailingMaxPadding` 16 · `searchSectionHeadersPinToBounds` YES ·
+`searchResultsTitleHeaderBottomPadding` 12 · `searchDefaultMaxResults` 4 ·
+`searchConversationSectionInsets` {20,0,20,0} · `searchConversationMinAvatarLabelSpacing` 10 ·
+`searchCellPreferredWidth` **160** · `searchMessagesAvatarSize` {28,28} · top/bottom spacing 12/18 ·
+`searchMessagesConversationToSenderSpacing` 4 · `…SenderToBalloonSpacing` 8 ·
+`…BalloonToChevronSpacing` 12 · `…HorizontalBalloonMargin` 72 · `…MaxSummaryLength` 200 ·
+`…InterGroupSpacing` 0 · `searchMessagesBalloonFont` SF Regular 17 (line 20.0215) · sender/date SF
+Regular 12 (line 14.1328) · DM/Group conversation SF **Medium** 12 ·
+`searchMessagesFromMeUnannotatedLabelColor` white 0.6 · `searchResultLabelBoldFont` SF Semibold 12 /
+`searchResultLabelFont` SF Regular 12 · `searchIndexingTitleFont` SF Regular 22 /
+`…SubtitleFont` SF Regular 15 · `searchPhotosInterItemSpacing` 10, `…CellCornerRadius` **0** (Mac
+overrides to 8) · `searchLinksInterItemSpacing` 10, `…CellCornerRadius` 10 (Mac 8),
+`searchLinksFractionalWidthScale` 1.2, `…FractionalHeightScale` 0.85 ·
+`searchAttachmentsInterItemSpacing` 10, `…CellCornerRadius` 10, `…TitleTopPadding` 12,
+`…CellDatePadding` 4, `…CellPadding` 0, `…ImageTopPadding` 0 · locations / highlights /
+collaboration inter-item spacing all 10 · `searchControllerObscuresConversationList` YES ·
+`conversationListShowsSearchOnAppear` NO · `shouldShowSearchBarInConversationList` NO ·
+`searchDetailsResultsInsets` {12,16,16,16} · `searchDetailsSectionMarginInsets` {0,16,0,16} ·
+`searchDetailsSeeAllButtonTrailingMargin` 0. `searchNavbarCanvasInsets` and
+`spaceBetweenSearchBarAndComposeButton` are declared on `CKUIBehaviorMac` only.
+
+**The 86.667-vs-84 idiom trap.** `-[CKUIBehavior searchMessageCellHeightForDisplayScale:]` branches on
+the **live `UIDevice` idiom**, not on the behaviour class. Unswizzled — where a Catalyst probe reports
+the phone idiom — it returns 86.666667 at scale 3, 86.5 at 2 and 87 at 1, which is the conversation
+list's own measured row pitch and the value the kit uses. Apply the `.mac` swizzle these notes
+recommend elsewhere and the same selector returns **84.0 at every scale**. Anyone re-deriving the row
+pitch with the swizzle on will get 84 and think the kit is wrong. Both readings verified in one probe
+that prints the idiom it is running under.
+
+Strings, out of `ChatKit.loctable`: SEARCH_CONVERSATIONS_TITLE "Conversations" (there is **no**
+"Top Hits" string anywhere in ChatKit.framework or Messages.app), SEARCH_MESSAGES_TITLE "Messages",
+SEARCH_PHOTOS_TITLE "Photos", SEARCH_LINKS_TITLE "Links", SEARCH_ATTACHMENTS_TITLE "Documents",
+SEARCH_LOCATIONS_TITLE "Locations", SEARCH_PINS_TITLE "Pins", SEARCH_WALLET_TITLE "Wallet",
+SEARCH_COLLABORATION_TITLE "Collaboration", SEARCH_SCREENSHOTS_TITLE "Screenshots", SEARCH_SHOW_MORE
+"See All", SEARCH "Search", SEARCH_RESULTS_INDEXING_TITLE "No Results", SEARCH_RESULTS_TITLE
+"“%@” in %@", CONVERSATION_SEARCH_RESULTS_TITLE "Conversations with “%@”", SEARCH_PHOTOS_ALL_TITLE
+"All". `CKLinkSearchResultCell` holds an `LPLinkView` and an `LPLinkMetadata`, so a link result is a
+LinkPresentation card rather than a thumbnail with captions under it.
+
+Lab: `/lab/search?scene=active|noresults|resting|results|open|close&theme=…&progress=…`. `active`
+diffs at 0.07% full-frame against `search-active-light.png`, `noresults&theme=dark` at 0.09% against
+`search-noresults-dark.png`, and the composited bar at `scene=open&progress=0` diffs at 0.02% against
+`list-light.png` with an interior mean of −0.01, which is what proves the search screen replaces the
+list's bar rather than stacking a second one on it.

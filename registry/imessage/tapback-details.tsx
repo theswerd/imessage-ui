@@ -1,174 +1,254 @@
 "use client";
 
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/registry/imessage/avatar";
 import { usePlatform, type Platform } from "@/registry/imessage/platform";
-import { BalloonTrail, TapbackGlyph, balloonGeometry, macosBalloonRim, tapbackLabels, type BalloonGeometry, type TapbackType } from "@/registry/imessage/tapback";
+import { TapbackGlyph, tapbackLabels, type TapbackType } from "@/registry/imessage/tapback";
 import { fontStack } from "@/registry/imessage/tokens";
 
 /**
- * "Tapback Details…", the surface both context menus open: who reacted, with what, and a way to take
- * your own reaction back.
+ * The **Tapback Details platter**: the horizontal list of who reacted, with one tally per reaction
+ * kind across the front, presented when you tap a tapback badge or pick "Tapback Details…".
  *
- * **NO CAPTURE EXISTS.** Nothing in `references/` records this surface on either platform, so not one
- * number below was read off a frame. They come from ChatKit 26.5 instead, the framework macOS
- * Messages is built on, read out of the live runtime on 2026-09-08 with a Mac Catalyst probe
- * (`clang -target arm64-apple-ios26.0-macabi`, `dlopen` of
- * `/System/iOSSupport/System/Library/PrivateFrameworks/ChatKit.framework/ChatKit`, then `objc_msgSend`
- * on the class and instance getters named below). Every value states its selector.
+ * **NO CAPTURE OF THIS PLATTER EXISTS**, on either platform, so nothing below was read off a frame of
+ * it. It is built from ChatKit 26.5 — the framework macOS Messages is a Catalyst app of — read out of
+ * the live runtime on 2026-09-08 with a Mac Catalyst probe (`clang -target arm64-apple-ios26.0-macabi`,
+ * `dlopen` of `/System/iOSSupport/System/Library/PrivateFrameworks/ChatKit.framework/ChatKit`, swizzle
+ * `-[UIDevice userInterfaceIdiom]`, then `objc_msgSend` on the getters named below), cross-checked
+ * against the on-disk simulator copy of the same framework
+ * (`…/iOS 26.0.simruntime/Contents/Resources/RuntimeRoot/…/ChatKit.framework/ChatKit`, whose symbol
+ * table is intact and disassembles). Every value states its selector.
  *
- * ChatKit calls this the **voting view**: `-[CKUIBehavior messageAcknowledgementVotingViewHeight]`
- * and its neighbours size the platter, and the Swift type `ChatKit.StyleSupport` carries the interior
- * as class constants (`+votingViewCellWidth` and the rest). The strings are ChatKit's own, from
+ * ChatKit calls it the **voting view**: `-[CKUIBehavior messageAcknowledgementVotingViewHeight]` and
+ * its two neighbours size the platter, and the Swift type `ChatKit.StyleSupport` carries the interior
+ * as class constants (`+votingViewCellWidth` and the rest). Its strings are ChatKit's own, from
  * `ChatKit.framework/Resources/ChatKit.loctable` (`en`): `TAPBACK_DETAILS_ELLIPSIS` = "Tapback
- * Details…" is the menu row, `TAPBACK_DETAILS` = "Tapback Details" the title, and
- * `ACCESSIBILITY_TAPBACK_LABEL` = "%@ reacted with %@" plus
- * `ACCESSIBILITY_EXPANDED_TAPBACK_FORMAT` = "%lu %@ reactions from %@" are the accessibility texts
- * this file reproduces.
+ * Details…" is the menu row, `TAPBACK_DETAILS` = "Tapback Details" the title,
+ * `ACCESSIBILITY_TAPBACK_LABEL` = "%@ reacted with %@" the cell,
+ * `ACCESSIBILITY_EXPANDED_TAPBACK_FORMAT` = "%lu %@ reactions from %@" the tally,
+ * `ACCESSIBILITY_TAPBACK_OVERFLOW_STRING` = "Others" the tail of a long name list, and
+ * `REMOVE_TAPBACK_INTENT_TITLE` = "Remove Tapback" the action on your own cell.
  *
- * **The native layout is a horizontal platter, not a table.** `votingViewPlatterCornerRadius` = 34
- * round, `messageAcknowledgementVotingViewHeight` = 72 tall on iOS and 80 on Mac, holding one
+ * **Mac numbers are ChatKit's Mac numbers, 1:1. There is no Catalyst point scale.** An earlier version
+ * of this file multiplied every macOS value by 0.77; that was wrong and the repo's own captures
+ * falsify it three times over. `StyleSupport`'s constants are idiom-independent (one value, both
+ * platforms); only `CKUIBehavior` differs by idiom, and its idiom pairs land on measured captures with
+ * no scaling at all: `conversationListContactImageDiameter` 45 Phone / 40 Mac against SPEC's measured
+ * Ø45 iOS row avatar and Ø40 macOS sidebar avatar; `conversationListSummaryFont` 15 / 12 against
+ * SPEC's 15pt iOS preview and 12pt macOS preview; `balloonTextFont` 17 / 13 against SPEC's 17pt iOS
+ * bubble text and 13pt macOS bubble text.
+ *
+ * **The layout is a horizontal platter, not a table.** `votingViewPlatterCornerRadius` = 34 round (all
+ * but a capsule at `messageAcknowledgementVotingViewHeight` 72 iOS / 80 Mac), holding one
  * `votingViewCellWidth` = 64 wide cell per reactor: a `votingViewAvatarDiameter` = 44 avatar badged
  * with the reaction in a `votingViewAvatarViewGlyphFrame` 20 square, then
- * `votingViewAvatarToTextSpacing` = 4 and a `votingViewAvatarViewLabelHeight` = 18 name. The count
- * leads it as a `votingViewExpandedTally` 27 square per reaction kind with its total beside it
- * (`votingViewTallyLabelSpacing` = 0). This file reproduces that shape rather than a vertical list.
+ * `votingViewAvatarToTextSpacing` = 4 and a `votingViewAvatarViewLabelHeight` = 18 name. One
+ * `votingViewExpandedTally` 27 square per reaction kind leads the row with its count beside it
+ * (`votingViewTallyLabelSpacing` = 0), and a close button trails everything at
+ * `votingViewCloseButtonLeftPadding` = 22. `votingViewAdditionalTopInset` = 4 tops the content, which
+ * with 4 + 44 + 4 + 18 = 70 fits the 72 iOS height with 2 to spare (10 on Mac's 80; ChatKit does not
+ * say where that slack goes, so the content is top-aligned and it falls at the bottom).
  *
- * **Mac numbers go through Catalyst's 0.77.** ChatKit is a UIKit framework and Messages a Catalyst
- * app, so one Mac-idiom point is 0.77 of an AppKit point. Two of ChatKit's own constants pin that
- * factor against measurements already in SPEC.md:
- * `+[ChatKit.StyleSupport transcriptTitleViewAvatarButtonDiameter]` = 52 lands on the macOS header's
- * measured Ø40 avatar (52 × 0.77 = 40.04), and `+transcriptTitleViewHeight` = 87 lands on the 67 that
- * capture's avatar and name pill span together (87 × 0.77 = 66.99). Neither matches iOS, whose nav
- * bar avatar is Ø60. Every macOS number here is therefore its ChatKit value times `catalystScale`,
- * and is unverified against a capture.
+ * **The glyphs are glyphs, not balloons.** ChatKit names a balloon a balloon everywhere else
+ * (`messageAcknowledgmentTranscriptBalloonSize`, `aggregateAcknowledgmentTranscriptBalloonSize`,
+ * `messageAcknowledgmentPickerBarAcknowledgmentItemBalloonSize`); here it names a *glyph frame* and a
+ * *tally*, so the badge and the tally draw the bare artwork with no circle behind it. What fills such
+ * a frame comes from ChatKit's own balloon-to-glyph arithmetic checked against this repo's measured
+ * ink, in `tapbackGlyphInk` below.
  *
- * **What is JUDGEMENT, and is marked so below:** the presentation's durations, the close button's
- * size, using the macOS knockout rim on the iOS badge, and presenting the platter as a bottom sheet
- * on iOS and an anchored popover on macOS (ChatKit has one platter and does not say how either host
- * presents it). The platter's fill, rim and shadow are not judgement: they reuse the glass solved
- * from `references/ios/captures/longpress-*.png` in `tapback.tsx`'s `tapbackVars`, and the balloon
- * artwork is the traced geometry from the same file, scaled.
+ * **Presentation.** `-[CKChatController(ClickyOrbConformance) _votingViewForChatItem:containingViewController:]`
+ * builds a `CKAttributionViewAccessoryView` sized `attributionViewHeight` = 132 by the safe layout
+ * frame's width less the system layout margins, and `-[CKFullScreenBalloonViewControllerPhone
+ * votingViewTargetFrame]` places it at x = the leading margin, y = `max(attributionViewMinPadding = 6,
+ * the tapback's own frame origin y)` — i.e. **an overlay anchored near the top of the transcript at the
+ * message, not a bottom sheet**. The platter itself shrink-wraps inside that box up to
+ * `messageAcknowledgementVotingViewMaxWidth` (400 iOS / 500 Mac) and keeps
+ * `messageAcknowledgementVotingViewMinPadding` (8 iOS / 6 Mac) from the presenting edge.
  *
- * Not to be confused with `message-actions.tsx`'s `TapbackDetails`, which is a different ChatKit
- * surface: `CKTapbackAttributionView`, the card that floats above a long-pressed message you have
- * already reacted to (`-[CKUIBehavior attributionViewHeight]` = 132, `attributionViewMaxWidth` = 400
- * on iOS and 500 on Mac).
+ * **What is JUDGEMENT, and is marked so below:** the close button's size (ChatKit gives it a left
+ * padding and no size), where the 20 square badge sits on the avatar vertically, whether
+ * `votingViewItemSpacing` applies between cells as well as between tallies, the presentation's
+ * durations and curves, and the filter behaviour of the tallies.
+ *
+ * Not to be confused with `message-actions.tsx`'s `TapbackDetails`, which is the *collapsed* form of
+ * the same ChatKit view family and **is** captured: `CKTapbackAttributionView`, the 124 × 121 glass
+ * card with a balloon over the reactor's avatar that floats above a long-pressed message you have
+ * already reacted to (`references/ios/captures/longpress-ok-selected-{light,dark}.png`). That file
+ * owns the name `tapbackDetailsMetrics` and the slot `data-slot="tapback-details"`; everything here is
+ * named `…Platter` and slotted `tapback-details-platter` so the two never collide in one overlay.
  */
 
-/** One Mac-idiom UIKit point is this much of an AppKit point. See the header for the two constants that fix it. */
-export const catalystScale = 0.77;
-
-export type TapbackDetailsMetrics = {
+export type TapbackDetailsPlatterMetrics = {
   /** `-[CKUIBehavior messageAcknowledgementVotingViewHeight]`: 72 iOS, 80 Mac. */
   height: number;
-  /** `+[ChatKit.StyleSupport votingViewPlatterCornerRadius]` = 34. */
+  /** `+[ChatKit.StyleSupport votingViewPlatterCornerRadius]` = 34, both platforms. */
   radius: number;
-  /** `+votingViewHorizontalPadding` = 24. */
+  /** `+votingViewHorizontalPadding` = 24, both platforms. */
   paddingX: number;
-  /** `+votingViewItemSpacing` = 24, between the tallies and between the cells. */
+  /** `+votingViewItemSpacing` = 24, both platforms. */
   itemSpacing: number;
-  /** `+votingViewAdditionalTopInset` = 4. */
+  /** `+votingViewAdditionalTopInset` = 4, both platforms. */
   topInset: number;
   /** `-[CKUIBehavior messageAcknowledgementVotingViewMaxWidth]`: 400 iOS, 500 Mac. */
   maxWidth: number;
   /** `-messageAcknowledgementVotingViewMinPadding`: 8 iOS, 6 Mac, from the presenting edge. */
   minPadding: number;
-  /** `+votingViewCellWidth` = 64. */
+  /** `+votingViewCellWidth` = 64, both platforms. */
   cellWidth: number;
-  /** `+votingViewAvatarDiameter` = 44. */
+  /** `+votingViewAvatarDiameter` = 44, both platforms. */
   avatar: number;
-  /** `+votingViewAvatarViewGlyphFrameWidth` and `…Height`, both 20: the reaction badged on the avatar. */
+  /** `+votingViewAvatarViewGlyphFrameWidth` and `…Height`, both 20, both platforms. */
   glyphFrame: number;
-  /** `+votingViewAvatarToTextSpacing` = 4. */
+  /** `+votingViewAvatarToTextSpacing` = 4, both platforms. */
   avatarToText: number;
-  /** `+votingViewAvatarViewLabelHeight` = 18. */
+  /** `+votingViewAvatarViewLabelHeight` = 18, both platforms. */
   labelHeight: number;
   /** `-[CKUIBehavior avatarNameFont]`: SFNS Regular 12 iOS, 16 Mac. */
   nameFontSize: number;
   /** `-[CKUIBehavior messageAcknowledgmentVoteCountFont]`: SFNS Regular 12 iOS, 16 Mac. */
   countFontSize: number;
-  /** `+votingViewExpandedTallyWidth` and `…Height`, both 27. */
+  /** `+votingViewExpandedTallyWidth` and `…Height`, both 27, both platforms. */
   tally: number;
-  /** `+votingViewTallyLabelSpacing` = 0, between a tally and its count. */
+  /** `+votingViewTallyLabelSpacing` = 0, between a tally's glyph frame and its count. */
   tallyLabelSpacing: number;
-  /** `+votingViewBlurWidth` = 88: how far the platter fades its scrolling content at each end. */
+  /** `+votingViewBlurWidth` = 88: how far the platter fades its scrolling content at an overflowing end. */
   blurWidth: number;
-  /** `+votingViewCloseButtonLeftPadding` = 22. The button's own size is judgement; see `closeSize`. */
+  /** `+votingViewCloseButtonLeftPadding` = 22, both platforms. */
   closeLeftPadding: number;
-  /** JUDGEMENT: ChatKit gives the close button a left padding but no size, so it takes the tally's box. */
+  /** JUDGEMENT: ChatKit gives the close button a left padding and no size, so it takes the tally's box. */
   closeSize: number;
+  /** `-[CKUIBehavior messageAcknowledgmentVotingStackSize]` = 4, both platforms: how many names a tally reads out before "Others". */
+  stackSize: number;
+  /**
+   * The measured share of a ChatKit glyph frame that the artwork's ink actually fills. ChatKit draws a
+   * classic tapback as an image inset inside its frame, so a 27 frame is not 27 of ink.
+   *
+   * iOS: `-[CKUIBehavior messageAcknowledgmentTranscriptBalloonSize]` = 36 with
+   * `messageAcknowledgmentTranscriptGlyphInset` = 4 all round gives a 28 glyph frame, and the heart's
+   * ink in that balloon measures 18.34 on `references/ios/captures/tapback-love-light.png` →
+   * 18.34 / 28 = 0.6550.
+   *
+   * macOS: the same pair is 29 and 3, giving a 23 frame, and the heart's ink measures 14.64 on
+   * `references/macos/captures/tapback-love-{light,dark}-2x.png` → 14.64 / 23 = 0.6365. ChatKit's 29
+   * and the capture agree independently: the measured circle is Ø27.98 and the measured knockout rim
+   * is 0.51 a side, and 27.98 + 2 × 0.51 = 29.00 exactly. (The iOS pair agrees the same way, 34.0 +
+   * 2 × 1.0 = 36.)
+   */
+  glyphInk: number;
 };
 
-const mac = (points: number) => Number((points * catalystScale).toFixed(4));
+const styleSupport = {
+  // +[ChatKit.StyleSupport …], read at idiom 0 and idiom 5 and identical at both.
+  radius: 34, paddingX: 24, itemSpacing: 24, topInset: 4,
+  cellWidth: 64, avatar: 44, glyphFrame: 20, avatarToText: 4, labelHeight: 18,
+  tally: 27, tallyLabelSpacing: 0, blurWidth: 88, closeLeftPadding: 22,
+  /** JUDGEMENT, and unmeasured: the tally's own box is the only other 1:1 square in the platter. */
+  closeSize: 27,
+  /** -[CKUIBehavior messageAcknowledgmentVotingStackSize] = 4 on both idioms. */
+  stackSize: 4,
+} as const;
 
-export const tapbackDetailsMetrics: Record<Platform, TapbackDetailsMetrics> = {
-  ios: {
-    height: 72, radius: 34, paddingX: 24, itemSpacing: 24, topInset: 4, maxWidth: 400, minPadding: 8,
-    cellWidth: 64, avatar: 44, glyphFrame: 20, avatarToText: 4, labelHeight: 18,
-    nameFontSize: 12, countFontSize: 12, tally: 27, tallyLabelSpacing: 0,
-    blurWidth: 88, closeLeftPadding: 22, closeSize: 27,
-  },
-  macos: {
-    height: mac(80), radius: mac(34), paddingX: mac(24), itemSpacing: mac(24), topInset: mac(4), maxWidth: mac(500), minPadding: mac(6),
-    cellWidth: mac(64), avatar: mac(44), glyphFrame: mac(20), avatarToText: mac(4), labelHeight: mac(18),
-    nameFontSize: mac(16), countFontSize: mac(16), tally: mac(27), tallyLabelSpacing: 0,
-    blurWidth: mac(88), closeLeftPadding: mac(22), closeSize: mac(27),
-  },
+export const tapbackDetailsPlatterMetrics: Record<Platform, TapbackDetailsPlatterMetrics> = {
+  ios: { ...styleSupport, height: 72, maxWidth: 400, minPadding: 8, nameFontSize: 12, countFontSize: 12, glyphInk: 0.655 },
+  macos: { ...styleSupport, height: 80, maxWidth: 500, minPadding: 6, nameFontSize: 16, countFontSize: 16, glyphInk: 0.6365 },
 };
+
+/** The ink `TapbackGlyph` should draw to fill a ChatKit glyph frame of `frame` points. */
+export function tapbackGlyphInk(platform: Platform, frame: number): number {
+  return Number((frame * tapbackDetailsPlatterMetrics[platform].glyphInk).toFixed(4));
+}
 
 /**
- * The presentation. `scale` is ChatKit's own (`+[ChatKit.StyleSupport tapbackStartingScaleX]` and
- * `…ScaleY`, both 0.3). Everything else is JUDGEMENT, borrowed from motion this kit has already
- * measured rather than invented: `enter` and `ease` are the sheet duration and curve `ios-details.tsx`
- * uses for its own rise, and `exit`/`exitEase` are the long-press overlay's measured 220 ms dismissal
- * (`messageActionsTiming.exit`). ChatKit does carry `-[CKUIBehavior tapbackDismissalDuration]` = 0.5 s,
- * but it belongs to the picker rather than to this platter, so it is recorded and not used.
+ * The presentation. **All JUDGEMENT**, borrowed from motion this kit has already measured rather than
+ * invented: the platter is presented by the same `CKFullScreenBalloonViewController` overlay as the
+ * long press, so it takes that overlay's own entrance and its measured `messageActionsTiming.exit` of
+ * 220 ms, with the spring `message-actions.tsx` uses for the sibling attribution card.
+ *
+ * ChatKit's own numbers here are recorded and not used: `-[CKUIBehavior tapbackDismissalDuration]`
+ * = 0.5 s belongs to the picker, and `+[ChatKit.StyleSupport tapbackStartingScaleX]` / `…ScaleY`
+ * = 0.3 is the balloon's pop-in scale, which `tapback.tsx`'s `tapbackAppear` already owns.
  */
-export const tapbackDetailsMotion = {
-  enter: 320,
+export const tapbackDetailsPlatterMotion = {
+  enter: 200,
   exit: 220,
-  ease: "cubic-bezier(0.32, 0.72, 0, 1)",
+  /** The spring `message-actions.tsx` runs its whole long-press entrance on. */
+  ease: "cubic-bezier(0.2, 0.95, 0.3, 1)",
+  /** `messageActionsTiming.exit`'s own curve. */
   exitEase: "cubic-bezier(0.4, 0, 1, 1)",
-  scale: 0.3,
+  /** The card's entrance pose in `message-actions.tsx`, which this platter shares. */
+  from: { opacity: 0, transform: "translateY(-8px) scale(0.9)" } as Keyframe,
+  to: { opacity: 1, transform: "translateY(0px) scale(1)" } as Keyframe,
+  /** The dismissal pose `message-actions.tsx` folds every accessory back to. */
+  exitTo: { opacity: 0, transform: "scale(0.72)" } as Keyframe,
   /** ChatKit's `-[CKUIBehavior tapbackDismissalDuration]` in ms. Recorded, not used; see above. */
   frameworkDismissal: 500,
+  /** ChatKit's `+[ChatKit.StyleSupport tapbackStartingScaleX/Y]`. Recorded, not used; see above. */
+  frameworkStartingScale: 0.3,
 } as const;
 
 /**
- * Light values ride the root's inline style so the platter renders correctly with no Tailwind at all;
- * the dark set rides a `dark:` class, the way `avatar.tsx` splits its own gradient.
+ * Theme tokens. They ride a `<style>` element, **not** an inline `style` object: an inline declaration
+ * beats any non-`!important` author rule, custom properties included, so light values spread inline
+ * would make every dark override dead. The dark selector mirrors `app/globals.css`'s own `dark`
+ * variant, `:where(.dark, .dark *)` minus a `[data-preview-theme="light"]` subtree, and both rules sit
+ * in this one stylesheet so source order settles the tie.
  *
- * The platter's fill, rim and shadow are the glass `tapback.tsx` solved from the long-press captures
- * (`--im-glass-solid` #ededef light and #1f1e21 dark, with its rim and shadow). `--im-td-label` is
- * ChatKit's `-[CKUITheme messageAcknowledgmentVotingTextColor]`, which resolves to
- * `secondaryLabelColor`: rgba(0,0,0,0.498) light, rgba(255,255,255,0.549) dark, the same colour
- * `-attributionCountViewFontColor` returns for the count. The dim behind the iOS sheet is the 20%
- * black measured on `references/ios/captures/newmsg-light.png` (`ios-new-message-sheet.tsx`), and the
- * close button's fill is the segmented-control track measured on `effects-picker-light.png`.
+ * The platter's glass is the glass `tapback.tsx` solved from `references/ios/captures/longpress-*.png`
+ * (`--im-glass` over `--im-glass-filter`, with `--im-glass-solid` behind it, plus its rim and shadow),
+ * reached through the same variables `tapback-bar.tsx` and `context-menu.tsx` read, so a host that has
+ * spread `tapbackVars` gets the measured values and a standalone install gets the measured light ones.
+ *
+ * `--im-td-label` is `-[CKUITheme messageAcknowledgmentVotingTextColor]`, which returns
+ * rgba(0,0,0,0.498) / rgba(255,255,255,0.549) — byte-identical to `+[UIColor secondaryLabelColor]`
+ * resolved in the same process, i.e. it *is* secondaryLabel. Under Catalyst that resolves to the macOS
+ * values, so macOS keeps them and iOS uses iOS's own secondaryLabel, rgba(60,60,67,0.6) /
+ * rgba(235,235,245,0.6) (the values `system-message.tsx` already records). `sticker-picker.tsx`
+ * documents this exact Catalyst trap.
+ *
+ * `--im-td-fill` (the close button, the selected tally, the pressed cell) is the iOS system fill
+ * measured as the segmented-control track on `effects-picker-light.png` in `ios-effects-picker.tsx`.
+ * The dim behind the iOS overlay is `--im-dim`, the 21% measured for the long-press overlay.
  */
-const lightVars = {
-  "--im-td-platter": "#ededef",
-  "--im-td-rim": "rgba(255,255,255,0.55)",
-  "--im-td-shadow": "0 6px 24px rgba(0,0,0,0.10)",
-  "--im-td-label": "rgba(0,0,0,0.498)",
-  "--im-td-dim": "rgba(0,0,0,0.2)",
-  "--im-td-fill": "rgba(120,120,128,0.16)",
-  "--im-td-theirs": "#e9e9eb",
-} as const;
+const platterTokens = `
+[data-slot="tapback-details-platter"]{
+  --im-td-platter: var(--im-glass, rgba(229,229,231,0.69));
+  --im-td-platter-filter: var(--im-glass-filter, blur(9px) brightness(1.32) saturate(1.35));
+  --im-td-platter-solid: var(--im-glass-solid, #ededef);
+  --im-td-rim: var(--im-glass-rim, rgba(255,255,255,0.55));
+  --im-td-shadow: var(--im-glass-shadow, 0 6px 24px rgba(0,0,0,0.10));
+  --im-td-label: rgba(60,60,67,0.6);
+  --im-td-fill: rgba(120,120,128,0.16);
+}
+[data-slot="tapback-details-platter"][data-platform="macos"]{ --im-td-label: rgba(0,0,0,0.498); }
+[data-slot="tapback-details-platter"]:where(.dark, .dark *):not(:where([data-preview-theme="light"], [data-preview-theme="light"] *)){
+  --im-td-platter: var(--im-glass, rgba(38,37,39,0.8));
+  --im-td-platter-filter: var(--im-glass-filter, blur(9px) saturate(1.6));
+  --im-td-platter-solid: var(--im-glass-solid, #1f1e21);
+  --im-td-rim: var(--im-glass-rim, rgba(255,255,255,0.10));
+  --im-td-shadow: var(--im-glass-shadow, 0 6px 24px rgba(0,0,0,0.5));
+  --im-td-label: rgba(235,235,245,0.6);
+  --im-td-fill: rgba(120,120,128,0.24);
+}
+[data-slot="tapback-details-platter"][data-platform="macos"]:where(.dark, .dark *):not(:where([data-preview-theme="light"], [data-preview-theme="light"] *)){ --im-td-label: rgba(255,255,255,0.549); }
+[data-slot="tapback-details-scrim"]{ background: var(--im-dim, rgba(22,18,44,0.21)); }
+[data-slot="tapback-details-platter"] [data-slot="tapback-details-fill"]{ opacity: 0; transition: opacity 80ms linear }
+[data-slot="tapback-details-platter"][data-state="open"] [data-slot="tapback-details-item"]:hover [data-slot="tapback-details-fill"]{ opacity: 1 }
+[data-slot="tapback-details-platter"] [data-slot="tapback-details-item"]:focus-visible [data-slot="tapback-details-fill"]{ opacity: 1 }
+[data-slot="tapback-details-platter"] [data-slot="tapback-details-item"]:active [data-slot="tapback-details-fill"]{ opacity: 1 }
+[data-slot="tapback-details-platter"] [data-slot="tapback-details-item"][aria-pressed="true"] [data-slot="tapback-details-fill"]{ opacity: 1 }
+[data-slot="tapback-details-scroller"]::-webkit-scrollbar{ display: none }
+@media (prefers-reduced-motion: reduce){ [data-slot="tapback-details-platter"] [data-slot="tapback-details-fill"]{ transition: none } }
+`;
 
-const darkVars =
-  "dark:[--im-td-platter:#1f1e21] dark:[--im-td-rim:rgba(255,255,255,0.10)] dark:[--im-td-shadow:0_6px_24px_rgba(0,0,0,0.5)] " +
-  "dark:[--im-td-label:rgba(255,255,255,0.549)] dark:[--im-td-dim:rgba(0,0,0,0.5)] dark:[--im-td-fill:rgba(120,120,128,0.24)] " +
-  "dark:[--im-td-theirs:#262629]";
-
-/** Which corner of the popover its entrance grows out of. */
-const transformOrigins: Record<"top-left" | "top-right" | "bottom-left" | "bottom-right", string> = {
+/** Which corner of the platter its entrance grows out of. */
+const transformOrigins: Record<"top-left" | "top-right" | "bottom-left" | "bottom-right" | "top" | "bottom", string> = {
   "top-left": "0% 0%",
   "top-right": "100% 0%",
   "bottom-left": "0% 100%",
   "bottom-right": "100% 100%",
+  top: "50% 0%",
+  bottom: "50% 100%",
 };
 
 export type TapbackReactor = {
@@ -189,13 +269,19 @@ export type TapbackReactor = {
   own?: boolean;
 };
 
-export type TapbackDetailsProps = Omit<ComponentProps<"div">, "children"> & {
+export type TapbackDetailsPlatterProps = Omit<ComponentProps<"div">, "children" | "onSelect"> & {
   reactors: TapbackReactor[];
   platform?: Platform;
-  /** Called when the own cell is activated. ChatKit's own name for this action is "Remove Tapback". */
+  /** Called when your own cell is activated. ChatKit's own name for this action is "Remove Tapback". */
   onRemove?: (reactor: TapbackReactor) => void;
-  /** Dismiss: Escape, the close button, the iOS dim, or a click outside the macOS popover. */
+  /** Dismiss: Escape, the close button, the iOS scrim, or a click outside the macOS platter. */
   onClose?: () => void;
+  /**
+   * Which reaction kind the tallies are filtering to, as `reactionKeyOf` returns it, or null for all.
+   * Leave undefined to let the platter hold the filter itself.
+   */
+  filter?: string | null;
+  onFilterChange?: (key: string | null) => void;
   /** False plays the dismissal; the platter stays mounted until it is over, then calls `onExited`. */
   open?: boolean;
   onExited?: () => void;
@@ -205,10 +291,16 @@ export type TapbackDetailsProps = Omit<ComponentProps<"div">, "children"> & {
    * scrubbing a timeline is not a dismissal, and a checkpoint has to land on the same frame every run.
    */
   progress?: number;
-  /** macOS: the popover's top-left corner in the containing block, and the corner it grows out of. */
+  /**
+   * Where the platter's box sits in the containing block. ChatKit's own placement is x = the leading
+   * layout margin and y = max(minPadding, the tapback's own frame origin y); pass the message's own
+   * top as `top` to reproduce it. Defaults to `minPadding` from the top.
+   */
   left?: number;
   top?: number;
   origin?: keyof typeof transformOrigins;
+  /** iOS: render the dimming scrim and trap focus. macOS anchors without one. */
+  modal?: boolean;
   /** Move focus into the platter when it opens (keyboard users). */
   autoFocus?: boolean;
 };
@@ -233,57 +325,13 @@ function initialsOf(reactor: TapbackReactor) {
   return reactor.name.trim().split(/\s+/).slice(0, 2).map(part => part[0] ?? "").join("").toUpperCase();
 }
 
-function reactionKey(reactor: TapbackReactor) {
+/** The identity a tally groups on, and the value `filter` takes. */
+export function reactionKeyOf(reactor: TapbackReactor) {
   return reactor.emoji ? `emoji:${reactor.emoji}` : `type:${reactor.reaction ?? "love"}`;
 }
 
 function reactionName(reactor: TapbackReactor) {
   return reactor.emoji ?? tapbackLabels[reactor.reaction ?? "love"];
-}
-
-/**
- * The balloon geometry from `tapback.tsx`, measured on `tapback-love-light.png` (iOS, Ø34) and on
- * both `tapback-love-*-2x.png` (macOS, Ø27.98), scaled so the whole balloon fills the ChatKit frame
- * it is given. Scaling the traced artwork keeps the glyph, the neck and both trailing circles in the
- * proportions the captures fix; only the overall size comes from the framework.
- */
-export function scaledBalloonGeometry(platform: Platform, frame: number): BalloonGeometry {
-  const g = balloonGeometry[platform];
-  const k = frame / g.main;
-  return {
-    main: frame,
-    medium: g.medium * k,
-    small: g.small * k,
-    mediumOffset: [g.mediumOffset[0] * k, g.mediumOffset[1] * k],
-    smallOffset: [g.smallOffset[0] * k, g.smallOffset[1] * k],
-    glyph: g.glyph * k,
-    glyphOffsetY: (g.glyphOffsetY ?? 0) * k,
-  };
-}
-
-/**
- * One reaction balloon at an arbitrary size, built from the scaled measured geometry. `Tapback`
- * itself is fixed at the balloon's own measured diameter, so the badge and the tally rebuild the
- * artwork here rather than scaling that component with a transform, which would scale its rim too.
- */
-function Balloon({ geometry, own, side, rim = false, children, style }: { geometry: BalloonGeometry; own: boolean; side: "left" | "right"; rim?: boolean; children?: ReactNode; style?: CSSProperties }) {
-  const fill = own ? "var(--im-tapback-own, #0088ff)" : "var(--im-td-theirs, #e9e9eb)";
-  return (
-    <span
-      aria-hidden="true"
-      data-slot="tapback-details-balloon"
-      data-own={own}
-      style={{
-        position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center", boxSizing: "border-box",
-        width: geometry.main, height: geometry.main, borderRadius: "50%", background: fill,
-        boxShadow: rim ? `0 0 0 ${macosBalloonRim}px var(--im-td-platter, #ededef)` : undefined,
-        ...style,
-      }}
-    >
-      {children}
-      <BalloonTrail geometry={geometry} side={side} color={fill} />
-    </span>
-  );
 }
 
 /**
@@ -296,18 +344,31 @@ function shortNameOf(reactor: TapbackReactor) {
   return reactor.shortName ?? reactor.name.trim().split(/\s+/)[0] ?? reactor.name;
 }
 
-export function TapbackDetails({
-  reactors, platform: platformProp, onRemove, onClose, open = true, onExited, progress,
-  left, top, origin = "top-left", autoFocus = false, className, style, ...props
-}: TapbackDetailsProps) {
+/**
+ * ChatKit's `ACCESSIBILITY_EXPANDED_TAPBACK_FORMAT` reads "%lu %@ reactions from %@". The name list
+ * runs to `messageAcknowledgmentVotingStackSize` = 4 and then takes ChatKit's own
+ * `ACCESSIBILITY_TAPBACK_OVERFLOW_STRING` = "Others".
+ */
+function namesFor(names: string[], stackSize: number) {
+  return names.length <= stackSize ? names.join(", ") : `${names.slice(0, stackSize).join(", ")}, Others`;
+}
+
+type Tally = { key: string; reactor: TapbackReactor; count: number; names: string[] };
+
+export function TapbackDetailsPlatter({
+  reactors, platform: platformProp, onRemove, onClose, filter, onFilterChange,
+  open = true, onExited, progress, left, top, origin, modal: modalProp, autoFocus = false,
+  className, style, ...props
+}: TapbackDetailsPlatterProps) {
   const contextPlatform = usePlatform();
   const platform = platformProp ?? contextPlatform;
-  const m = tapbackDetailsMetrics[platform];
-  const t = tapbackDetailsMotion;
+  const m = tapbackDetailsPlatterMetrics[platform];
+  const t = tapbackDetailsPlatterMotion;
+  const modal = modalProp ?? platform === "ios";
   const id = useId().replace(/:/g, "");
   const reduced = usePrefersReducedMotion();
   const platter = useRef<HTMLDivElement>(null);
-  const dim = useRef<HTMLDivElement>(null);
+  const scrim = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
 
   /**
@@ -327,6 +388,14 @@ export function TapbackDetails({
   const closing = shown && !open;
   const state = closing ? "closing" : reduced || settled || (progress !== undefined && clamp01(progress) === 1) ? "open" : "entering";
 
+  // The filter is the caller's when they pass one, and the platter's own otherwise.
+  const [ownFilter, setOwnFilter] = useState<string | null>(null);
+  const selected = filter === undefined ? ownFilter : filter;
+  const setFilter = useCallback((key: string | null) => {
+    if (filter === undefined) setOwnFilter(key);
+    onFilterChange?.(key);
+  }, [filter, onFilterChange]);
+
   const exited = useRef(onExited);
   const close = useRef(onClose);
   useEffect(() => { exited.current = onExited; close.current = onClose; });
@@ -340,18 +409,15 @@ export function TapbackDetails({
 
   /**
    * Web Animations, not a transition or a rAF loop, so `document.getAnimations()` can reach the
-   * timeline and a `progress` frame is a seek rather than a replay. iOS rises off the bottom edge the
-   * way a sheet does; macOS pops out of the corner it is anchored by, from ChatKit's own 0.3.
+   * timeline and a `progress` frame is a seek rather than a replay. Both platforms use the same pose:
+   * ChatKit presents one platter and the host controller places it.
    */
   useEffect(() => {
     const element = platter.current;
     if (!element || !shown || reduced) return;
-    const poses: Keyframe[] = platform === "ios"
-      ? [{ opacity: 0, transform: `translateY(${m.height + m.minPadding}px)` }, { opacity: 1, transform: "translateY(0px)" }]
-      : [{ opacity: 0, transform: `scale(${t.scale})` }, { opacity: 1, transform: "scale(1)" }];
     const animation = open
-      ? element.animate(poses, { duration: t.enter, easing: t.ease, fill: "both" })
-      : element.animate([poses[1], poses[0]], { duration: t.exit, easing: t.exitEase, fill: "both" });
+      ? element.animate([t.from, t.to], { duration: t.enter, easing: t.ease, fill: "both" })
+      : element.animate([t.to, t.exitTo], { duration: t.exit, easing: t.exitEase, fill: "both" });
     if (progress !== undefined) {
       // Seeked, not played: a scrubbed checkpoint has to land on the same frame every run.
       animation.pause();
@@ -365,11 +431,11 @@ export function TapbackDetails({
       // Reopened mid-dismissal: drop the fold so it cannot hold a stale pose under the entrance.
       if (animation.playState !== "finished") animation.cancel();
     };
-  }, [shown, open, progress, reduced, platform, m.height, m.minPadding, t.enter, t.exit, t.ease, t.exitEase, t.scale]);
+  }, [shown, open, progress, reduced, t.enter, t.exit, t.ease, t.exitEase, t.from, t.to, t.exitTo]);
 
-  // The dim rides the same timeline, so a scrubbed frame is consistent with the platter's.
+  // The scrim rides the same timeline, so a scrubbed frame is consistent with the platter's.
   useEffect(() => {
-    const element = dim.current;
+    const element = scrim.current;
     if (!element || !shown || reduced) return;
     const animation = open
       ? element.animate([{ opacity: 0 }, { opacity: 1 }], { duration: t.enter, easing: "ease-out", fill: "both" })
@@ -381,7 +447,7 @@ export function TapbackDetails({
     return () => { try { animation.cancel(); } catch { /* already gone */ } };
   }, [shown, open, progress, reduced, t.enter, t.exit]);
 
-  // Escape from wherever focus is, and on macOS a click anywhere outside the popover.
+  // Escape from wherever focus is, and outside a non-modal (macOS) platter, a click anywhere else.
   useEffect(() => {
     if (!open) return;
     const onKey = (event: globalThis.KeyboardEvent) => {
@@ -391,7 +457,7 @@ export function TapbackDetails({
     };
     const onPointerDown = (event: globalThis.PointerEvent) => {
       const target = event.target as Node | null;
-      if (platform !== "macos" || !close.current || !target || platter.current?.contains(target)) return;
+      if (modal || !close.current || !target || platter.current?.contains(target)) return;
       // The control that opened it owns the toggle; closing here would let its own click reopen it.
       if (target instanceof Element && target.closest('[aria-haspopup="dialog"]')) return;
       close.current();
@@ -402,18 +468,39 @@ export function TapbackDetails({
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("pointerdown", onPointerDown, true);
     };
-  }, [open, platform]);
+  }, [open, modal]);
+
+  /**
+   * A modal platter keeps Tab inside it. There is no `inert` to hand out here (the platter does not
+   * own its siblings), so the trap is the cycle itself, which is what makes `aria-modal` honest.
+   */
+  useEffect(() => {
+    if (!open || !modal) return;
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const box = platter.current;
+      if (!box) return;
+      const stops = Array.from(box.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex]:not([tabindex="-1"])'));
+      if (stops.length === 0) return;
+      const first = stops[0], last = stops[stops.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (event.shiftKey && (active === first || !box.contains(active))) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && (active === last || !box.contains(active))) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [open, modal]);
 
   useEffect(() => {
     // A scrubbed entrance must not move the caret: the harness seeks frames, it does not open dialogs.
     if (!open || !autoFocus || progress !== undefined) return;
-    platter.current?.querySelector<HTMLElement>("button, [tabindex]:not([tabindex='-1'])")?.focus({ preventScroll: true });
+    platter.current?.querySelector<HTMLElement>('[data-slot="tapback-details-item"], button')?.focus({ preventScroll: true });
   }, [open, autoFocus, progress]);
 
   /**
-   * ChatKit fades the platter's content over `votingViewBlurWidth` at each end, which only means
-   * anything once there is more than fits. Keyboard users get the scroller itself as a focus stop
-   * when that happens, which is the accessible pattern for a scrollable region.
+   * ChatKit fades the platter's content over `votingViewBlurWidth` at an end that has content beyond
+   * it, which is a scroll position, not a layout constant: a ramp at an end you are already at hides
+   * content for nothing. Both ends are tracked, and the mask carries only the ones that are live.
    */
   const [edges, setEdges] = useState({ start: false, end: false });
   const measure = useCallback(() => {
@@ -426,169 +513,210 @@ export function TapbackDetails({
   useLayoutEffect(() => {
     measure();
     const node = scroller.current;
-    if (!node || typeof ResizeObserver === "undefined") return;
+    if (!node) return;
+    node.addEventListener("scroll", measure, { passive: true });
+    if (typeof ResizeObserver === "undefined") return () => node.removeEventListener("scroll", measure);
     const observer = new ResizeObserver(measure);
     observer.observe(node);
-    return () => observer.disconnect();
-  }, [measure, reactors.length]);
-  const overflowing = edges.start || edges.end;
+    return () => { node.removeEventListener("scroll", measure); observer.disconnect(); };
+  }, [measure, reactors.length, selected]);
+
+  /**
+   * One roving tab stop across the whole row, arrows between items, and every move scrolls its item
+   * back into view: a focused cell that has scrolled off the platter is a focus you cannot see.
+   */
+  const [focusIndex, setFocusIndex] = useState(0);
+  const onRowKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const keys = ["ArrowRight", "ArrowLeft", "Home", "End"];
+    if (!keys.includes(event.key)) return;
+    const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[data-slot="tapback-details-item"]'));
+    if (items.length === 0) return;
+    const at = Math.max(0, items.findIndex(item => item === document.activeElement));
+    const next = event.key === "Home" ? 0
+      : event.key === "End" ? items.length - 1
+      : event.key === "ArrowRight" ? Math.min(items.length - 1, at + 1)
+      : Math.max(0, at - 1);
+    event.preventDefault();
+    setFocusIndex(next);
+    items[next]?.focus({ preventScroll: true });
+    items[next]?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, []);
 
   if (!shown || reactors.length === 0) return null;
 
-  // Tallies keep first-appearance order, and one counts as yours if any reaction in it is yours.
-  const tallies: Array<{ key: string; reactor: TapbackReactor; count: number; own: boolean; names: string[] }> = [];
+  // Tallies keep first-appearance order, and a filter narrows the cells without changing the tallies.
+  const tallies: Tally[] = [];
   for (const reactor of reactors) {
-    const key = reactionKey(reactor);
+    const key = reactionKeyOf(reactor);
     const found = tallies.find(entry => entry.key === key);
-    if (found) { found.count += 1; found.own = found.own || Boolean(reactor.own); found.names.push(reactor.name); }
-    else tallies.push({ key, reactor, count: 1, own: Boolean(reactor.own), names: [reactor.name] });
+    if (found) { found.count += 1; found.names.push(reactor.name); }
+    else tallies.push({ key, reactor, count: 1, names: [reactor.name] });
   }
+  const shownReactors = selected ? reactors.filter(reactor => reactionKeyOf(reactor) === selected) : reactors;
 
-  const badge = scaledBalloonGeometry(platform, m.glyphFrame);
-  const fade = `linear-gradient(to right, transparent 0, #000 ${m.blurWidth}px, #000 calc(100% - ${m.blurWidth}px), transparent 100%)`;
+  // One tab stop for the row; every other item is reachable with the arrows. A tally is at its own
+  // index and a cell at `tallies.length` plus its own, so the row is one flat sequence.
+  const stopAt = Math.min(focusIndex, tallies.length + shownReactors.length - 1);
+  const tabIndexFor = (index: number) => (index === stopAt ? 0 : -1);
+
+  const badgeInk = tapbackGlyphInk(platform, m.glyphFrame);
+  const tallyInk = tapbackGlyphInk(platform, m.tally);
+  const ramp = [
+    `transparent 0`,
+    `#000 ${edges.start ? m.blurWidth : 0}px`,
+    `#000 calc(100% - ${edges.end ? m.blurWidth : 0}px)`,
+    `transparent 100%`,
+  ].join(", ");
+  const fade = edges.start || edges.end ? `linear-gradient(to right, ${ramp})` : undefined;
+
+  const itemBase: CSSProperties = {
+    position: "relative", border: 0, background: "transparent", padding: 0, margin: 0,
+    cursor: "default", font: "inherit", color: "inherit", outlineOffset: -2,
+    display: "inline-flex", alignItems: "flex-start", flex: "0 0 auto",
+  };
 
   /**
-   * Hover, focus and pressed feedback on the one cell that does something. Driven from CSS so a
-   * pointer crossing the platter never touches React state, and gated on `data-state` so nothing
-   * lights up while the platter is still growing under a stationary cursor. The scroller hides its
-   * bar: native fades its content instead, and a bar would eat the cells' bottom edge.
+   * The tally: ChatKit's `votingViewExpandedTally` 27 square with its count beside it at
+   * `votingViewTallyLabelSpacing` 0. JUDGEMENT: it is the filter control. ChatKit's own
+   * `TapbackAttributionViewModel` carries a `_selectedItem`, so one tally being selected is the
+   * framework's own idea; that selecting it narrows the cells is this file's.
    */
-  const platterCss = `[data-slot="tapback-details"] [data-slot="tapback-details-cell-fill"]{opacity:0;transition:opacity 80ms linear}
-[data-slot="tapback-details"][data-state="open"] [data-slot="tapback-details-remove"]:hover [data-slot="tapback-details-cell-fill"]{opacity:1}
-[data-slot="tapback-details"] [data-slot="tapback-details-remove"]:focus-visible [data-slot="tapback-details-cell-fill"]{opacity:1}
-[data-slot="tapback-details"] [data-slot="tapback-details-remove"]:active [data-slot="tapback-details-cell-fill"]{opacity:1}
-[data-slot="tapback-details-scroller"]::-webkit-scrollbar{display:none}
-@media (prefers-reduced-motion: reduce){[data-slot="tapback-details"] [data-slot="tapback-details-cell-fill"]{transition:none}}`;
-
-  const cellBody = (reactor: TapbackReactor) => (
-    <>
-      <span
-        aria-hidden="true"
-        data-slot="tapback-details-cell-fill"
-        style={{ position: "absolute", left: 0, right: 0, top: -m.topInset / 2, bottom: -m.topInset / 2, borderRadius: m.avatar / 2, background: "var(--im-td-fill, rgba(120,120,128,0.16))" }}
-      />
-      <span style={{ position: "relative", display: "block", width: m.avatar, height: m.avatar, marginInline: "auto" }}>
-        <Avatar size={m.avatar} initials={initialsOf(reactor)} src={reactor.avatar} role="presentation" aria-hidden="true" style={{ position: "absolute", inset: 0 }} />
-        {/* The badge sits on the avatar's trailing-bottom with its trail pointing away, the way a
-            balloon points away from its bubble. Its 0.5 knockout rim is measured on macOS
-            (`macosBalloonRim`); using it on iOS too, where a balloon over a bubble has none, is
-            JUDGEMENT: an avatar is not a bubble and the badge needs the separation. */}
-        <Balloon geometry={badge} own={Boolean(reactor.own)} side="right" rim style={{ position: "absolute", right: -m.glyphFrame * 0.1, bottom: -m.glyphFrame * 0.1 }}>
-          <TapbackGlyph
-            type={reactor.emoji ? undefined : reactor.reaction ?? "love"}
-            emoji={reactor.emoji}
-            size={badge.glyph}
-            onAccent={Boolean(reactor.own)}
-            style={{ marginTop: reactor.emoji ? 0 : 2 * (badge.glyphOffsetY ?? 0) }}
-          />
-        </Balloon>
-      </span>
-      <span
-        data-slot="tapback-details-name"
-        style={{
-          position: "relative", display: "block", marginTop: m.avatarToText, width: m.cellWidth, height: m.labelHeight,
-          lineHeight: `${m.labelHeight}px`, fontSize: m.nameFontSize, fontWeight: 400, letterSpacing: 0,
-          color: "var(--im-td-label, rgba(0,0,0,0.498))", textAlign: "center",
-          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-        }}
-      >
-        {shortNameOf(reactor)}
-      </span>
-    </>
-  );
-
-  const cells = reactors.map((reactor, index) => {
-    // ChatKit's own accessibility string is "%@ reacted with %@"; the action that takes one back is
-    // "Remove Tapback".
-    const reacted = `${reactor.name} reacted with ${reactionName(reactor)}`;
-    const box: CSSProperties = { position: "relative", display: "block", width: m.cellWidth, textAlign: "center" };
+  const tallyItems = tallies.map((entry, index) => {
+    const on = selected === entry.key;
     return (
-      <li key={reactor.id} data-slot="tapback-details-cell" data-own={reactor.own || undefined}
-        style={{ listStyle: "none", margin: 0, padding: 0, marginLeft: index === 0 ? 0 : m.itemSpacing, flex: "0 0 auto" }}>
-        {reactor.own && onRemove ? (
-          <button type="button" data-slot="tapback-details-remove" aria-label={`${reacted}. Remove Tapback`} onClick={() => onRemove(reactor)}
-            // The ring is inset: the scroller has to clip on the cross axis, so an outset one is cut.
-            style={{ ...box, border: 0, background: "transparent", padding: 0, margin: 0, cursor: "default", font: "inherit", color: "inherit", outlineOffset: -2 }}>
-            {cellBody(reactor)}
-          </button>
-        ) : (
-          <span data-slot="tapback-details-person" role="img" aria-label={reacted} style={box}>
-            {cellBody(reactor)}
-          </span>
-        )}
-      </li>
+      <button
+        key={entry.key} type="button" data-slot="tapback-details-item" data-kind="tally" data-reaction={entry.key}
+        aria-pressed={on} tabIndex={tabIndexFor(index)}
+        aria-label={`${entry.count} ${reactionName(entry.reactor)} ${entry.count === 1 ? "reaction" : "reactions"} from ${namesFor(entry.names, m.stackSize)}`}
+        onClick={() => setFilter(on ? null : entry.key)}
+        onFocus={event => { setFocusIndex(index); event.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest" }); }}
+        style={{ ...itemBase, alignItems: "center", height: m.tally, marginLeft: tallies[0] === entry ? 0 : m.itemSpacing }}
+      >
+        <span aria-hidden="true" data-slot="tapback-details-fill"
+          style={{ position: "absolute", left: -m.tallyLabelSpacing - 6, right: -6, top: -3, bottom: -3, borderRadius: (m.tally + 6) / 2, background: "var(--im-td-fill, rgba(120,120,128,0.16))" }} />
+        <span aria-hidden="true" style={{ position: "relative", width: m.tally, height: m.tally, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+          <TapbackGlyph type={entry.reactor.emoji ? undefined : entry.reactor.reaction ?? "love"} emoji={entry.reactor.emoji} size={tallyInk} />
+        </span>
+        <span aria-hidden="true" data-slot="tapback-details-count"
+          style={{ position: "relative", marginLeft: m.tallyLabelSpacing, fontSize: m.countFontSize, lineHeight: 1, fontWeight: 400, letterSpacing: 0, color: "var(--im-td-label, rgba(60,60,67,0.6))" }}>
+          {entry.count}
+        </span>
+      </button>
     );
   });
 
-  // The platter hugs its content and only then runs into `maxWidth`, which is what ChatKit's pair of
-  // a max width and a minimum padding from the presenting edge describes. On macOS an absolutely
-  // positioned box with an auto width already shrink-wraps; on iOS a centring row does it instead,
-  // because setting both `left` and `right` would stretch it.
+  const cellItems = shownReactors.map((reactor, index) => {
+    // ChatKit's own accessibility string is "%@ reacted with %@"; the action that takes one back is
+    // "Remove Tapback".
+    const reacted = `${reactor.name} reacted with ${reactionName(reactor)}`;
+    const removable = Boolean(reactor.own && onRemove);
+    return (
+      <button
+        key={reactor.id} type="button" data-slot="tapback-details-item" data-kind="cell" data-own={reactor.own || undefined}
+        tabIndex={tabIndexFor(tallies.length + index)} aria-label={removable ? `${reacted}. Remove Tapback` : reacted}
+        aria-disabled={removable ? undefined : true}
+        onClick={removable ? () => onRemove?.(reactor) : undefined}
+        onFocus={event => { setFocusIndex(tallies.length + index); event.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest" }); }}
+        style={{ ...itemBase, flexDirection: "column", width: m.cellWidth, marginLeft: index === 0 ? 0 : m.itemSpacing }}
+      >
+        <span aria-hidden="true" data-slot="tapback-details-fill"
+          style={{ position: "absolute", left: 0, right: 0, top: -2, bottom: -2, borderRadius: m.avatar / 2, background: "var(--im-td-fill, rgba(120,120,128,0.16))" }} />
+        <span style={{ position: "relative", display: "block", width: m.cellWidth, height: m.avatar }}>
+          <Avatar size={m.avatar} initials={initialsOf(reactor)} src={reactor.avatar} role="presentation" aria-hidden="true"
+            style={{ position: "absolute", left: (m.cellWidth - m.avatar) / 2, top: 0 }} />
+          {/* The reaction badges the avatar as a bare glyph in ChatKit's `votingViewAvatarViewGlyphFrame`
+              20 square. Horizontally that is arithmetic, not a guess: `votingViewCellWidth` 64 is the
+              Ø44 avatar plus exactly one 20 frame, so the frame's trailing edge is the cell's and half
+              of it laps the avatar. JUDGEMENT, and unmeasured: it is bottom-aligned with the avatar.
+              ChatKit gives the frame's size and says nothing about where in the cell it sits. */}
+          <span aria-hidden="true" data-slot="tapback-details-badge"
+            style={{ position: "absolute", right: 0, top: m.avatar - m.glyphFrame, width: m.glyphFrame, height: m.glyphFrame, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+            <TapbackGlyph type={reactor.emoji ? undefined : reactor.reaction ?? "love"} emoji={reactor.emoji} size={badgeInk} />
+          </span>
+        </span>
+        <span
+          data-slot="tapback-details-name"
+          style={{
+            position: "relative", display: "block", marginTop: m.avatarToText, width: m.cellWidth, height: m.labelHeight,
+            lineHeight: `${m.labelHeight}px`, fontSize: m.nameFontSize, fontWeight: 400, letterSpacing: 0,
+            color: "var(--im-td-label, rgba(60,60,67,0.6))", textAlign: "center",
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}
+        >
+          {shortNameOf(reactor)}
+        </span>
+      </button>
+    );
+  });
+
+  /**
+   * The platter hugs its content and only then runs into `maxWidth`, which is what ChatKit's pair of
+   * a max width and a minimum padding from the presenting edge describes. With a `left` it is placed
+   * absolutely, the way `votingViewTargetFrame` places it (x = the leading layout margin); without
+   * one it centres in the row it is given, which is where the one captured frame of this view family
+   * (`longpress-ok-selected-*.png`) actually shows it.
+   */
+  const placed = left !== undefined;
   const platterStyle: CSSProperties = {
-    ...(platform === "ios"
-      ? { position: "relative", maxWidth: `min(${m.maxWidth}px, 100%)` }
-      : { position: "absolute", left, top, maxWidth: m.maxWidth }),
+    ...(placed ? { position: "absolute", left, top: top ?? m.minPadding } : { position: "relative" }),
     boxSizing: "border-box",
+    // Shrink-wrapped, then clamped: a relatively positioned block would otherwise fill its row.
+    width: "fit-content",
+    maxWidth: `min(${m.maxWidth}px, 100%)`,
     height: m.height,
     borderRadius: m.radius,
     paddingTop: m.topInset,
     paddingInline: m.paddingX,
     display: "flex",
-    alignItems: "center",
-    background: "var(--im-td-platter, #ededef)",
+    alignItems: "flex-start",
+    background: "var(--im-td-platter, rgba(229,229,231,0.69))",
+    backdropFilter: "var(--im-td-platter-filter, blur(9px) brightness(1.32) saturate(1.35))",
+    WebkitBackdropFilter: "var(--im-td-platter-filter, blur(9px) brightness(1.32) saturate(1.35))",
     boxShadow: "var(--im-td-shadow, 0 6px 24px rgba(0,0,0,0.10)), inset 0 0 0 0.5px var(--im-td-rim, rgba(255,255,255,0.55))",
-    transformOrigin: transformOrigins[origin],
+    transformOrigin: transformOrigins[origin ?? "top"],
     // Nothing is clickable while it folds away, so a dismissal cannot pick a cell by accident.
     pointerEvents: closing ? "none" : undefined,
   };
 
-  const inside = (
-    <>
+  const platterBox = (
+    <div ref={platter} data-slot="tapback-details-platter" data-platform={platform} data-state={state}
+      role="dialog" aria-modal={modal || undefined} aria-labelledby={`${id}-title`}
+      // A modal platter hands `className`, `style` and the rest of the props to its overlay instead,
+      // which is the element the caller is actually positioning.
+      className={cn("select-none", modal ? undefined : className)}
+      style={{ fontFamily: fontStack, ...platterStyle, ...(modal ? undefined : style) } as CSSProperties}
+      {...(modal ? {} : props)}>
       <span id={`${id}-title`} style={{ position: "absolute", width: 1, height: 1, margin: -1, padding: 0, overflow: "hidden", clipPath: "inset(50%)", whiteSpace: "nowrap", border: 0 }}>Tapback Details</span>
 
-      {/* The count and the people scroll together, which is what one fade at each end of the platter
+      {/* The tallies and the people scroll together, which is what one fade at each end of the platter
           (`votingViewBlurWidth`) describes; only the close button is pinned. */}
       <div ref={scroller} data-slot="tapback-details-scroller"
-        role={overflowing ? "group" : undefined} aria-label={overflowing ? "Reactions" : undefined} tabIndex={overflowing ? 0 : undefined}
         style={{
-          flex: "0 1 auto", minWidth: 0, overflowX: "auto", overflowY: "hidden", scrollbarWidth: "none",
-          WebkitMaskImage: overflowing ? fade : undefined, maskImage: overflowing ? fade : undefined,
+          flex: "0 1 auto", minWidth: 0, height: m.avatar + m.avatarToText + m.labelHeight,
+          overflowX: "auto", overflowY: "hidden", scrollbarWidth: "none",
+          WebkitMaskImage: fade, maskImage: fade,
         }}>
-        <div style={{ display: "flex", alignItems: "center", width: "max-content" }}>
-          {/* ChatKit calls the count the expanded tally: one per reaction kind with its total beside
-              it at `votingViewTallyLabelSpacing` 0, named with ChatKit's own
-              ACCESSIBILITY_EXPANDED_TAPBACK_FORMAT, "%lu %@ reactions from %@". */}
-          <div data-slot="tapback-details-tallies" style={{ display: "flex", alignItems: "center", flex: "0 0 auto", marginRight: m.itemSpacing }}>
-            {tallies.map((entry, index) => (
-              <span key={entry.key} data-slot="tapback-details-tally" role="img"
-                aria-label={`${entry.count} ${reactionName(entry.reactor)} ${entry.count === 1 ? "reaction" : "reactions"} from ${entry.names.join(", ")}`}
-                style={{ display: "inline-flex", alignItems: "center", marginLeft: index === 0 ? 0 : m.itemSpacing }}>
-                {/* The tally is the bare glyph in ChatKit's `votingViewExpandedTally` box, not a
-                    balloon: a balloon's neck and trail point at the bubble it belongs to, and a
-                    summary has no bubble. */}
-                <span aria-hidden="true" style={{ width: m.tally, height: m.tally, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-                  <TapbackGlyph type={entry.reactor.emoji ? undefined : entry.reactor.reaction ?? "love"} emoji={entry.reactor.emoji} size={m.tally} />
-                </span>
-                <span aria-hidden="true" data-slot="tapback-details-count"
-                  style={{ marginLeft: m.tallyLabelSpacing, fontSize: m.countFontSize, lineHeight: 1, fontWeight: 400, letterSpacing: 0, color: "var(--im-td-label, rgba(0,0,0,0.498))" }}>
-                  {entry.count}
-                </span>
-              </span>
-            ))}
+        <div role="group" aria-label="Reactions" onKeyDown={onRowKeyDown}
+          style={{ display: "flex", alignItems: "flex-start", width: "max-content", height: m.avatar + m.avatarToText + m.labelHeight }}>
+          {/* JUDGEMENT: the tallies are centred on the avatars' own band rather than on the whole
+              cell. ChatKit sizes the tally and says nothing about its vertical alignment. */}
+          <div data-slot="tapback-details-tallies" style={{ display: "flex", alignItems: "center", flex: "0 0 auto", height: m.avatar, marginRight: m.itemSpacing }}>
+            {tallyItems}
           </div>
-          <ul data-slot="tapback-details-list" style={{ display: "flex", alignItems: "center", margin: 0, padding: 0, listStyle: "none" }}>
-            {cells}
-          </ul>
+          <div data-slot="tapback-details-cells" style={{ display: "flex", alignItems: "flex-start", flex: "0 0 auto" }}>
+            {cellItems}
+          </div>
         </div>
       </div>
 
       {onClose && (
         <button type="button" data-slot="tapback-details-close" aria-label="Close" onClick={onClose}
           style={{
-            flex: "0 0 auto", marginLeft: m.closeLeftPadding, width: m.closeSize, height: m.closeSize,
+            flex: "0 0 auto", marginLeft: m.closeLeftPadding, marginTop: (m.avatar - m.closeSize) / 2,
+            width: m.closeSize, height: m.closeSize,
             borderRadius: m.closeSize / 2, border: 0, padding: 0, cursor: "default",
             display: "flex", alignItems: "center", justifyContent: "center",
-            background: "var(--im-td-fill, rgba(120,120,128,0.16))", color: "var(--im-td-label, rgba(0,0,0,0.498))",
+            background: "var(--im-td-fill, rgba(120,120,128,0.16))", color: "var(--im-td-label, rgba(60,60,67,0.6))",
             outlineOffset: -2,
           }}>
           {/* The cross is 0.394 of its button, the ratio between the 17.33 cross and the Ø44 glass
@@ -598,37 +726,28 @@ export function TapbackDetails({
           </svg>
         </button>
       )}
-    </>
+    </div>
   );
 
-  // macOS: the popover is the root, positioned by the caller against the message it belongs to.
-  if (platform === "macos") {
+  // macOS anchors the platter directly; the caller positions it against the message.
+  if (!modal) {
     return (
-      <div ref={platter} data-slot="tapback-details" data-platform="macos" data-state={state}
-        role="dialog" aria-labelledby={`${id}-title`}
-        className={cn("select-none", darkVars, className)}
-        style={{ fontFamily: fontStack, zIndex: 40, ...lightVars, ...platterStyle, ...style } as CSSProperties}
-        {...props}>
-        <style>{platterCss}</style>
-        {inside}
-      </div>
+      <>
+        <style>{platterTokens}</style>
+        {platterBox}
+      </>
     );
   }
 
-  // iOS: the platter comes up over the dimmed conversation, so the dim is the root.
+  // iOS presents it over the dimmed transcript, the way the full-screen balloon controller does.
   return (
-    <div data-slot="tapback-details" data-platform="ios" data-state={state}
-      className={cn("absolute inset-0 z-40 select-none", darkVars, className)}
-      style={{ fontFamily: fontStack, ...lightVars, ...style } as CSSProperties}
-      {...props}>
-      <style>{platterCss}</style>
-      {/* The dim is the 20% black measured on `newmsg-light.png`; tapping it dismisses, as a sheet does. */}
-      <div ref={dim} data-slot="tapback-details-dim" aria-hidden="true" onClick={onClose}
-        style={{ position: "absolute", inset: 0, background: "var(--im-td-dim, rgba(0,0,0,0.2))" }} />
-      <div style={{ position: "absolute", left: m.minPadding, right: m.minPadding, bottom: m.minPadding, display: "flex", justifyContent: "center" }}>
-        <div ref={platter} data-slot="tapback-details-platter" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} style={platterStyle}>
-          {inside}
-        </div>
+    <div data-slot="tapback-details-overlay" data-platform={platform} data-state={state}
+      className={cn("absolute inset-0 z-40", className)} style={style} {...props}>
+      <style>{platterTokens}</style>
+      <div ref={scrim} data-slot="tapback-details-scrim" aria-hidden="true" onClick={onClose}
+        style={{ position: "absolute", inset: 0 }} />
+      <div style={{ position: "absolute", left: m.minPadding, right: m.minPadding, top: placed ? 0 : top ?? m.minPadding, bottom: 0, display: placed ? "block" : "flex", justifyContent: "center", alignItems: "flex-start" }}>
+        {platterBox}
       </div>
     </div>
   );
