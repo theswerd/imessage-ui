@@ -144,14 +144,30 @@ export type IosMessagesAppProps = {
   frameRef?: RefObject<HTMLDivElement | null>;
 };
 
+/**
+ * Several people reacting to one message is **one** balloon, not one per person.
+ *
+ * ChatKit collapses them into a `CKAggregateAcknowledgmentChatItem`, and that item carries a single
+ * `acknowledgmentImageName` and `acknowledgmentImageColor` next to `latestTapback`,
+ * `latestAcknowledgmentType`, `latestIsFromMe` and `includesMultiple`. One image name means one
+ * glyph: the transcript shows the most recent reaction, tinted by whether that one is yours, and
+ * says how many there are. Two glyphs would need two names, and there is no second name.
+ *
+ * `-[CKUIBehaviorPhone aggregateAcknowledgmentTranscriptBalloonSize]` is `{46, 40}` against
+ * `messageAcknowledgmentTranscriptBalloonSize` `{36, 36}` for a single, so the aggregate balloon is
+ * 10 wider and 4 taller. `Tapback`'s count pill grows the width and not the height; the extra 4 pt
+ * is not applied yet, and no capture of a multi-person reaction exists to settle how the count is
+ * set inside it.
+ */
 export function defaultReactions(message: Message): ReactNode {
-  if (!message.reactions?.length) return undefined;
+  const all = message.reactions;
+  if (!all?.length) return undefined;
   const outgoing = message.direction === "outgoing";
+  const latest = all[all.length - 1];
   return (
-    <div data-slot="reaction-stack" className="flex" style={{ gap: 2 }}>
-      {message.reactions.map((reaction, index) => (
-        <Tapback key={index} reaction={reaction.emoji ? undefined : (reaction.type as TapbackType)} emoji={reaction.emoji} own={reaction.byMe ?? true} side={outgoing ? "left" : "right"} />
-      ))}
+    <div data-slot="reaction-stack" className="flex">
+      <Tapback reaction={latest.emoji ? undefined : (latest.type as TapbackType)} emoji={latest.emoji}
+        own={latest.byMe ?? true} side={outgoing ? "left" : "right"} count={all.length > 1 ? all.length : undefined} />
     </div>
   );
 }

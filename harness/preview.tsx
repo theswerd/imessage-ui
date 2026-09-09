@@ -135,15 +135,18 @@ export function HarnessPreview({ platform, scenario, time, interactive = true, o
     messages, typing: frame.typing ? { sender: contact.name } : false, now, group: !!frame.group,
     contact: frame.group ? { name: frame.group.name, initials: "DC" } : { name: contact.name, initials: contact.initials },
     onTapback: react,
+    // Same rule as `defaultReactions`: several people's tapbacks are one aggregate balloon showing
+    // the latest, not one balloon each. This copy exists only to carry `animateIn` for a reaction
+    // applied in this session.
     renderReactions: (message: Message) => {
-      if (!message.reactions?.length) return undefined;
-      const outgoing = message.direction === "outgoing";
+      const all = message.reactions;
+      if (!all?.length) return undefined;
+      const latest = all[all.length - 1];
       return (
-        <div data-slot="reaction-stack" className="flex" style={{ gap: 2 }}>
-          {message.reactions.map((reaction, index) => (
-            <Tapback key={index} reaction={reaction.emoji ? undefined : (reaction.type as TapbackType)} emoji={reaction.emoji}
-              own={reaction.byMe ?? true} side={outgoing ? "left" : "right"} animateIn={poppedIn.has(message.id)} />
-          ))}
+        <div data-slot="reaction-stack" className="flex">
+          <Tapback reaction={latest.emoji ? undefined : (latest.type as TapbackType)} emoji={latest.emoji}
+            own={latest.byMe ?? true} side={message.direction === "outgoing" ? "left" : "right"}
+            count={all.length > 1 ? all.length : undefined} animateIn={poppedIn.has(message.id)} />
         </div>
       );
     },
