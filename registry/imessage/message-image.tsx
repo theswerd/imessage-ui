@@ -106,11 +106,16 @@ export type MessageImagesProps = Omit<ComponentProps<"div">, "children"> & {
   platform?: Platform;
 };
 
-/** Native shows at most four tiles and counts the rest. */
+/** Native draws at most four cards and counts the rest; see `photoStackLayout.visible`. */
 const MAX_TILES = 4;
 
-/** Gap between tiles. Provisional: no native capture of a multi-photo message exists. */
-const TILE_GAP = 2;
+/**
+ * The card the tail continues. The front card is the only one whose bottom edge reaches the
+ * balloon's - the ones behind it are smaller, pushed sideways and turned, and none touches the
+ * corner the tail grows out of - and a single photo is its own front card, so it is 0 either way.
+ * Module scope so it is a constant rather than a dependency of the measuring callback.
+ */
+const TAIL_TILE = 0;
 
 /**
  * How big one photo's balloon is, read out of ChatKit instead of a screenshot.
@@ -192,6 +197,64 @@ export const photoStackBox: Record<Platform, { previewMaxWidth: number; widthSca
   ios: { previewMaxWidth: 761, widthScale: 1.25, heightInset: 2 * (15 - 6) },
   macos: { previewMaxWidth: 300, widthScale: 1.25, heightInset: 2 * (15 - 4) },
 };
+
+/**
+ * **The stack, with its numbers.** The note above says the frames live in PhotoFoundation's solver
+ * and cannot be reached; they can. `PXMessagesStackItemsLayoutHelper` is empty until something
+ * configures it, but the thing that configures it is `PXMessagesStackItemsLayout`, and a
+ * `PXMessagesStackView` built with `-[initWithFrame:]` and laid out carries one already set up.
+ * Reading that layout's ivars at the phone idiom, out of `PhotosUICore.framework` beside ChatKit:
+ *
+ * | ivar | value |
+ * | --- | --- |
+ * | `_stackedItemsCount` | **4** |
+ * | `_normalizedPageWidth` | **0.8** |
+ * | `_normalizedStackSizeTransform` | **0.9** |
+ * | `_normalizedStackHorizontalOffsets` | **[0.0666667, 0.0483333, 0.0333333, 0.03]** |
+ * | `_normalizedStackVerticalOffset` | 0 |
+ * | `_normalizedContentInsets` | 0 |
+ * | `_rotationAngle` | **0.03490658 rad = 2.0°** |
+ * | `_minItemAspectRatio` / `_maxItemAspectRatio` | **0.75 / 1.3333** |
+ * | `_itemCornerRadius` | **20** |
+ *
+ * and `-[PXMessagesStackView horizontalContentMarginForSize:]` swept from 120 to 420 pt answers 15,
+ * 19, 23, 26, 30, then 32 and 32 for everything wider — i.e. **min(32, round(width / 8))**.
+ * `-[CKUIBehavior stackBalloonVerticalInset]` is **15** on both idioms.
+ *
+ * **What is measured and what is read into it.** Every number above is measured. How they compose is
+ * not: `getGeometries:count:forVisibleRect:focus:archSide:keyframeOverride:` asserts on an internal
+ * `totalItemCount` that only the layout fills in, so the solver could not be run directly and the
+ * arithmetic below is a reading of the normalized values, not the solver's own output. Specifically
+ * unverified: that the offsets are successive deltas rather than absolute positions (they decrease,
+ * which only makes sense as a fan that compresses); that the fan leans toward the trailing edge
+ * (`pageRightAnimated:` puts the next item to the right, so the ones behind peek out that way); and
+ * that the rotation accumulates by index. The count card is `PXMessagesStackAdditionalItemsView`: a
+ * `UIBlurEffect` behind a centred **SF Bold 17** label in **systemBlue**, whose
+ * `_localizedTitleForAdditionalItemsCount:` answers "+1 Item" and "+2 Items".
+ *
+ * What this replaces was a 2x2 grid, and a grid is not a thing Messages draws — there is no
+ * photo-grid balloon on either idiom, only `CKGenericPhotoStackBalloonView` over a
+ * `PXMessagesStackView`.
+ */
+export const photoStackLayout = {
+  /** Cards drawn at once, however many photos there are. */
+  visible: 4,
+  /** Each card behind is this fraction of the one in front. */
+  sizeTransform: 0.9,
+  /** Successive horizontal deltas, as fractions of the stack's width. */
+  offsets: [0.0666667, 0.0483333, 0.0333333, 0.03],
+  /** Degrees each card behind is turned, accumulating with depth. */
+  rotation: 2,
+  /** The card's corner, which is the balloon's own. */
+  radius: 20,
+  minAspect: 0.75,
+  maxAspect: 4 / 3,
+  verticalInset: 15,
+  /** `min(32, round(width / 8))`, swept off `horizontalContentMarginForSize:`. */
+  margin: (width: number) => Math.min(32, Math.round(width / 8)),
+  /** The count card's label, `_localizedTitleForAdditionalItemsCount:`. */
+  more: (count: number) => `+${count} Item${count === 1 ? "" : "s"}`,
+} as const;
 
 /** `-[CKUIBehavior previewBalloonSizeThatFits:]` for a balloon the transcript allows `balloonWidth`. */
 export function photoStackSize(balloonWidth: number, platform: Platform): { width: number; height: number } {
@@ -363,7 +426,11 @@ export function MessageImages({
   const m = bubbleMetrics[platform];
   const side = direction === "outgoing" ? "right" : "left";
   const width = maxWidth ?? m.maxWidth;
-  const tiles = images.slice(0, MAX_TILES);
+  // Four card slots. Past four photos the last slot stops being a photo and becomes the stack's own
+  // count card (`PXMessagesStackAdditionalItemsView`), so three photos show and the rest are counted
+  // — the count is not a scrim laid over a fourth photo, which is what this drew before.
+  const counted = images.length > MAX_TILES;
+  const tiles = useMemo(() => images.slice(0, counted ? MAX_TILES - 1 : MAX_TILES), [images, counted]);
   const overflow = images.length - tiles.length;
   const single = tiles.length === 1;
   const groupKey = tiles.map(image => image.src).join("|");
@@ -398,16 +465,47 @@ export function MessageImages({
   const groupWidth = stack ? stack.width : capped ? Math.min(width, ceiling / ratio) : width;
   const height = stack ? stack.height : groupWidth * ratio;
 
-  const grid = useMemo<CSSProperties>(() => {
-    if (single) return { display: "block" };
-    return { display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: tiles.length === 2 ? "1fr" : "1fr 1fr", gap: TILE_GAP };
-  }, [single, tiles.length]);
+  /**
+   * Where each card sits, in the stack's own box. Index 0 is the front one, the only one whose whole
+   * face shows; the rest peek out behind it toward the trailing edge, each `sizeTransform` of the one
+   * in front and turned a further `rotation`. See `photoStackLayout` for which parts of this are the
+   * framework's and which are a reading of it.
+   */
+  const cards = useMemo(() => {
+    const L = photoStackLayout;
+    if (single) return null;
+    const boxWidth = stack?.width ?? width;
+    const boxHeight = stack?.height ?? width;
+    const margin = L.margin(boxWidth);
+    const front = { width: boxWidth - 2 * margin, height: boxHeight - 2 * L.verticalInset };
+    // The card's shape is clamped the way the layout clamps an item's aspect, so a very wide or very
+    // tall box never hands the stack a card no photo would be cropped into.
+    const aspectRatio = Math.min(Math.max(front.width / front.height, L.minAspect), L.maxAspect);
+    const cardHeight = Math.min(front.height, front.width / aspectRatio);
+    const cardWidth = Math.min(front.width, cardHeight * aspectRatio);
+    // The fan leans away from the tail. Nothing measured says which way it goes — `pageRightAnimated:`
+    // only says the next photo is to the right — but the tail grows out of the front card's bottom
+    // corner on `side`, and a fan that went the same way would bury it under the cards behind.
+    const lean = side === "right" ? -1 : 1;
+    let shift = 0;
+    return Array.from({ length: MAX_TILES }, (_, index) => {
+      if (index > 0) shift += (L.offsets[index - 1] ?? L.offsets[L.offsets.length - 1]) * boxWidth;
+      return {
+        width: cardWidth,
+        height: cardHeight,
+        // Centred in the box, then pushed out along the lean and turned into the arch.
+        left: (boxWidth - cardWidth) / 2 + lean * shift,
+        top: (boxHeight - cardHeight) / 2,
+        scale: L.sizeTransform ** index,
+        rotate: lean * index * L.rotation,
+      };
+    });
+  }, [single, stack, width, side]);
 
   const hang = tailBox.hang * m.tailScale;
   // The tail continues the photo, so it is filled from the tile that touches it: the bottom tile on
   // the tail's side. Three photos put a full-height tile first, so on an incoming message that first
-  // tile is the one the tail meets; the 2x2 grid meets tile 3 on the left and tile 4 on the right.
-  const tailIndex = side === "right" ? tiles.length - 1 : tiles.length === MAX_TILES ? 2 : 0;
+
   const [tailFill, setTailFill] = useState<{ key: string; color: string } | null>(null);
   // A tile is on the placeholder until its own <img> says otherwise, so the bubble is never a hole.
   const [phase, setPhase] = useState<Record<string, Phase>>({});
@@ -424,7 +522,7 @@ export function MessageImages({
     const rendered = element.querySelectorAll("img");
     // By tile index, not by position in the list: a tile that failed renders no <img> at all, and
     // counting elements would then sample the wrong photo for the tail.
-    const edge = element.querySelector<HTMLImageElement>(`img[data-tile="${tailIndex}"]`);
+    const edge = element.querySelector<HTMLImageElement>(`img[data-tile="${TAIL_TILE}"]`);
     // Only ever replace a real colour with a real colour: a half-decoded image reads as null, and
     // dropping back to gray for a frame would flash the tail.
     const sampled = tail && edge ? sampleCorner(edge, side, tailBox.width * m.tailScale, tailBox.height * m.tailScale) : null;
@@ -447,7 +545,7 @@ export function MessageImages({
       aspectMemo.set(firstSrc, value);
       setMeasured(previous => (previous?.src === firstSrc && previous.aspect === value ? previous : { src: firstSrc, aspect: value }));
     }
-  }, [single, tail, tailIndex, side, m.tailScale, groupKey, firstSrc, setMeasured, setPhase, setTailFill]);
+  }, [single, tail, side, m.tailScale, groupKey, firstSrc, setMeasured, setPhase, setTailFill]);
   useLayoutEffect(() => { measure(); }, [measure]);
 
   const retry = useCallback((src: string) => {
@@ -455,6 +553,7 @@ export function MessageImages({
     setAttempt(previous => ({ ...previous, [src]: (previous[src] ?? 0) + 1 }));
   }, []);
 
+  const countCard = counted ? cards?.[MAX_TILES - 1] : null;
   const open = onOpenImage ?? (onOpen ? (index: number) => onOpen(index) : undefined);
   const busy = loading || tiles.some(image => phase[image.src] === undefined);
   const slot = reactionSlot[platform];
@@ -483,25 +582,26 @@ export function MessageImages({
       {/* `aspectRatio` rather than a pixel height, so the box keeps its shape when the clamp above
           bites: at full width it resolves to exactly `height`, and under the clamp the grid shortens
           with its width instead of holding a tall box over narrow tiles. */}
-      <div ref={gridRef} data-slot="image-grid" style={{ ...grid, width: "100%", aspectRatio: `${groupWidth} / ${height}`, borderRadius: m.radius, overflow: "hidden", clipPath: tail ? bodyClipPath(side, m.tailScale, tailSeamOverlap[platform]) : undefined, background: "var(--im-gray-top)" }}>
+      {/* A stack, not a grid: the cards are placed in this box rather than flowed through it, and the
+          box itself paints nothing — the front card is what the balloon looks like, so the corner and
+          the tail belong to it and not to a container clipping four tiles. A single photo keeps the
+          old shape, where the box *is* the balloon. */}
+      <div ref={gridRef} data-slot={single ? "image-grid" : "photo-stack"} style={single
+        ? { display: "block", width: "100%", aspectRatio: `${groupWidth} / ${height}`, borderRadius: m.radius, overflow: "hidden", clipPath: tail ? bodyClipPath(side, m.tailScale, tailSeamOverlap[platform]) : undefined, background: "var(--im-gray-top)" }
+        : { position: "relative", width: "100%", aspectRatio: `${groupWidth} / ${height}` }}>
         {tiles.map((image, index) => {
-          const spanFirst = tiles.length === 3 && index === 0;
           const state = phase[image.src];
           // Two ways into the same affordance: the transfer was never fetched (`pending`), or it was
           // and it did not arrive. Native offers the download either way, so the tile does too.
           const failed = image.pending === true || state === "failed";
-          const last = index === MAX_TILES - 1 && overflow > 0;
           const name = image.alt?.trim() || "Photo";
           // "Photo, 2 of 5" follows ChatKit's own `messages.attachment.stack.view.format`
           // ("attachment %1$d of %2$d"); the counted tile has to say what its "+N" opens.
           const position = images.length > 1 ? `${name}, ${index + 1} of ${images.length}` : name;
-          // ChatKit's `attachment.count` carries a real plural rule ("%d attachment" / "%d attachments"),
-          // so the counted tile gets one too rather than reading "1 more photos".
-          const more = `Show ${overflow} more photo${overflow === 1 ? "" : "s"}.`;
           // "Live Photo" is the noun VoiceOver reads for an iris asset, and it is the only thing the
           // badge says, so the name has to carry it or the badge is invisible without sight.
           const named = image.livePhoto ? `Live Photo. ${position}` : position;
-          const label = failed ? `${named}. ${downloadLabel[platform]}.` : last ? `${named}. ${more}` : named;
+          const label = failed ? `${named}. ${downloadLabel[platform]}.` : named;
           // A tile that cannot be fetched offers the fetch again, the way native's undownloaded
           // attachment does. Otherwise it opens the viewer, handing over its own box so the viewer can
           // grow out of this tile.
@@ -513,12 +613,27 @@ export function MessageImages({
           // A button is a control for the pointer and the keyboard both, for free. With nothing to
           // open it would be a dead tab stop that reads out "dimmed", so the tile becomes a named
           // image instead: the photo keeps its accessible name either way.
+          const card = cards?.[index];
           const shell = {
             "data-slot": "photo-tile", "data-index": index,
             "data-state": failed ? "failed" : state === "ready" ? "ready" : "loading",
             "aria-label": label,
-            className: "relative block h-full w-full overflow-hidden p-0 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#0088ff]",
-            style: spanFirst ? { gridRow: "span 2" } : undefined,
+            className: cn("block overflow-hidden p-0 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#0088ff]",
+              card ? "absolute" : "relative h-full w-full"),
+            style: card
+              ? {
+                  // Painted back to front, so the front card is on top and takes the pointer.
+                  zIndex: MAX_TILES - index,
+                  left: card.left, top: card.top, width: card.width, height: card.height,
+                  transform: `rotate(${card.rotate}deg) scale(${card.scale})`,
+                  transformOrigin: "50% 50%",
+                  borderRadius: photoStackLayout.radius,
+                  // Only the front card carries the balloon's tail; the ones behind are plain cards.
+                  clipPath: index === 0 && tail ? bodyClipPath(side, m.tailScale, tailSeamOverlap[platform]) : undefined,
+                  background: "var(--im-gray-top)",
+                  boxShadow: index === 0 ? undefined : "0 0 0 0.5px rgba(0,0,0,0.06)",
+                }
+              : undefined,
           } as const;
           const inner = (
             <>
@@ -546,20 +661,67 @@ export function MessageImages({
                   <LivePhotoGlyph platform={platform} />
                 </span>
               )}
-              {last && (
-                <span aria-hidden="true" className="absolute inset-0 flex items-center justify-center font-semibold text-white"
-                  style={{ background: "rgba(0,0,0,0.42)", fontSize: platform === "ios" ? 22 : 17 }}>+{overflow}</span>
-              )}
+
             </>
           );
           return activate
             ? <button key={image.src + index} type="button" onClick={activate} {...shell}>{inner}</button>
             : <div key={image.src + index} role="img" {...shell}>{inner}</div>;
         })}
+        {/* The last card, when there are more photos than card slots.
+            `PXMessagesStackAdditionalItemsView` is a `UIBlurEffect` under a centred SF Bold 17 label
+            in systemBlue, and `_localizedTitleForAdditionalItemsCount:` is where "+2 Items" comes
+            from. The blur has nothing measured behind it here - a card at the back of a stack has
+            only its neighbours to blur - so it is drawn as the material's own light/dark fill. */}
+        {counted && countCard && (
+          <button type="button" data-slot="photo-stack-more" aria-label={`Show ${overflow} more photo${overflow === 1 ? "" : "s"}.`}
+            onClick={open ? event => open(tiles.length, event.currentTarget.getBoundingClientRect()) : undefined}
+            className="absolute flex items-center justify-center overflow-hidden p-0 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#0088ff]"
+            style={{
+              zIndex: MAX_TILES - (MAX_TILES - 1),
+              left: countCard.left, top: countCard.top, width: countCard.width, height: countCard.height,
+              transform: `rotate(${countCard.rotate}deg) scale(${countCard.scale})`, transformOrigin: "50% 50%",
+              borderRadius: photoStackLayout.radius,
+              background: "var(--im-stack-more, rgba(242,242,247,0.82))",
+              backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
+              boxShadow: "0 0 0 0.5px rgba(0,0,0,0.06)",
+              color: "var(--im-stack-more-label, #0088ff)", fontSize: 17, fontWeight: 700, letterSpacing: 0,
+            }}>
+            {photoStackLayout.more(overflow)}
+          </button>
+        )}
       </div>
+      {/* On the front card's bottom corner, not the box's: a stack's box is wider and taller than the
+          card it holds (the margin rule leaves room for the cards behind to peek into), so a tail
+          pinned to the box would float away from the photo it is supposed to continue. */}
       {tail && (
         <div aria-hidden="true" data-slot="tail" className="pointer-events-none absolute"
-          style={{ [side]: 0, bottom: -hang, width: tailBox.width * m.tailScale, height: tailBox.height * m.tailScale + hang, clipPath: `path("${tailPath(side, m.tailScale)}")`, background: tailFill?.key === groupKey ? tailFill.color : "var(--im-gray-bottom)" }} />
+          style={{
+            [side]: cards ? (stack ? stack.width : width) - (cards[0].left + cards[0].width) : 0,
+            bottom: cards ? (stack ? stack.height : height) - (cards[0].top + cards[0].height) - hang : -hang,
+            width: tailBox.width * m.tailScale, height: tailBox.height * m.tailScale + hang,
+            clipPath: `path("${tailPath(side, m.tailScale)}")`,
+            background: tailFill?.key === groupKey ? tailFill.color : "var(--im-gray-bottom)",
+          }}>
+          {/* On a stack the tail is a corner of the front card, so it can carry the photograph itself
+              rather than one colour averaged out of that corner. The same photo is laid out at the
+              card's size and pushed back by the card's own offset, so the pixels line up across the
+              seam; the flat fill stays behind it for the 6.8 pt that hangs below the card, where
+              there is no photo to continue. A single photo keeps the flat fill on its own - its
+              balloon is the box, and its geometry is the measured one every baseline was taken
+              against. */}
+          {cards && firstSrc && (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img src={firstSrc} alt="" aria-hidden="true" className="absolute max-w-none object-cover"
+              style={{
+                width: cards[0].width, height: cards[0].height,
+                // The tail's own edge on `side` is the card's edge, so the photo lines up there with
+                // no offset; vertically the tail starts one tail-height above the card's bottom.
+                [side]: 0,
+                top: -(cards[0].height - tailBox.height * m.tailScale),
+              }} />
+          )}
+        </div>
       )}
       {/* Outside the grid on purpose: the grid clips to the balloon's outline, and a balloon that laps
           the photo's rounded corner would lose its own edge to that clip. */}

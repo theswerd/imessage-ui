@@ -320,6 +320,11 @@ export const scenarios = [
   { id: "link-preview", title: "Link preview", group: "Previews", duration: 0, checkpoints: [0] },
   { id: "attachment", title: "File preview", group: "Previews", duration: 0, checkpoints: [0] },
   { id: "photos", title: "Photos", group: "Previews", duration: 0, checkpoints: [0] },
+  // One photo is its own balloon; several are a stack. These two are the ends of that: a single
+  // photo, which never becomes a card, and ten, which fills all four card slots and turns the last
+  // one into the count card. See `photoStackLayout` in `message-image.tsx`.
+  { id: "photo-one", title: "One photo", group: "Previews", duration: 0, checkpoints: [0] },
+  { id: "photo-many", title: "Ten photos", group: "Previews", duration: 0, checkpoints: [0] },
   // The two per-tile states a photo balloon can be in that the plain `photos` scenario cannot show:
   // an attachment that has not been fetched, which offers native's own download copy at
   // `downloadButtonFont`'s measured 17 pt, and a Live Photo, which wears ChatKit's
@@ -731,6 +736,17 @@ export function frameAt(id: ScenarioId, milliseconds: number): SceneFrame {
     // plain ones for the badge and the download copy to be read against. Incoming, because an
     // undownloaded attachment is one somebody else sent — and because the download label is drawn in
     // `--im-incoming-text`, so on an outgoing bubble it would be measured against the wrong ground.
+    case "photo-one":
+      frame.messages.push({ id: "ph1", direction: "outgoing", minutesAgo: 1, text: "Photos",
+        images: [{ src: "/fixtures/shore.jpg", alt: "Shore" }] });
+      break;
+    case "photo-many":
+      frame.messages.push({ id: "ph10", direction: "outgoing", minutesAgo: 1, text: "Photos",
+        images: Array.from({ length: 10 }, (_, index) => {
+          const fixture = ["shore", "ridge", "bloom", "dusk"][index % 4];
+          return { src: `/fixtures/${fixture}.jpg`, alt: `Photo ${index + 1}` };
+        }) });
+      break;
     case "photo-states":
       frame.messages.push({ id: "ph-states", direction: "incoming", minutesAgo: 1, text: "Photos",
         images: [
