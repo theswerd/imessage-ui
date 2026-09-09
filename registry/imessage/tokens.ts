@@ -97,6 +97,12 @@ export const bubbleMetrics: Record<Platform, BubbleMetrics> = {
     // routine run against our own 14.5 render returns 14.42, so native's 14.39 reads as 14.46 once
     // that bias is removed. What is left at 14.5 is a symmetric S of +-0.15, twice our own render's,
     // which is the shape difference of a slightly continuous corner, not a radius error.
+    //
+    // ChatKit disagrees and the capture wins. `-[CKUIBehaviorMac balloonCornerRadius]`, read at
+    // idiom 5, is **15.4118** - exactly the phone's 20.0107 times Catalyst's 0.77 - where the phone's
+    // own 20.0107 matched an uncalibrated trace of `conv3-light.png` to three decimals. So the Mac
+    // does not draw its balloon at the radius that property reports, and the calibrated 14.46 above
+    // is what it actually paints. Worth knowing before anyone "fixes" this to match the framework.
     radius: 14.5,
     minWidth: 40,
     maxWidth: 382.5,
