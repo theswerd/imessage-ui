@@ -440,7 +440,16 @@ described as measured:
   The tail is filled by sampling the photo's own trailing-bottom edge. Grid: one photo keeps its
   aspect ratio, two are side by side, three put a tall tile first, four or more show four tiles with
   a "+N" count on the last.
-- **Audio messages** (`message-audio.tsx`): waveform bar count, widths and spacing are provisional.
+- **Audio messages** (`message-audio.tsx`): ChatKit describes the row and it is not the shape that
+  was guessed here. `audioWaveformHeight` **35**, `audioWaveformGapWidth` **2**,
+  `audioProgressViewSize` **{29, 29}**, `audioBalloonHorizontalSpacing` **10**,
+  `audioBalloonWaveformTimeSpace` **6**, `audioBalloonVerticalSpacing` **7** with
+  `audioBalloonAlignmentInsets` {0,0,0,0}. So the waveform is taller than the control beside it
+  (35 against 29, where one 28 used to serve as both), and the balloon insets its row by 7
+  vertically rather than by a text bubble's 10. Still provisional: the **bar width**, and
+  therefore the bar count, which is only how many fit. `audioRecordingViewTimeBetweenWaveformSegments`
+  is 1/12 s, so a recording lays down 12 bars a second - that fixes a count from a duration but
+  not a width.
 - **The macOS composer beyond one line.** Every capture has a one-line field, so how far it grows per
   extra line, and what it does at its ceiling, is unmeasured; `macos-composer.tsx` grows it by the
   16-point line box and keeps the field's bottom, the `+` and the emoji button pinned at y 629. Also

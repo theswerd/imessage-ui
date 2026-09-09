@@ -9,15 +9,30 @@ import { MessageBubble } from "@/registry/imessage/message-bubble";
 /**
  * An audio message: a waveform, a play control, and the remaining time, inside a normal bubble.
  *
- * NOT MEASURED. No native capture of an audio message exists in `references/`, so the waveform's bar
- * width and spacing follow the documented look rather than a measurement, and the bar count is only
- * how many of those fit.
+ * No native capture of an audio message exists in `references/`, but ChatKit describes the row and
+ * this now uses what it says instead of the shape that was guessed here:
+ *
+ * | value | ChatKit | what was here |
+ * |---|---|---|
+ * | waveform height | `audioWaveformHeight` **35** | 28 (shared with the button) |
+ * | bar gap | `audioWaveformGapWidth` **2** | 2.6 |
+ * | play control | `audioProgressViewSize` **{29, 29}** | 28 |
+ * | control to waveform | `audioBalloonHorizontalSpacing` **10** | 10, right by luck |
+ * | waveform to time | `audioBalloonWaveformTimeSpace` **6** | 10 |
+ * | vertical inset | `audioBalloonVerticalSpacing` **7** | the text bubble's 10 |
+ *
+ * So the row is not one height: the waveform is 35 and the control is 29, and the balloon insets its
+ * contents by 7 vertically rather than by the 10 a text bubble uses. `audioBalloonAlignmentInsets`
+ * is {0,0,0,0}, which is what says the 7 is the whole vertical inset.
+ *
+ * Still not measured, because ChatKit is silent on them: the **bar width**, and therefore the bar
+ * count, which is only how many fit. `audioRecordingViewTimeBetweenWaveformSegments` is 1/12 s, so a
+ * recording lays down 12 bars a second - that fixes the count for a recording of known length but
+ * not the width of one.
  *
  * What is not guessed:
- * - The bubble, its padding (iOS 10/13.85, macOS 7.08/12.5), radius and tail are the measured ones,
- *   because this renders inside `MessageBubble`.
- * - The row height and the play button's diameter are one number, not two: the button is the circle
- *   that fills the row exactly. The number itself is provisional.
+ * - The bubble, its radius and its tail are the measured ones, because this renders inside
+ *   `MessageBubble`.
  * - The duration label reuses a type size measured on its own platform: iOS 13pt (the "Send with
  *   effect" segmented-control label, the one measured step between the 11pt secondary label and the
  *   17pt body) and macOS 11pt (the attachment card's "Text Document / 275 bytes" line).
@@ -63,16 +78,23 @@ export function MessageAudio({ peaks, duration, direction = "outgoing", tail = f
   const contextPlatform = usePlatform();
   const platform = platformProp ?? contextPlatform;
   const ios = platform === "ios";
-  // UNVERIFIED: the bar count, width and spacing have no capture behind them. The count is the most
-  // bars that fit inside the measured maximum bubble width at that width and spacing, so the row
-  // never has to break the measured 13.85 padding: iOS 280.5 - 27.7 padding - 28 button - 20 gaps -
-  // 28.13 for a "0:17" label leaves 176.67, and 32 bars at 3 with 2.6 between them are 176.6 of it.
-  const barCount = ios ? 32 : 28;
+  // The bar count is still only how many fit, because ChatKit gives a gap and no bar width. At the
+  // measured maximum bubble width: iOS 280.5 - 27.7 padding - 29 control - 16 of gaps - 28.13 for a
+  // "0:17" label leaves 179.67, and 36 bars at 3 with 2 between them are 178 of it.
+  const barCount = ios ? 36 : 28;
   const bars = useMemo(() => (peaks?.length ? peaks : fallbackPeaks(barCount)), [peaks, barCount]);
+  // UNVERIFIED: no source gives a bar width.
   const barWidth = ios ? 3 : 2.5;
-  const barGap = ios ? 2.6 : 2;
-  /** The row's height, which is also the play button's diameter and the waveform's full-scale peak. */
-  const rowHeight = ios ? 28 : 22;
+  /** `audioWaveformGapWidth`. */
+  const barGap = ios ? 2 : 2;
+  /** `audioWaveformHeight`: the waveform's full-scale peak, taller than the control beside it. */
+  const waveHeight = ios ? 35 : 22;
+  /** `audioProgressViewSize`. */
+  const controlSize = ios ? 29 : 22;
+  /** `audioBalloonVerticalSpacing`: the audio balloon insets its row by 7, not by a text bubble's 10. */
+  const insetY = ios ? 7 : 5;
+  /** `audioBalloonWaveformTimeSpace`. */
+  const timeGap = ios ? 6 : 6;
   const played = duration > 0 ? Math.max(0, Math.min(1, position / duration)) : 0;
   const track = useRef<HTMLSpanElement>(null);
   const outgoing = direction === "outgoing";
@@ -95,11 +117,12 @@ export function MessageAudio({ peaks, duration, direction = "outgoing", tail = f
           what keeps an inline box, which otherwise overflows rather than wrapping, inside the
           measured padding; a long duration then narrows the bars instead. */}
       <span role="group" aria-label={`Audio message, ${clock(duration)}`}
-        className="inline-flex items-center align-middle" style={{ gap: ios ? 10 : 8, maxWidth: "100%", whiteSpace: "nowrap" }}>
+        className="inline-flex items-center align-middle"
+        style={{ gap: ios ? 10 : 8, maxWidth: "100%", whiteSpace: "nowrap", marginBlock: ios ? insetY - bubbleMetrics[platform].paddingY : 0 }}>
         <button type="button" aria-label={playing ? "Pause audio message" : "Play audio message"} aria-pressed={playing}
           onClick={() => onPlayChange?.(!playing)}
           className="flex shrink-0 items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff]"
-          style={{ width: rowHeight, height: rowHeight, background: outgoing ? "rgba(255,255,255,0.22)" : "rgba(0,0,0,0.08)", color: ink }}>
+          style={{ width: controlSize, height: controlSize, background: outgoing ? "rgba(255,255,255,0.22)" : "rgba(0,0,0,0.08)", color: ink }}>
           {playing ? (
             <svg aria-hidden="true" width={ios ? 11 : 9} height={ios ? 12 : 10} viewBox="0 0 11 12"><rect x="0" y="0" width="4" height="12" rx="1.2" fill="currentColor" /><rect x="7" y="0" width="4" height="12" rx="1.2" fill="currentColor" /></svg>
           ) : (
@@ -116,18 +139,20 @@ export function MessageAudio({ peaks, duration, direction = "outgoing", tail = f
             if (event.key === "ArrowLeft") { event.preventDefault(); onSeek(Math.max(0, position - 1)); }
           }}
           className="inline-flex flex-1 cursor-default items-center focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff]"
-          style={{ height: rowHeight, gap: barGap }}>
+          style={{ height: waveHeight, gap: barGap }}>
           {bars.map((peak, index) => {
             const reached = index / bars.length <= played;
             return (
               <span key={index} aria-hidden="true" style={{
-                width: barWidth, height: Math.max(3, peak * rowHeight), borderRadius: barWidth / 2,
+                width: barWidth, height: Math.max(3, peak * waveHeight), borderRadius: barWidth / 2,
                 background: ink, opacity: reached ? 1 : outgoing ? 0.45 : 0.28,
               }} />
             );
           })}
         </span>
-        <span aria-hidden="true" style={{ fontSize: ios ? 13 : 11, color: ink, opacity: 0.75, fontVariantNumeric: "tabular-nums" }}>
+        {/* `audioBalloonWaveformTimeSpace`: the waveform and the time sit closer than the control and
+            the waveform do, so this gap is its own, not the row's. */}
+        <span aria-hidden="true" style={{ marginInlineStart: timeGap - (ios ? 10 : 8), fontSize: ios ? 13 : 11, color: ink, opacity: 0.75, fontVariantNumeric: "tabular-nums" }}>
           {clock(playing || position > 0 ? duration - position : duration)}
         </span>
       </span>
