@@ -438,8 +438,8 @@ async function beginGesture(page: Page, info: TestInfo) {
     return at;
   };
   return {
-    /** A touch has no hover; only a mouse gesture may assert one. */
-    hovers: cdp === null,
+    /** A real finger, or the mouse standing in for one. A touch has no hover; a mouse pans nothing. */
+    touch: cdp !== null,
     async hover(target: Locator) { const { x, y } = await centre(target); await page.mouse.move(x, y); },
     /** Puts the pointer down at a stated point rather than at a control's centre. */
     async downAt(x: number, y: number) {
@@ -500,19 +500,23 @@ function styleOf(target: Locator) {
 const TRANSPARENT = "rgba(0, 0, 0, 0)";
 
 /**
- * Everything the element and its subtree paint, as one string to compare before against during.
+ * Everything the element and its subtree paint, as one string to compare rest against held.
  *
- * The subtree is the point. A pressed control does not always change its own box: the iOS details
- * rows put the highlight on a layer of their own, the composer's glass buttons dim the glass rather
- * than the button, and a row that delegates its fill to a child would look untouched from the
- * outside. Comparing the whole subtree asks the only question worth asking — did anything change on
- * screen — without pinning a colour this file has no measurement for.
+ * The subtree is the point. A pressed control does not always change its own box: the composer's
+ * glass buttons dim the glass layer rather than the button, and a row that delegates its fill to a
+ * child would look untouched from the outside. Comparing the whole subtree asks the only question
+ * worth asking — did anything change on screen — without pinning a colour this file has no
+ * measurement of its own for. The two colours it does have measured are asserted exactly, above.
  */
+function paintOf(target: Locator) {
+  return paintFrom(target);
+}
+
 /**
- * The paint of the element AND its parent's subtree. A pressed row does not always paint on itself:
- * `ios-details.tsx` puts the highlight on a `row-press` layer that is a SIBLING of the button inside
- * the cell's clip, so a subtree query rooted at the button sees a screen that never changes. The
- * parent is the smallest box that contains both.
+ * The same, rooted one level up. A pressed row does not always paint inside itself either:
+ * `ios-details.tsx` puts the highlight on a `row-press` layer that is a SIBLING of the button, both
+ * inside the cell's clip, so a subtree query rooted at the button sees a screen that never changes.
+ * The parent is the smallest box that holds both.
  */
 function paintAround(target: Locator) {
   return paintFrom(target.locator("xpath=.."));
@@ -542,10 +546,6 @@ function nextFrame(page: Page) {
   return page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 }
 
-function paintOf(target: Locator) {
-  return paintFrom(target);
-}
-
 function paintFrom(target: Locator) {
   return target.evaluate(root => [root, ...root.querySelectorAll("*")].map(element => {
     const style = getComputedStyle(element);
@@ -555,13 +555,32 @@ function paintFrom(target: Locator) {
   }).join("\n"));
 }
 
+/**
+ * Flips the harness's preview between the two palettes in place. The theme is a `dark` class on the
+ * preview wrapper — exactly what the workbench's own Theme control sets — so switching it here is
+ * the same switch a reader makes, without a second navigation. That matters: a WebKit navigation
+ * against the dev server takes 0.6 s on a good day and hangs past 15 s on a bad one (see the note on
+ * `scenes render without an uncaught page error`), so a test that loads twice to compare two colours
+ * is a test that reports the dev server rather than the kit.
+ */
+async function setPreviewTheme(page: Page, theme: "light" | "dark") {
+  await page.evaluate(next => {
+    const preview = document.querySelector<HTMLElement>("[data-preview-theme]");
+    if (!preview) throw new Error("the harness preview is not on the page");
+    preview.classList.toggle("dark", next === "dark");
+    preview.dataset.previewTheme = next;
+    preview.style.colorScheme = next;
+  }, theme);
+}
+
 test("a finger on a conversation row lights it, and letting go puts it out", async ({ page }, info) => {
   test.skip(platformFor(info) === "macos", "the iOS list is the touch surface; the sidebar's own press is the test below");
-  // Light and dark are two different colours out of ChatKit, and only one of them can be wrong at a
+  // Light and dark are two different colours out of ChatKit and only one of them can be wrong at a
   // time, so both are driven. The row is the THIRD: the row above a pressed one drops its separator
   // as well, and picking the first would leave that half of the behaviour unobserved.
+  await openScene(page, info, "list");
   for (const [theme, fill] of [["light", "rgb(220, 220, 220)"], ["dark", "rgb(70, 70, 70)"]] as const) {
-    await openScene(page, info, "list", 0, theme);
+    await setPreviewTheme(page, theme);
     const row = page.locator('[data-slot="row"]').nth(2);
     const button = row.locator("button");
     const separators = page.locator('[data-slot="separator"]');
@@ -629,9 +648,10 @@ test("a sidebar row answers hover and press with two different fills", async ({ 
  * because 0.85 on a 187 pt capsule reads as a different control rather than a pressed one); the
  * macOS glass buttons darken their fill and the waveform, which has no fill, dims instead.
  *
- * `after` is left unasserted on macOS: those fills ease back over `macComposerMetrics.press.release`
- * and the pointer is still inside the button, so what they settle to is the hover fill, not the rest
- * one. The invariant worth pinning is that the pressed marker goes, and that is asserted everywhere.
+ * The release is asserted as the pointer LEAVING the control rather than as a lift: a macOS fill
+ * eases back over `macComposerMetrics.press.release` to the HOVER colour, not to the rest one, so
+ * "the paint returned" is not a claim that holds with the mouse still on the button. "The press let
+ * go" is, on both platforms, and it is the invariant that was missing.
  */
 const chromeButtons = {
   ios: [
@@ -812,7 +832,11 @@ test("a mostly vertical drag scrolls the transcript instead of opening the drawe
   await gesture.up();
 
   expect(progress, "a vertical drag opens no drawer at all").toBe("0.000");
-  await expect.poll(scrollTop, { message: "the log scrolled instead" }).toBeLessThan(before);
+  // Only a real touch pans a scroller. A held mouse dragged down over an `overflow-y-auto` box moves
+  // nothing in either engine, so on the mouse path the assertion above — that the drawer stayed shut
+  // — is the whole of what this gesture can prove, and asserting a scroll there would be asserting
+  // the browser rather than the axis lock.
+  if (gesture.touch) await expect.poll(scrollTop, { message: "the log scrolled instead" }).toBeLessThan(before);
 });
 
 test("unread conversations draw a dot, announce themselves, and go white on the selection", async ({ page }, info) => {

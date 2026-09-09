@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
-  conversation, conversationList, detailsCollapseTravel, frameAt, frameworkMotion, nativeMotion,
-  scenarioRuns, scenarios, unverifiedMotion, viewerPhotos, type Platform, type ScenarioId,
+  conversation, conversationList, detailsCollapseTravel, frameAt, frameworkMotion, iosConversations,
+  macConversations, nativeMotion, scenarioRuns, scenarios, unreadConversationList, unverifiedMotion,
+  viewerPhotos, type Platform, type ScenarioId,
 } from "../../harness/scenarios";
 
 const scenarioFor = (id: ScenarioId) => scenarios.find(scenario => scenario.id === id)!;
@@ -407,6 +408,82 @@ describe("the presented surfaces", () => {
     // And one of the rows it leaves standing must be the selected one, which is where the annotation
     // takes the white the name takes. `alex` is what the preview selects for a non-group frame.
     expect(conversationList.find(item => item.id === "alex")!.preview.toLowerCase()).toContain("ou");
+  });
+  /**
+   * The unread scenario, and the fixture behind it. Both lists have drawn an unread dot since they
+   * were written and neither had ever drawn one, because no fixture in this repo had ever set the
+   * field: `conversationList` had six rows and not one of them was unread, so a screenshot of this
+   * kit showed a Messages list in which nothing was ever unread. These are the checks that make that
+   * a failing test rather than a missing pixel.
+   */
+  test("the unread scenario puts unread rows, a count and a selection in front of both lists", () => {
+    const frame = frameAt("list-unread", 0);
+    expect(frame.screen).toBe("list");
+    expect(frame.conversations).toBe(unreadConversationList);
+    // macOS shows the sidebar beside a transcript, so the scene also says which row is selected, and
+    // it is an unread one: the white-on-selection dot is the one behaviour the platforms disagree on.
+    expect(frame.selectedConversation).toBe("design");
+    const selected = unreadConversationList.find(item => item.id === frame.selectedConversation)!;
+    expect(selected.unread).toBeTruthy();
+    // And the pane behind it is that same conversation, so the row, the header and the transcript
+    // name one thing rather than three.
+    expect(frame.group?.name).toBe("Design Crit");
+    // It runs on both shells, because the two draw the state differently.
+    expect(scenarioRuns("list-unread", "ios") && scenarioRuns("list-unread", "macos")).toBe(true);
+
+    // Every case the two lists distinguish is in the fixture, and a read row is there to read the
+    // rest against.
+    expect(unreadConversationList.some(item => item.unread === true)).toBe(true);
+    expect(unreadConversationList.some(item => typeof item.unread === "number")).toBe(true);
+    expect(unreadConversationList.some(item => item.unread && item.muted)).toBe(true);
+    expect(unreadConversationList.some(item => item.unread && item.pinned)).toBe(true);
+    expect(unreadConversationList.some(item => item.unread && (item.members?.length ?? 0) > 1)).toBe(true);
+    expect(unreadConversationList.some(item => !item.unread)).toBe(true);
+  });
+  /**
+   * The regression net for the bug that cost the dot its existence. `preview.tsx` used to copy the
+   * fixture into each shell field by field, naming five keys and dropping everything else in
+   * silence — so `unread` reached neither list however the fixture was written. The copy now lives
+   * in `scenarios.ts` as `iosConversations` / `macConversations`, and this holds those two to the
+   * fixture's own keys: a field added to `ListFixture` that neither derivation carries fails here.
+   */
+  test("every field of a list fixture reaches one of the two lists", () => {
+    const ios = iosConversations(unreadConversationList);
+    const mac = macConversations(unreadConversationList);
+    expect(ios).toHaveLength(unreadConversationList.length);
+    expect(mac).toHaveLength(unreadConversationList.length);
+
+    const carried = new Set([...Object.keys(ios[0]), ...Object.keys(mac[0]), ...Object.keys(mac[1])]);
+    for (const key of Object.keys(unreadConversationList[1])) {
+      expect(`${key}: ${carried.has(key) ? "carried" : "dropped"}`).toBe(`${key}: carried`);
+    }
+
+    // iOS takes a boolean, so a count reaches it as a plain dot; macOS keeps the number to announce.
+    for (const [index, row] of unreadConversationList.entries()) {
+      expect(ios[index].unread).toBe(!!row.unread);
+      expect(mac[index].unread).toBe(row.unread);
+      expect(mac[index].pinned).toBe(row.pinned);
+      expect(mac[index].muted).toBe(row.muted);
+    }
+    // The iOS list has no notion of a sender, so a group row's prefix is composed into the preview —
+    // which is exactly what the shared fixture bakes in by hand for the same row.
+    const group = unreadConversationList.findIndex(item => (item.members?.length ?? 0) > 1);
+    expect(ios[group].preview).toBe(`${unreadConversationList[group].sender}: ${unreadConversationList[group].preview}`);
+    expect(mac[group].preview).toBe(unreadConversationList[group].preview);
+    expect(mac[group].sender).toBe(unreadConversationList[group].sender);
+  });
+  /**
+   * The shared fixture stays read on purpose. It is what every other scenario's sidebar and list is
+   * screenshotted against, so an unread dot in here would move a hundred baselines that have nothing
+   * to do with unread — `list-unread` carries its own rows instead.
+   */
+  test("the shared conversation fixture is entirely read, and every frame starts from it", () => {
+    expect(conversationList.every(item => !item.unread)).toBe(true);
+    expect(iosConversations(conversationList).every(item => item.unread === false)).toBe(true);
+    for (const scenario of scenarios) {
+      if (scenario.id === "list-unread") continue;
+      expect(`${scenario.id}: ${frameAt(scenario.id, 0).conversations === conversationList ? "shared" : "its own"}`).toBe(`${scenario.id}: shared`);
+    }
   });
   /** The macOS inspector's participant row, which only a group has anybody to draw. */
   test("the inspector on a group names the same three people the transcript does", () => {

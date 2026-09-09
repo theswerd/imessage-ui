@@ -11,7 +11,8 @@ import { bodyClipPath, tailBox, tailPath, tailSeamOverlap } from "@/registry/ime
  * same traced outline in `bubble-shape.ts` clips the image instead of filling it.
  *
  * NOT MEASURED against a native photo message: the corner radius and tail come from the measured text
- * bubble, and the multi-photo grid follows the documented layout. The tile gap is provisional.
+ * bubble. The multi-photo layout is the stack ChatKit actually draws, with the framework's own
+ * constants — see `photoStackLayout` for which parts of composing them are a reading.
  *
  * ## What a photo message offers, and what is here (audit, 2026-09-09)
  *
@@ -25,23 +26,23 @@ import { bodyClipPath, tailBox, tailPath, tailSeamOverlap } from "@/registry/ime
  * | video duration badge    | none on a transcript balloon                                   | NO — and correctly so. `CKMovieBalloonView` is `CKImageBalloonView` plus an `AVPlayerLayer` and has no duration label at all (`playsInlineVideo` = 1). The only `_durationLabel` in ChatKit is on `CKPhotoSearchResultCell`, the search-results cell. Adding one to a bubble would be inventing a control native does not draw |
  * | Live Photo badge        | `CKImageBalloonView._irisBadgeView`, `livePhotoBadgeImage`      | yes, added here: symbol identity and ring geometry MEASURED off the framework's own `UIImage` (see `livePhotoBadge`); its position in the tile is judgement |
  * | spatial badge           | `CKImageBalloonView._monoskiBadgeView`                          | NO. Not built; no size read yet |
- * | overflow count past 4   | see the stack note below                                       | drawn as a "+N" scrim on the fourth tile. UNMEASURED, and probably the wrong shape — native's counter is the stack's "additional items card" (`stackViewDidSelectAdditionalItemsCard:`, `_updateAdditionalItemsCount`), not a tile |
+ * | overflow count past 4   | `PXMessagesStackAdditionalItemsView`, `_localizedTitleForAdditionalItemsCount:` | yes: the last card slot stops being a photo and becomes the count card, a blur under SF Bold 17 in systemBlue reading "+7 Items". The copy and the type are MEASURED; the blur has nothing behind it to measure against |
  * | tap target → viewer     | —                                                              | yes: every tile is a `<button>` and `onOpenImage` hands the viewer the tile's own `DOMRect` |
  *
- * ## The grid is very likely the wrong layout, and this is not a small point
+ ## The grid was the wrong layout, and it is gone
  *
  * There is no photo-*grid* balloon in ChatKit. Two or more attachments on one message are a **stack**:
- * `CKPhotoStackBalloonView` / `CKStaticPhotoStackBalloonView` / `CKGenericPhotoStackBalloonView`,
- * driven by `PXMessagesStackBalloonViewController` over a `CKStaticImageStackView` whose frames come
- * from `PFMessagesStackLayoutFrameSolver`, with `stackView:didChangeCurrentAssetReference:…` for the
- * swipe and `stackViewDidSelectAdditionalItemsCard:` for the counter. The `CKPhotoGrid*` names in the
- * framework belong to the full-screen grid the stack opens into, not to the transcript. The
- * accessibility format this file already quotes, `messages.attachment.stack.view.format`, is that
- * stack view's.
+ * `CKGenericPhotoStackBalloonView` over a `PXMessagesStackView`, which pages left and right
+ * (`pageLeftAnimated:` / `pageRightAnimated:`) and counts the rest on a
+ * `PXMessagesStackAdditionalItemsView`. The `CKPhotoGrid*` names in the framework belong to the
+ * full-screen grid the stack opens into, not to the transcript. The accessibility format this file
+ * quotes, `messages.attachment.stack.view.format`, is that stack view's.
  *
- * The 2x2 tiling here is therefore a pre-stack layout kept because it is the one thing that can be
- * built without a capture: the stack's frames live in PhotoFoundation's solver, and no capture of a
- * multi-photo message exists to fit them against. Recorded, not fixed.
+ * The note that used to sit here said the stack could not be built because its frames live in
+ * PhotoFoundation's solver and no capture exists to fit them against. Half of that was wrong: the
+ * constants are readable — see `photoStackLayout` — and they are what this draws now. The half that
+ * still stands is that no capture of a multi-photo message exists, so *composing* those constants is
+ * a reading and is marked as one.
  *
  * The stack's **outer box**, though, is no longer a guess — see `photoStackBox`. `PFMessagesStackLayoutFrameSolver`
  * only ever hands out *normalized* geometry (`normalizedVerticalInsets`, `normalizedVerticalOffset`,
