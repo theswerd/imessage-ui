@@ -233,8 +233,15 @@ export type PhotoPickerPlatform = "ios" | "macos";
  * | `attachmentBrowserGridSectionInset` | {8, 8} | {8, 8} |
  * | `attachmentBrowserGridInterItemSpacing` | 4 | 4 |
  * | `attachmentBrowserGridMinimumLineSpacing` | 4 | 4 |
- * | `attachmentBrowserDefaultSizeForSquare` | **104** | **72.5** |
+ * | `attachmentBrowserDefaultSizeForSquare` | **{104, 104}** | **{72.5, 72.5}** |
  * | `searchPhotosCellCornerRadius` | **8** | **0** |
+ *
+ * Two readings in that table are narrower than they look, and both are recorded rather than hidden.
+ * `attachmentBrowserDefaultSizeForSquare` returns a `CGSize`, not a scalar - it is square, so the
+ * one number is the whole of it, but the selector is not a length. And `searchPhotosCellCornerRadius`
+ * names the cell in *search*, not the attachment browser's; nothing on either class names the
+ * browser tile's corner, so 8 is that neighbour's radius borrowed, which is why the tile carries it
+ * as a `clip-path` and not as a measured token.
  *
  * There is **no** photo-specific popover selector on either class: the whole
  * `browser|picker|popover|photo|grid|sticker` selector list on `CKUIBehaviorMac` and on the base
@@ -360,10 +367,44 @@ function useMacPopoverPlacement(
   radius: number,
 ) {
   const [placement, setPlacement] = useState<{ left: number; top: number; arrowX: number } | null>(null);
+  const last = useRef<{ left: number; top: number; arrowX: number } | null>(null);
   useLayoutEffect(() => {
     const node = root.current;
     if (!enabled || !node) return;
-    const base = node.getBoundingClientRect();
+    const place = () => {
+    /**
+     * The origin is taken through `offsetParent`, not from `node.getBoundingClientRect()`, and the
+     * difference is a bug that only showed on the path a person actually takes.
+     *
+     * `useHostPlatform` sniffs in a layout effect, so the first client commit renders the *iOS*
+     * branch. Both branches return a `<div>` in the same slot, so React reuses the DOM node, and the
+     * iOS entrance animation - `fill: "both"`, `translateY(restHeight + inset)` - is still on that
+     * node when the sniff flips to macOS and this effect runs. A rect taken then is 393 pt low, the
+     * placement is committed against it, and when the animation goes away the popover is left 393 pt
+     * high: `top: -398px`, arrow pointing at the header, over the sidebar and the titlebar. Every
+     * screenshot missed it because `/harness?scene=photo-picker` mounts with `progress` set (the
+     * animation is seeked, not running) and `/lab/macos-pickers` passes `platform="macos"` (there is
+     * no iOS commit at all).
+     *
+     * `offsetLeft`/`offsetTop`/`offsetWidth`/`offsetHeight` are layout, so the node's own transform
+     * cannot reach them; the parent's rect is still a rect, so a transform on an *ancestor* is kept,
+     * which is right - the button's rect lives in that same space.
+     */
+    const parent = node.offsetParent;
+    let base: { left: number; top: number; width: number; height: number };
+    if (parent instanceof HTMLElement) {
+      const box = parent.getBoundingClientRect();
+      const edge = getComputedStyle(parent);
+      base = {
+        left: box.left + parseFloat(edge.borderLeftWidth) + node.offsetLeft,
+        top: box.top + parseFloat(edge.borderTopWidth) + node.offsetTop,
+        width: node.offsetWidth,
+        height: node.offsetHeight,
+      };
+    } else {
+      const box = node.getBoundingClientRect();
+      base = { left: box.left, top: box.top, width: box.width, height: box.height };
+    }
     const host = node.closest("[data-im-platform]") ?? node.ownerDocument.body;
     const button = host.querySelector('[data-slot="attach-button"]');
     const rect = button?.getBoundingClientRect();
@@ -382,12 +423,26 @@ function useMacPopoverPlacement(
     // Measuring the DOM and rendering against what came back is the one thing a layout effect is
     // for, and it cannot be lifted into render: the "+" button does not exist until the commit.
     // The pose is committed before the browser paints, so no frame shows the popover unplaced.
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- a layout measurement, see above
-    setPlacement({
+    const next = {
       left,
       top: anchor.top - arrow.height - box.height,
       arrowX: Math.max(inset, Math.min(centre, box.width - inset)),
-    });
+    };
+    const previous = last.current;
+    if (previous && previous.left === next.left && previous.top === next.top && previous.arrowX === next.arrowX) return;
+    last.current = next;
+    setPlacement(next);
+    };
+    place();
+    // The measurement is only as good as the frame it was taken in: the "+" button can still be
+    // moving when the shell mounts. Re-measuring on the next frame and on any resize of the host
+    // costs one comparison when nothing has changed, and the comparison above makes a re-place that
+    // agrees with the last one a no-op rather than a render.
+    const frame = requestAnimationFrame(place);
+    const host = node.closest("[data-im-platform]") ?? node.ownerDocument.body;
+    const observer = new ResizeObserver(place);
+    observer.observe(host);
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); };
   }, [root, enabled, box.width, box.height, arrow.width, arrow.height, radius]);
   return placement;
 }

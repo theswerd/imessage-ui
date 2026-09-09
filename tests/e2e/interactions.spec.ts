@@ -467,10 +467,24 @@ async function beginGesture(page: Page, info: TestInfo) {
      * on a control whose click would navigate away from the thing being measured. A cancelled touch
      * is what the browser itself sends when a gesture is taken over for panning, and it is the path
      * `UITableView` treats as "a touch that became a scroll never highlights".
+     *
+     * The mouse has no such event. Moving off the control and releasing there is not enough either:
+     * these buttons take the pointer with `setPointerCapture`, and WebKit delivers the compatibility
+     * click to the capture target however far the mouse has travelled — measured 2026-09-09, where a
+     * released hold on "Back" popped the conversation and left the next assertion looking at a list.
+     * So the release is fenced with a one-shot capture-phase listener on `document`, which runs ahead
+     * of React's root listener and stops the click before any handler sees it. It is scoped to this
+     * teardown and to nothing else: no test asserts through it, and a click that a test means to
+     * deliver goes through `up()` or through Playwright's own `click()`.
      */
     async abort() {
       if (cdp) { await cdp.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] }); return; }
       await page.mouse.move(2, 2);
+      await page.evaluate(() => {
+        const swallow = (event: Event) => { event.stopPropagation(); event.preventDefault(); document.removeEventListener("click", swallow, true); };
+        document.addEventListener("click", swallow, true);
+        setTimeout(() => document.removeEventListener("click", swallow, true), 500);
+      });
       await page.mouse.up();
     },
   };
@@ -635,17 +649,17 @@ const chromeButtons = {
 } as const;
 
 test("every chrome button takes a press, changes what it paints, and raises no focus ring", async ({ page }, info) => {
-  // One load per button, not one for the file. Back, the name pill and "+" all present something on
-  // release, and WebKit delivers the compatibility click to a captured button even when the pointer
-  // ends elsewhere — so a shared page would put the next button behind a pushed screen or a popover.
-  // A fresh load is also what makes `rest` a rest pose: on a shared page the send arrow inherits the
-  // DOM node the mic just released, and its 100 ms ease back reads as a pressed button.
-  test.slow();
+  // One page for the whole table. A load per button would be the obvious way to keep the buttons
+  // from presenting things on each other, but a WebKit navigation against the dev server takes
+  // anywhere from 0.6 to 15 s (the file's own note on `scenes render…` says why), so five of them is
+  // a test that times out rather than a test that fails. `beginGesture().abort()` fences the release
+  // instead, and `settled()` keeps the previous button's 100 ms ease-back out of the next one's rest
+  // pose — which matters most on the send arrow, since React hands it the DOM node the mic released.
+  await openScene(page, info, "conversation");
   for (const button of chromeButtons[platformFor(info)]) {
-    await openScene(page, info, "conversation");
     // The send arrow only exists while there is a draft; the mic and the waveform only while there
     // is not. So the field is set per button rather than once.
-    if (button.draft) await composerField(page).fill("Blue for iMessage.");
+    await composerField(page).fill(button.draft ? "Blue for iMessage." : "");
     const target = page.locator(`[data-slot="${button.slot}"]`).first();
     await expect(target, `${button.slot} is on screen`).toBeVisible();
     const rest = await settled(page, () => paintOf(target));
@@ -655,7 +669,10 @@ test("every chrome button takes a press, changes what it paints, and raises no f
     await gesture.down(target);
     await expect(target, `${button.slot} takes a press`).toHaveAttribute("data-pressed");
     // The marker alone would pass on a button that draws nothing, so the paint has to move too.
-    expect(await paintOf(target), `${button.slot} must look pressed, not merely be marked pressed`).not.toBe(rest);
+    // Polled, not sampled once: the macOS glass buttons ease their fill in over `press.release`, so
+    // on the frame the marker lands they are still painting the colour they had.
+    await expect.poll(async () => (await paintOf(target)) === rest ? "unchanged" : "moves",
+      { message: `${button.slot} must look pressed, not merely be marked pressed` }).toBe("moves");
     expect((await styleOf(target)).focusVisible, `${button.slot} must not raise a focus ring under a pointer`).toBe(false);
 
     // A press that wanders off the control commits nothing and paints nothing: `usePress` tracks the
@@ -699,7 +716,11 @@ test("the Hide Alerts switch toggles with nothing controlling it", async ({ page
 /** The rows and buttons each details screen makes pressable, by the slot each one carries. */
 const detailsPressables = {
   ios: { details: ["action", "block"], "group-details": ["action", "participant", "leave"] },
-  macos: { details: ["details-close", "details-tab", "details-action", "details-handle"] },
+  // `details-link`, `details-attachment` and `details-handle` are NOT here: the harness fixtures give
+  // them no handler, so `MacDetails` renders them as plain divs with no press to drive. Giving them
+  // one would turn the handle rows blue (`tone={handle.onPress ? "tint" : "label"}`) and move the
+  // inspector's visual baselines, which is a change for whoever owns those, not for this file.
+  macos: { details: ["details-close", "details-tab", "details-action", "details-photo"] },
 } as const;
 
 test("the details screens answer a press on every row that has one", async ({ page }, info) => {
@@ -719,7 +740,8 @@ test("the details screens answer a press on every row that has one", async ({ pa
       // latches under a CDP touch, so an `:active` assertion would pass on a screen that does
       // nothing — which is what these screens did.
       await expect(target, `${scene}: ${slot} takes a press`).toHaveAttribute("data-pressed");
-      expect(await paintAround(target), `${scene}: ${slot} must paint its press, not merely be marked`).not.toBe(rest);
+      await expect.poll(async () => (await paintAround(target)) === rest ? "unchanged" : "moves",
+        { message: `${scene}: ${slot} must paint its press, not merely be marked` }).toBe("moves");
       expect((await styleOf(target)).focusVisible, `${scene}: ${slot} must not raise a focus ring under a pointer`).toBe(false);
 
       await gesture.abort();
@@ -830,4 +852,40 @@ test("unread conversations draw a dot, announce themselves, and go white on the 
   expect((await styleOf(selectedRow.locator('[data-slot="row-unread"]'))).background).toBe("rgb(255, 255, 255)");
   const unselected = page.locator('[data-slot="sidebar-row"][data-selected="false"] [data-slot="row-unread"]').first();
   expect((await styleOf(unselected)).background).toBe("rgb(0, 136, 255)");
+});
+
+/**
+ * The macOS attachment popovers are placed by measuring the DOM, and the measurement used to be
+ * taken through the node the *iOS* entrance animation had left a `translateY` on: `useHostPlatform`
+ * sniffs in a layout effect, so the first client commit renders the iOS sheet, React reuses the div
+ * for the macOS branch, and the `fill: "both"` keyframe was still on it. The popover ended up
+ * `top: -398px` - one `restHeight + inset` too high, hanging over the sidebar and the titlebar -
+ * every time it was opened by clicking, which is the only path the shell has.
+ *
+ * Neither of the routes the work was checked on could see it: `?scene=photo-picker` mounts with
+ * `progress` set, so the animation is seeked rather than running, and `/lab/macos-pickers` passes
+ * `platform="macos"`, so there is no iOS commit at all. So this test drives the button.
+ */
+test("a macOS attachment popover opened by clicking lands on its button", async ({ page }, info) => {
+  test.skip(platformFor(info) !== "macos", "the popover presentation is the Mac's");
+  const device = await openScene(page, info, "conversation");
+  const pane = await device.boundingBox();
+
+  for (const [row, slot] of [["Photos", "photo-picker"], ["Stickers", "sticker-picker"]] as const) {
+    await page.locator('[data-slot="attach-button"]').click();
+    await page.getByRole("menuitem", { name: row }).click();
+    const popover = page.locator(`[data-slot="${slot}"][data-platform="macos"] [data-slot="mac-popover"]`);
+    await expect(popover).toBeVisible();
+    const box = (await popover.boundingBox())!;
+    const button = (await page.locator('[data-slot="attach-button"]').boundingBox())!;
+
+    // Inside the window it belongs to, on every edge. The old bug put its top 172 px above the pane.
+    expect(box.y, `${row} popover top is inside the pane`).toBeGreaterThanOrEqual(pane!.y - 1);
+    expect(box.x, `${row} popover left is inside the pane`).toBeGreaterThanOrEqual(pane!.x - 1);
+    expect(box.y + box.height, `${row} popover sits above the + button`).toBeLessThanOrEqual(button.y + 1);
+    // It opens upward off the button, so its bottom edge is within an arrow's height of the top of
+    // the button rather than somewhere else entirely.
+    expect(button.y - (box.y + box.height), `${row} popover hugs the button`).toBeLessThan(24);
+    await page.keyboard.press("Escape");
+  }
 });
