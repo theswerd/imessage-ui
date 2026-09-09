@@ -348,7 +348,7 @@ export function HarnessPreview({ platform, scenario, time, interactive = true, o
             // so it stays in the tertiary state the capture shows for an action that is not offered.
             onAudioCall: () => onEvent?.("details.call"),
             onFaceTime: () => onEvent?.("details.facetime"),
-            onBlock: () => onEvent?.("details.block") }}
+            onBlock: blocked => onEvent?.(`details.block ${blocked ? "on" : "off"}`) }}
           onDetails={() => onEvent?.("navigation.details")}
           onCloseDetails={() => onEvent?.("navigation.details.close")}
           onGroupEvent={event => onEvent?.(`group.${event.type}`)}

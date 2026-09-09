@@ -161,8 +161,22 @@ export type IosDetailsProps = Omit<ComponentProps<"div">, "children" | "onChange
   photos?: IosDetailsSection<IosDetailsPhoto>;
   sharedLinks?: IosDetailsSection<IosDetailsItem>;
   attachments?: IosDetailsSection<IosDetailsItem>;
+  /**
+   * The destructive row's two states. It is a toggle in Messages, not a one-way trip: the row reads
+   * `BLOCK_CONTACT` ("Block Contact") and, once the contact is blocked, `UNBLOCK_CONTACT` ("Unblock
+   * Contact") — both ChatKit's own strings. Omit `blocked` and the row keeps its own state, the way
+   * `IosSwitch` does, so the row answers a press with nothing wired.
+   *
+   * **NOT BUILT: the confirmation.** iOS puts an action sheet in front of this whose message is
+   * `BLOCK_SENDER_TITLE` ("You will not receive phone calls, messages, or FaceTime from people on
+   * the block list.") over a destructive `BLOCK_CONTACT` and a Cancel. No capture in `references/`
+   * holds it, and its geometry would be invented, so the row toggles and reports instead.
+   */
+  blocked?: boolean;
+  defaultBlocked?: boolean;
   blockLabel?: string;
-  onBlock?: () => void;
+  unblockLabel?: string;
+  onBlock?: (blocked: boolean) => void;
   onBack?: () => void;
   /** The conversation behind the screen; rendered blurred and washed out. */
   backdrop?: ReactNode;
@@ -852,7 +866,8 @@ export function IosDetails({
   name, initials, avatar, phoneLabel = "phone", phone, tag, actions = [], links = [],
   // No `= false` here: that default is what made the switch uncontrolled-but-pinned. `undefined`
   // has to reach `IosSwitch` for it to keep its own state.
-  hideAlerts, defaultHideAlerts, onHideAlertsChange, hideAlertsLabel = "Hide Alerts", blockLabel = "Block Contact", onBlock,
+  hideAlerts, defaultHideAlerts, onHideAlertsChange, hideAlertsLabel = "Hide Alerts",
+  blocked, defaultBlocked = false, blockLabel = "Block Contact", unblockLabel = "Unblock Contact", onBlock,
   photos, sharedLinks, attachments,
   onBack, backdrop, progress, scroll, open = true, onExited, className, style, ...props
 }: IosDetailsProps) {
@@ -874,6 +889,9 @@ export function IosDetails({
   // The dismissal is derived during render, not in an effect: an effect leaves one committed frame
   // with the screen already gone, and the exit never runs. `closing` also separates a screen that is
   // leaving (fire `onExited`, stop taking clicks) from one mounted closed, which just sits dismissed.
+  // Uncontrolled unless the caller states it, the same contract `IosSwitch` documents.
+  const [ownBlocked, setOwnBlocked] = useState(defaultBlocked);
+  const isBlocked = blocked ?? ownBlocked;
   const [seenOpen, setSeenOpen] = useState(open);
   const [closing, setClosing] = useState(false);
   if (seenOpen !== open) { setSeenOpen(open); setClosing(!open); }
@@ -1100,7 +1118,7 @@ export function IosDetails({
   if (attachments && attachments.items.length > 0) place(listHeight(attachments), top => <ListCell key="attachments" section={attachments} title="Attachments" top={top} />);
   place(cell.row, top => (
     <Cell key="block" top={top} height={cell.row}>
-      <BlockRow label={blockLabel} onPress={onBlock} />
+      <BlockRow label={isBlocked ? unblockLabel : blockLabel} onPress={() => { if (blocked === undefined) setOwnBlocked(!isBlocked); onBlock?.(!isBlocked); }} />
     </Cell>
   ));
   // The page ends 20 below the last group: the measured gap, used as the bottom inset.

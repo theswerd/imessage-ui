@@ -261,7 +261,8 @@ export type IosMessagesAppProps = {
     attachments?: IosDetailsSection<IosDetailsItem>;
     onAddContact?: () => void;
     onLeave?: () => void;
-    onBlock?: () => void;
+    /** Blocking is a toggle; the row reports which way it went. */
+    onBlock?: (blocked: boolean) => void;
     /**
      * The three glass circles under the name. Leave it out and the screen still draws all three,
      * which is what `details-light.png` shows: an action this contact cannot take keeps its circle
