@@ -157,7 +157,11 @@ export function MessageBubble({
     <div data-slot="message-bubble" data-direction={direction} data-service={service} data-platform={platform} data-selected={selected ? "true" : undefined}
       className={cn("flex min-w-0 flex-col", selectionOverlayClass, outgoing ? "items-end" : "items-start", className)}
       style={{ fontFamily: fontStack, ...vars, ...style }} {...props}>
-      {sender && <span data-slot="sender" className="mb-[2px] px-[14px] text-[12px] leading-[14px]" style={{ color: "var(--im-secondary)" }}>{sender}</span>}
+      {/* `-[CKUIBehavior senderTranscriptInsets]` is {0, 14, 0, 0} on iPhone and {0, 12, 0, 0} at
+          idiom 5: a leading inset only, with nothing on the top, bottom or trailing edge. This used
+          to spend the same 14 on both sides and on both platforms. The type is still unmeasured. */}
+      {sender && <span data-slot="sender" className="mb-[2px] text-[12px] leading-[14px]"
+        style={{ color: "var(--im-secondary)", paddingInlineStart: platform === "ios" ? 14 : 12 }}>{sender}</span>}
       <div ref={frame} data-slot="bubble-frame" className="relative max-w-full" style={{ maxWidth: maxWidth ?? (platform === "ios" ? m.maxWidth : `${m.maxWidthRatio * 100}%`), marginTop: reactions ? reactionOffset.marginTop : undefined }}>
         {big ? (
           <div data-slot="emoji" style={{ fontSize: m.emojiOnlySize, lineHeight: `${m.emojiOnlyLineHeight}px`, fontFamily: emojiFontStack, padding: `0 ${m.emojiOnlyInset}px` }}>

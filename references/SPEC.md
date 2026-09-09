@@ -422,7 +422,9 @@ described as measured:
   carry `data-selected` but no fill change.
 - The iOS link card and both rich link variants (macOS compact is measured).
 - The receive animation (pop from the typing indicator).
-- Group-chat sender-name placement.
+- Group-chat sender-name **type**. Its placement is settled: `-[CKUIBehavior senderTranscriptInsets]`
+  is **{0, 14, 0, 0}** on iPhone and **{0, 12, 0, 0}** at idiom 5 - a leading inset only, nothing
+  on the other three edges. The kit used to spend the same 14 on both sides and on both platforms.
 - "Yesterday" and weekday date-header wording, and whether later headers drop the service line.
 - **Message effects** (`message-effects.tsx`, `screen-effects.tsx`): the four bubble effects and the
   nine screen effect animations. Shapes and timings follow the documented look. Screen effects that
