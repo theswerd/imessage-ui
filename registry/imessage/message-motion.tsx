@@ -42,6 +42,20 @@ export const messageMotion = {
   reaction: 320,
   press: 120,
   longPress: 500,
+  /**
+   * `-[CKUIBehaviorPhone sendAnimationDuration]` is **0.4**, and that is not a contradiction of the
+   * 690 here - it is the flight, not the whole thing. Tracking the sent bubble's bottom edge through
+   * `references/ios/motion/send-60fps.mp4` at 60 fps, from the frame the composer empties:
+   *
+   *   t 0      the bubble appears with its bottom at device y 856.5
+   *   t 400    it has arrived, bottom 728.5 - this is where ChatKit's 0.4 ends
+   *   t 400-667 it springs back down 728.5 -> 733.5, five device pixels
+   *   t 667-1017 stationary
+   *   t 1017+  it moves again, which is the next event and not this animation
+   *
+   * So 0.4 s is the travel and the settle runs to about 667; 690 is that settle rounded off the
+   * frame grid. Do not "fix" this to 400 - the bubble would stop dead where native is still moving.
+   */
   send: {
     morph: 17, liftoff: 33, shrink: 150, duration: 690,
     textReveal: 25, textVisible: 70,
