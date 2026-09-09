@@ -228,7 +228,14 @@ export const palettes: Record<Platform, { light: Palette; dark: Palette }> = {
       secondaryLabel: "#8d8d93",
       edited: "#3f8ff7",
       tapbackMine: "#0088ff",
-      tapbackTheirs: "#262629",
+      /**
+       * Not the incoming bubble's #262629, which is what this used to borrow. The balloon another
+       * person's reaction gets is `messageAcknowledgmentBalloonColorTypeForStyle:` 0, whose
+       * `balloonColorsForColorType:` resolves to **#e9e9eb** light and **#3b3b3d** dark - the same
+       * pair at idiom 0 and idiom 5, which is why macOS below already ships #3b3b3d. No capture on
+       * either platform contains someone else's balloon, so the framework is the only source.
+       */
+      tapbackTheirs: "#3b3b3d",
       separator: "#38383a",
     },
   },

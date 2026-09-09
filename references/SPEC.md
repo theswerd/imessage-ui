@@ -45,7 +45,7 @@ Units are points unless stated. Fractions come from the 3x/2x pixel grid; reprod
 | Incoming bubble | #e9e9eb, text #000000 | #262629, text #ffffff |
 | Screen background | #ffffff | #000000 |
 | Secondary label (Delivered, date, spam notice) | #8a8a8e | #8d8d93 |
-| Others' tapback balloon | #e9e9eb | #262629 |
+| Others' tapback balloon | #e9e9eb | **#3b3b3d** — `messageAcknowledgmentBalloonColorTypeForStyle:` 0 resolves through `balloonColorsForColorType:` to this pair at idiom 0 and idiom 5 alike. The #262629 here before was the incoming bubble's colour borrowed; no capture on either platform contains someone else's balloon |
 | Composer field fill | #ffffff (glass, soft shadow) | #191919, placeholder #5d5d5d |
 | Name pill | #ffffff glass, text #000 | #191919, text #f4f3f4 |
 | Link buttons ("Report Spam") | #0088ff on #e9e9eb | #0091ff on #262629 |

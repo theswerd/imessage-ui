@@ -130,7 +130,7 @@ export function tapbackVars(theme: "light" | "dark", platform: Platform = "ios")
   } : {
     "--im-dim": "rgba(22,21,42,0.21)", "--im-glass": "rgba(38,37,39,0.8)", "--im-glass-filter": "blur(9px) saturate(1.6)", "--im-glass-solid": "#1f1e21", "--im-glass-rim": "rgba(255,255,255,0.10)",
     "--im-glass-shadow": "0 6px 24px rgba(0,0,0,0.5)", "--im-picker-icon": "#8e8e93", "--im-menu-glass": "rgba(20,22,23,0.8)", "--im-menu-glass-filter": "blur(9px) saturate(2)", "--im-menu-bg": "#121316", "--im-menu-text": "#ffffff", "--im-menu-shadow": "rgba(0,0,0,0.098)",
-    "--im-menu-separator": "rgba(255,255,255,0.15)", "--im-menu-destructive": "#ff453a", "--im-tapback-own": tapbackColors.ownDark, "--im-tapback-theirs": "#262629", "--im-tapback-ring": tapbackColors.selectedRingDark,
+    "--im-menu-separator": "rgba(255,255,255,0.15)", "--im-menu-destructive": "#ff453a", "--im-tapback-own": tapbackColors.ownDark, "--im-tapback-theirs": "#3b3b3d", "--im-tapback-ring": tapbackColors.selectedRingDark,
   };
   if (platform === "ios") return ios;
   const macos = { "--im-tapback-own": macosBalloonFill, "--im-tapback-own-surface": macosBalloonSurface };
