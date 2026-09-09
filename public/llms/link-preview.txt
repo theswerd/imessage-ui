@@ -1,0 +1,27 @@
+# Link preview
+
+The measured compact link card, plus a rich variant with an image, title and host.
+
+## Requirements
+
+React 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor.
+
+## Install
+
+```sh
+npx shadcn@latest add http://localhost:3100/r/link-preview.json
+```
+
+## Usage
+
+```tsx
+import { LinkPreview } from "@/components/imessage/link-preview";
+
+<LinkPreview
+  href="https://ui.shadcn.com"
+  title="Build your component library."
+  description="Beautifully designed components you can customize."
+/>
+```
+
+Components render UI only. Supply your own message data, persistence, uploads, and send handlers. No iMessage or Apple service connection is included.

@@ -1,0 +1,23 @@
+# iOS nav bar
+
+The conversation nav bar with the glass back button, large avatar, and name pill, plus the list's large title.
+
+## Requirements
+
+React 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor.
+
+## Install
+
+```sh
+npx shadcn@latest add http://localhost:3100/r/ios-nav-bar.json
+```
+
+## Usage
+
+```tsx
+import { IosNavBar } from "@/components/imessage/ios-nav-bar";
+
+<IosNavBar name="Alex Morgan" onBack={() => history.back()} />
+```
+
+Components render UI only. Supply your own message data, persistence, uploads, and send handlers. No iMessage or Apple service connection is included.

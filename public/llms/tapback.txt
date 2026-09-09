@@ -1,0 +1,25 @@
+# Tapback
+
+The native reaction balloon: six classic Tapbacks and custom emoji, own and others' colors, counts, and the selected state.
+
+## Requirements
+
+React 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor.
+
+## Install
+
+```sh
+npx shadcn@latest add http://localhost:3100/r/tapback.json
+```
+
+## Usage
+
+```tsx
+import { Tapback } from "@/components/imessage/tapback";
+
+<Tapback reaction="love" />
+<Tapback reaction="like" selected={liked}
+  onClick={() => setLiked(!liked)} />
+```
+
+Components render UI only. Supply your own message data, persistence, uploads, and send handlers. No iMessage or Apple service connection is included.

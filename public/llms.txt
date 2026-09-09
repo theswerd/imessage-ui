@@ -1,0 +1,51 @@
+# iMessage UI
+
+A shadcn registry of Messages components for the web, measured against iOS 26 and macOS 26.
+
+Registry: http://localhost:3100/r/registry.json
+Namespace: @imessage → http://localhost:3100/r/{name}.json
+
+- [Platform context](http://localhost:3100/llms/platform.txt): Tells every iMessage component whether to render iOS 26 or macOS 26 metrics.
+- [Design tokens](http://localhost:3100/llms/tokens.txt): Measured colors, screen-space bubble gradients, type scale, and spacing for iOS and macOS.
+- [Bubble shape](http://localhost:3100/llms/bubble-shape.txt): The traced native bubble outline and tail as SVG path and clip-path generators.
+- [Screen-space fill hook](http://localhost:3100/llms/use-screen-space.txt): Keeps bubble fills aligned to the screen-space gradient while a list scrolls.
+- [Message bubble](http://localhost:3100/llms/message-bubble.txt): Native iOS 26 and macOS 26 bubbles: traced outline and tail, screen-space gradient fill, status, edited, reactions, and emoji-only messages.
+- [Tapback](http://localhost:3100/llms/tapback.txt): The native reaction balloon: six classic Tapbacks and custom emoji, own and others' colors, counts, and the selected state.
+- [Typing indicator](http://localhost:3100/llms/typing-indicator.txt): The native typing bubble with its three staggered dots and trailing circles.
+- [Date separator](http://localhost:3100/llms/date-separator.txt): Date headers: the iOS two-line header with its service line, the mid-list one-liner, and the macOS variant.
+- [Link preview](http://localhost:3100/llms/link-preview.txt): The measured compact link card, plus a rich variant with an image, title and host.
+- [Attachment](http://localhost:3100/llms/message-attachment.txt): The document card Messages draws instead of a text bubble, with the file icon, name and size, in the bubble's own shape.
+- [Conversation](http://localhost:3100/llms/conversation.txt): A complete, composable conversation for either platform: header, scrolling log with clusters and reactions, typing state, and a composer. Bring your own data and send handler.
+- [Message motion](http://localhost:3100/llms/message-motion.txt): The measured send and receive animations, seekable so a harness can scrub them.
+- [FaceTime card](http://localhost:3100/llms/facetime-card.txt): A FaceTime link card in the native card style, plus the call states an application may want to show around it.
+- [Avatar](http://localhost:3100/llms/avatar.txt): Initials on the measured Messages gradient, a photo, or the generic silhouette, at native sizes.
+- [macOS window](http://localhost:3100/llms/macos-window.txt): The Messages window frame: traffic lights, sidebar and content slots, active and inactive states.
+- [macOS sidebar](http://localhost:3100/llms/macos-sidebar.txt): The conversation list sidebar with search, pinned conversations, rows, and selection states.
+- [macOS header](http://localhost:3100/llms/macos-header.txt): The translucent conversation header with compose, contact, and video controls.
+- [macOS composer](http://localhost:3100/llms/macos-composer.txt): The message field with the plus, audio, and emoji controls; Return sends.
+- [Tapback bar](http://localhost:3100/llms/tapback-bar.txt): The iOS Tapback picker pill with recent emoji and the emoji-picker bubble, plus the macOS two-row layout.
+- [Context menu](http://localhost:3100/llms/context-menu.txt): iOS tinted message menu and the macOS NSMenu-style menu with Tapback rows.
+- [Message actions](http://localhost:3100/llms/message-actions.txt): The iOS long-press overlay: dim and blur, lifted bubble, Tapback bar, and menu, with the measured transition.
+- [Long press hook](http://localhost:3100/llms/use-long-press.txt): A cancelable 500 ms hold with keyboard, double-click, and right-click alternatives.
+- [Message list](http://localhost:3100/llms/message-list.txt): The scrolling log: clusters and tails, date headers, status labels, sender names, emoji-only rows, link cards, attachments, and the typing indicator.
+- [iOS status bar](http://localhost:3100/llms/ios-status-bar.txt): Time, Dynamic Island, cellular, Wi-Fi, and battery exactly as iOS 26 draws them.
+- [iOS nav bar](http://localhost:3100/llms/ios-nav-bar.txt): The conversation nav bar with the glass back button, large avatar, and name pill, plus the list's large title.
+- [iOS composer](http://localhost:3100/llms/ios-composer.txt): The glass message field with the plus button, microphone, auto-growing text, and the send pill.
+- [iOS conversation list](http://localhost:3100/llms/ios-conversation-list.txt): The Messages list screen: large title, rows with avatars and previews, search pill, and compose button.
+- [iOS new message sheet](http://localhost:3100/llms/ios-new-message-sheet.txt): The New Message sheet with its close button and To field.
+- [Palette](http://localhost:3100/llms/palette.txt): Emits the measured light and dark palette as CSS variables for one platform.
+- [iOS Messages app](http://localhost:3100/llms/ios-messages-app.txt): The complete iOS 26 Messages app: list, conversation, New Message sheet, and the long-press overlay.
+- [macOS Messages app](http://localhost:3100/llms/macos-messages-app.txt): The complete macOS 26 Messages window: sidebar, header, message log, composer, and the right-click menu.
+- [macOS plus menu](http://localhost:3100/llms/macos-plus-menu.txt): The popover that opens from the composer's plus button: Photos, Stickers, Genmoji, Image Playground, #images, Message Effects.
+- [Message effects](http://localhost:3100/llms/message-effects.txt): Send with effect on a bubble: the slam, loud and gentle animations and the Invisible Ink reveal, replayable on demand.
+- [Screen effects](http://localhost:3100/llms/screen-effects.txt): The full-screen send effects, drawn deterministically on a canvas so they can be scrubbed and screenshotted.
+- [iOS effects picker](http://localhost:3100/llms/ios-effects-picker.txt): The iOS "Send with effect" screen: the Bubble/Screen tabs, the effect rail, the preview bubble and its caption.
+- [Inline reply](http://localhost:3100/llms/message-reply.txt): The quoted stub above a reply, the reply-count affordance, and the focused thread view.
+- [Photo message](http://localhost:3100/llms/message-image.txt): Photos and videos in the bubble's shape, tail included, with the native multi-photo grid.
+- [Audio message](http://localhost:3100/llms/message-audio.txt): A voice message bubble with a waveform, play control, and a seekable position.
+- [Edit and undo send](http://localhost:3100/llms/message-edit.txt): Edit a sent message in place, the Edited label, and the undo-send removal.
+- [iOS conversation details](http://localhost:3100/llms/ios-details.txt): The details screen: contact, call actions, and the grouped settings cells.
+- [iOS plus menu](http://localhost:3100/llms/ios-plus-menu.txt): The attachment sheet with its app rows and the embedded photo grid.
+- [iOS selection mode](http://localhost:3100/llms/ios-select-mode.txt): Selection circles beside messages, the close button, and the bottom toolbar.
+- [Swipe for times](http://localhost:3100/llms/ios-swipe-times.txt): The drag that shifts the conversation left to reveal per-message times.
+- [Conversation notices](http://localhost:3100/llms/ios-notices.txt): The unknown-sender notice, the failed-send badge, and the Not Delivered label.

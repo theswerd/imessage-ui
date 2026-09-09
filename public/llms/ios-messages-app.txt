@@ -1,0 +1,27 @@
+# iOS Messages app
+
+The complete iOS 26 Messages app: list, conversation, New Message sheet, and the long-press overlay.
+
+## Requirements
+
+React 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor.
+
+## Install
+
+```sh
+npx shadcn@latest add http://localhost:3100/r/ios-messages-app.json
+```
+
+## Usage
+
+```tsx
+import { IosMessagesApp } from "@/components/imessage/ios-messages-app";
+
+<IosMessagesApp
+  contact={{ name: "Alex Morgan" }}
+  messages={messages}
+  composer={{ onSend: sendMessage }}
+/>
+```
+
+Components render UI only. Supply your own message data, persistence, uploads, and send handlers. No iMessage or Apple service connection is included.

@@ -1,0 +1,25 @@
+# Message bubble
+
+Native iOS 26 and macOS 26 bubbles: traced outline and tail, screen-space gradient fill, status, edited, reactions, and emoji-only messages.
+
+## Requirements
+
+React 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor.
+
+## Install
+
+```sh
+npx shadcn@latest add http://localhost:3100/r/message-bubble.json
+```
+
+## Usage
+
+```tsx
+import { MessageBubble } from "@/components/imessage/message-bubble";
+
+<MessageBubble direction="outgoing" status="Delivered">
+  Hey, you made it. 👋
+</MessageBubble>
+```
+
+Components render UI only. Supply your own message data, persistence, uploads, and send handlers. No iMessage or Apple service connection is included.

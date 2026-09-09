@@ -1,0 +1,28 @@
+# Attachment
+
+The document card Messages draws instead of a text bubble, with the file icon, name and size, in the bubble's own shape.
+
+## Requirements
+
+React 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor.
+
+## Install
+
+```sh
+npx shadcn@latest add http://localhost:3100/r/message-attachment.json
+```
+
+## Usage
+
+```tsx
+import { MessageAttachment } from "@/components/imessage/message-attachment";
+
+<MessageAttachment
+  name="design-notes.txt"
+  size="2 KB · Text document"
+  href="/design-notes.txt"
+  download
+/>
+```
+
+Components render UI only. Supply your own message data, persistence, uploads, and send handlers. No iMessage or Apple service connection is included.

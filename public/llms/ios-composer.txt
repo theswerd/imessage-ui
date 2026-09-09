@@ -1,0 +1,27 @@
+# iOS composer
+
+The glass message field with the plus button, microphone, auto-growing text, and the send pill.
+
+## Requirements
+
+React 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor.
+
+## Install
+
+```sh
+npx shadcn@latest add http://localhost:3100/r/ios-composer.json
+```
+
+## Usage
+
+```tsx
+import { IosComposer } from "@/components/imessage/ios-composer";
+
+<IosComposer
+  onSend={async (text) => {
+    await sendMessage(text);
+  }}
+/>
+```
+
+Components render UI only. Supply your own message data, persistence, uploads, and send handlers. No iMessage or Apple service connection is included.

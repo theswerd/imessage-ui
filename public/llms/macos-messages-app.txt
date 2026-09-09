@@ -1,0 +1,29 @@
+# macOS Messages app
+
+The complete macOS 26 Messages window: sidebar, header, message log, composer, and the right-click menu.
+
+## Requirements
+
+React 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor.
+
+## Install
+
+```sh
+npx shadcn@latest add http://localhost:3100/r/macos-messages-app.json
+```
+
+## Usage
+
+```tsx
+import { MacMessagesApp } from "@/components/imessage/macos-messages-app";
+
+<MacMessagesApp
+  contact={{ name: "Alex Morgan" }}
+  conversations={conversations}
+  selectedId="alex"
+  messages={messages}
+  composer={{ onSend: sendMessage }}
+/>
+```
+
+Components render UI only. Supply your own message data, persistence, uploads, and send handlers. No iMessage or Apple service connection is included.

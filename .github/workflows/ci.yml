@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Typecheck, lint and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run registry:build
+      - run: bun run typecheck
+      - run: bun run lint
+      - run: bun test tests/unit
+
+  visual:
+    name: Visual and interaction suite
+    # The suite makes hundreds of navigations per project. Against the dev server on-demand route
+    # compilation becomes the bottleneck and navigations time out, so it runs against a production
+    # build, which is what PLAYWRIGHT_BASE_URL selects. Baselines are rendered on macOS, so they do
+    # not match a Linux runner's font rasterisation; this job proves the suite runs and reports the
+    # diff rather than gating on it.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bunx playwright install --with-deps chromium webkit
+      - run: bun run build
+      - run: bun run start --port 3101 &
+      - run: bunx wait-on http://localhost:3101 --timeout 120000
+      - run: PLAYWRIGHT_BASE_URL=http://localhost:3101 bun run test:all
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

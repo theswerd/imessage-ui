@@ -1,0 +1,15 @@
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+.env*
+!.env.example
+.DS_Store
+coverage/
+test-results/
+playwright-report/
+artifacts/
+public/references/**/*.png
+
+# Temporary probe routes agents create while verifying a surface; never committed.
+app/lab/tmp-*/

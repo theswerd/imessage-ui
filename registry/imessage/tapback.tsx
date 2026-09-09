@@ -1,0 +1,314 @@
+"use client";
+
+import { useId, useLayoutEffect, useRef, type ComponentProps, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { cn } from "@/lib/utils";
+import { usePlatform, type Platform } from "@/registry/imessage/platform";
+import { emojiFontStack, fontStack } from "@/registry/imessage/tokens";
+
+/**
+ * Tapback balloon, measured from iOS 26 (`references/ios/captures/tapback-love-light.png`, 3x):
+ * a Ø34 circle with two trailing circles (Ø10.4 at (−10.82, +15.20) and Ø5 at (−17.49, +23.46) from
+ * the balloon's center) pointing away from the bubble. Own reactions are #0088ff (light and dark), the
+ * heart is an 18.34×16.33 glossy pink shape centered 0.8 below the circle's center. Others' balloons are
+ * #e9e9eb light / #262629 dark (`incoming-light.png`, `incoming-dark.png`). macOS (circle-fitted on
+ * `references/macos/captures/tapback-love-light-2x.png` and `tapback-love-dark-2x.png`, both 2x, rmse
+ * 0.01–0.03 pt): Ø27.98 centred (136.72, 57.45) pt, trail Ø8.04 at (−9.04, +12.42) and Ø4.00 at
+ * (−14.22, +19.05), heart ink 14.64 × 12.96 centred 0.53 below the circle's centre. Both captures give
+ * the same numbers to 0.01 pt.
+ *
+ * The macOS fill is one theme-independent blue, #5498f8, laid over the pane with a vertical opacity
+ * ramp: solving the light/dark pair row by row gives a constant colour (85, 152, 248) and an alpha of
+ * 0.912 at the top edge rising to 1.00 at ≈83% down (light row y=89 reads (100,161,249), dark
+ * (80,141,229); by row y=139 both read (84,152,248)). The trailing circles are fully opaque.
+ * The artwork is also knocked out of whatever it covers by a 0.5 pt rim in the pane colour: invisible
+ * over the empty pane, it shows as a ring where the balloon laps the bubble (dark 2x, radial cut at
+ * −50°: (84,151,247) → (55,88,133) → (84,152,248); light: (85,152,248) → (182,218,251) → (108,186,245)).
+ */
+export const tapbackLabels = { love: "Love", like: "Like", dislike: "Dislike", laugh: "Laugh", emphasize: "Emphasize", question: "Question" } as const;
+export type TapbackType = keyof typeof tapbackLabels;
+export const tapbackTypes = Object.keys(tapbackLabels) as TapbackType[];
+
+/** Local color tokens (not in tokens.ts). Measured own-reaction blue; the rest are system values. */
+export const tapbackColors = {
+  own: "#0088ff",
+  ownDark: "#0088ff",
+  /** Highlight ring behind the chosen tapback inside the bar (Ø44.2; measured on both selected captures). */
+  selectedRing: "#26aeff",
+  selectedRingDark: "#0064d2",
+} as const;
+
+/**
+ * The macOS own-reaction blue and the opacity ramp the main circle carries over it. Solved row by row
+ * from the light/dark pair of `tapback-love-*-2x.png` at the balloon's own rows y 89–139 (2x): one
+ * colour in both themes, alpha 0.907 at the top edge, 0.951 a quarter down, 0.982 at the centre and
+ * opaque from ≈83% down. Reproducing it as alpha (not as two baked colours) keeps both themes right.
+ */
+export const macosBalloonFill = "#5498f8";
+const macosBalloonSurface = "linear-gradient(to bottom, rgba(84,152,248,0.907) 0%, rgba(84,152,248,0.951) 25%, rgba(84,152,248,0.982) 50%, rgba(84,152,248,1) 100%)";
+/** The macOS balloon is knocked out of what it covers by this much pane colour (measured 0.51 pt). */
+export const macosBalloonRim = 0.5;
+
+/**
+ * CSS variables the tapback UI reads (with fallbacks to the light iOS values). Spread on a frame
+ * next to `paletteVars`. Glass fills were solved from the captures: the pill over the dimmed white
+ * list is #ededef and over the dimmed green bubble ≈#b4efc6 (brighter than the dimmed content, hence
+ * the brightness term); over the dimmed black list it is #1f1e21. The dim itself is rgba(22,18,44,0.21).
+ */
+export function tapbackVars(theme: "light" | "dark", platform: Platform = "ios"): Record<string, string> {
+  const ios: Record<string, string> = theme === "light" ? {
+    "--im-dim": "rgba(22,18,44,0.21)", "--im-glass": "rgba(229,229,231,0.69)", "--im-glass-filter": "blur(9px) brightness(1.32) saturate(1.35)", "--im-glass-solid": "#ededef", "--im-glass-rim": "rgba(255,255,255,0.55)",
+    "--im-glass-shadow": "0 6px 24px rgba(0,0,0,0.10)", "--im-picker-icon": "#aeaeb2", "--im-menu-glass": "rgba(229,229,231,0.69)", "--im-menu-glass-filter": "blur(9px) brightness(1.32) saturate(1.35)", "--im-menu-bg": "#edeff1", "--im-menu-text": "#000000",
+    "--im-menu-separator": "rgba(0,0,0,0.12)", "--im-menu-destructive": "#ff3b30", "--im-tapback-own": tapbackColors.own, "--im-tapback-ring": tapbackColors.selectedRing,
+  } : {
+    "--im-dim": "rgba(22,18,44,0.21)", "--im-glass": "rgba(38,37,39,0.8)", "--im-glass-filter": "blur(9px) saturate(1.6)", "--im-glass-solid": "#1f1e21", "--im-glass-rim": "rgba(255,255,255,0.10)",
+    "--im-glass-shadow": "0 6px 24px rgba(0,0,0,0.5)", "--im-picker-icon": "#8e8e93", "--im-menu-glass": "rgba(20,25,25,0.8)", "--im-menu-glass-filter": "blur(9px) saturate(2)", "--im-menu-bg": "#121316", "--im-menu-text": "#ffffff",
+    "--im-menu-separator": "rgba(255,255,255,0.15)", "--im-menu-destructive": "#ff453a", "--im-tapback-own": tapbackColors.ownDark, "--im-tapback-theirs": "#262629", "--im-tapback-ring": tapbackColors.selectedRingDark,
+  };
+  if (platform === "ios") return ios;
+  const macos = { "--im-tapback-own": macosBalloonFill, "--im-tapback-own-surface": macosBalloonSurface };
+  return theme === "light"
+    ? { ...ios, ...macos, "--im-menu-bg": "rgba(247,248,251,0.92)", "--im-menu-text": "#242526", "--im-menu-separator": "#dfe0e2", "--im-menu-border": "#b1b1b1", "--im-menu-rim": "rgba(255,255,255,0.7)" }
+    : { ...ios, ...macos, "--im-menu-bg": "rgba(30,34,39,0.92)", "--im-menu-text": "#dcddde", "--im-menu-separator": "#3e4145", "--im-menu-border": "#050506", "--im-menu-rim": "rgba(255,255,255,0.28)", "--im-tapback-theirs": "#3b3b3d" };
+}
+
+export type BalloonGeometry = { main: number; medium: number; small: number; mediumOffset: [number, number]; smallOffset: [number, number]; glyph: number; /** The glyph sits this far below the circle's centre. */ glyphOffsetY?: number };
+
+/**
+ * Balloon geometry per platform. Offsets are the trailing circles' centers relative to the main
+ * center, pointing left. iOS from `incoming-light.png` (Ø34.0, trail Ø10.4 at (−10.82, +15.20) and
+ * Ø5.0 at (−17.49, +23.46), heart ink 18.34).
+ *
+ * macOS is circle-fitted on both `tapback-love-light-2x.png` and `tapback-love-dark-2x.png`, which
+ * agree to 0.01 pt: main centre (273.44, 114.90) px Ø55.97 px, medium (255.37, 139.73) Ø16.07, small
+ * (245.00, 153.00) Ø7.99. It is close to the iOS artwork at 28/34 but not exactly: that scaling would
+ * put the trail at Ø8.57 and Ø4.12, 6% and 3% larger. The heart ink (rows y 103–129, columns x 259–288)
+ * measures 14.64 × 12.96 with its centre 0.53 below the circle's, of which 0.07 comes from the glyph
+ * box itself, so the box is nudged 0.46.
+ */
+export const balloonGeometry: Record<Platform, BalloonGeometry> = {
+  ios: { main: 34, medium: 10.4, small: 5, mediumOffset: [-10.82, 15.2], smallOffset: [-17.49, 23.46], glyph: 18.34, glyphOffsetY: 0.8 },
+  macos: { main: 28, medium: 8.04, small: 4, mediumOffset: [-9.04, 12.42], smallOffset: [-14.22, 19.05], glyph: 14.64, glyphOffsetY: 0.46 },
+};
+
+/**
+ * Where a balloon sits relative to the bubble body it belongs to, measured on the settled captures.
+ * `marginTop` is the extra space the list opens above the bubble, `top`/`side` place the main circle
+ * against the body's top corner on the side away from the screen edge. Consumed by `message-bubble`.
+ *
+ * iOS: `conv3-light.png` → `tapback-love-light.png` is the same fixture with and without the balloon,
+ * and the cluster gap grows from 10.313 to 38.313, i.e. exactly 28. `top`/`side` average the outgoing
+ * capture (−27.47 / −14.02) and the mirrored incoming one (`incoming-light.png`, −27.31 / +13.68).
+ * macOS (`tapback-love-dark-2x.png`, cross-checked light): body bottom 34.93 → next body top 65.51 is
+ * a 30.58 gap where the cluster gap below it is 3.18, so the slot opens 27.40; the Ø28 circle's top
+ * (86.92 px) sits 22.05 above the body top (131.01 px) and its leading edge (245.46 px) 11.79 outside
+ * the body's leading edge (269.03 px).
+ *
+ * `message-bubble` carries its own copy of these numbers and is the one that actually places a
+ * balloon; its macOS row still reads { 19.6, −19.1, −9.9 } and is 7.8 / 3.0 / 1.9 pt off.
+ */
+export const balloonSlot: Record<Platform, { marginTop: number; top: number; side: number }> = {
+  ios: { marginTop: 28, top: -27.39, side: -13.85 },
+  macos: { marginTop: 27.4, top: -22.05, side: -11.79 },
+};
+
+/** The emoji-picker "thought bubble" beside a long-pressed message is the same shape at ~1.3x. */
+export const pickerBalloonGeometry: BalloonGeometry = { main: 44, medium: 14.6, small: 8, mediumOffset: [-13.2, 20.3], smallOffset: [-22.2, 30.7], glyph: 24 };
+
+/** Renders the trailing circles of a balloon; the parent is the main circle (position: relative). */
+export function BalloonTrail({ geometry, side, color }: { geometry: BalloonGeometry; side: "left" | "right"; color: string }) {
+  const half = geometry.main / 2;
+  const place = (d: number, [dx, dy]: [number, number]): CSSProperties => ({
+    position: "absolute", width: d, height: d, borderRadius: "50%", background: color, top: half + dy - d / 2,
+    [side === "left" ? "left" : "right"]: half + dx - d / 2,
+  });
+  return (
+    <>
+      <span aria-hidden="true" data-slot="balloon-medium" style={place(geometry.medium, geometry.mediumOffset)} />
+      <span aria-hidden="true" data-slot="balloon-small" style={place(geometry.small, geometry.smallOffset)} />
+    </>
+  );
+}
+
+const glossyText = (gradient: string): CSSProperties => ({ backgroundImage: gradient, WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent", WebkitTextFillColor: "transparent" });
+
+/**
+ * Heart ramps, sampled at matching heights on every capture. On a gray or white balloon Apple's heart
+ * runs #ffc1d8 → #ff4796; on the blue own-reaction balloon (and on the blue selected disc in the bar)
+ * the same artwork reads a constant 21/255 lighter in green and 20/255 in blue, so it keeps its
+ * contrast. Positions are the radial offsets fitted to the Ø49.8 balloon in the details popover.
+ */
+const heartRamp = {
+  plain: [["0", "#ffd9ea"], ["0.12", "#ffc1d8"], ["0.38", "#ff99ca"], ["0.51", "#ff81bd"], ["0.79", "#ff6cb0"], ["1", "#ff4796"]],
+  onAccent: [["0", "#ffeefe"], ["0.12", "#ffd6ec"], ["0.38", "#ffaede"], ["0.51", "#ff96d1"], ["0.79", "#ff81c4"], ["1", "#ff5caa"]],
+} as const;
+
+/**
+ * The six classic tapback glyphs and custom emoji, drawn to match Apple's artwork.
+ * `size` is the glyph box: 25.33 in the iOS tapback bar, 18.34 in a Ø34 balloon.
+ * `onAccent` picks the lighter artwork Apple uses on the blue balloon and the blue selected disc.
+ */
+export function TapbackGlyph({ type, emoji, size, onAccent = false, className, style }: { type?: TapbackType; emoji?: string; size: number; onAccent?: boolean; className?: string; style?: CSSProperties }) {
+  const id = useId().replace(/:/g, "");
+  const base: CSSProperties = { display: "inline-flex", alignItems: "center", justifyContent: "center", lineHeight: 1, userSelect: "none", ...style };
+  if (emoji || !type) {
+    return <span data-slot="tapback-glyph" data-glyph="emoji" className={className} style={{ ...base, fontSize: size, fontFamily: emojiFontStack, width: size, height: size }}>{emoji}</span>;
+  }
+  if (type === "love") {
+    // Outline traced from `tapback-love-light.png` at 3x: ink 18.34 × 16.33 (ratio 0.8906), the two
+    // lobes are r 4.75 circles centred (4.75, 4.91) and (13.25, 4.91) meeting in a notch at (9, 2.79),
+    // and each flank is one cubic to the tip (rmse 0.03 against 15 sampled rows).
+    const w = size, h = size * 0.8906;
+    return (
+      <svg data-slot="tapback-glyph" data-glyph="love" className={className} style={base} width={w} height={h} viewBox="0 0 18 16.03" aria-hidden="true">
+        <defs>
+          <radialGradient id={`${id}-h`} cx="0.5" cy="0.18" r="0.8">
+            {(onAccent ? heartRamp.onAccent : heartRamp.plain).map(([offset, color]) => <stop key={offset} offset={offset} stopColor={color} />)}
+          </radialGradient>
+        </defs>
+        <path d="M9,16.03 C7.6,15.9 0,10.51 0,4.91 A4.75,4.75 0 0 1 9,2.79 A4.75,4.75 0 0 1 18,4.91 C18,10.51 10.4,15.9 9,16.03 Z" fill={`url(#${id}-h)`} />
+      </svg>
+    );
+  }
+  if (type === "like" || type === "dislike") {
+    // The 👎 face sits 1.84 higher than native in a 25.33 slot; 👍 lands right. Push it back down.
+    const drop = type === "dislike" ? size * 0.145 : 0;
+    return <span data-slot="tapback-glyph" data-glyph={type} className={className} style={{ ...base, marginTop: (typeof base.marginTop === "number" ? base.marginTop : 0) + drop, fontSize: size * 0.987, fontFamily: emojiFontStack, width: size, height: size }}>{type === "like" ? "👍" : "👎"}</span>;
+  }
+  if (type === "laugh") {
+    return (
+      <span data-slot="tapback-glyph" data-glyph="laugh" className={className} style={{ ...base, flexDirection: "column", width: size, height: size, fontFamily: fontStack, fontWeight: 800, fontSize: size * 0.68, lineHeight: `${size * 0.5}px`, letterSpacing: -size * 0.02, ...glossyText("linear-gradient(#5fc9ff, #0aa6ff 55%, #0090f5)") }}>
+        <span style={{ WebkitTextStroke: `${size * 0.02}px rgba(255,255,255,0.6)` }}>HA</span><span style={{ WebkitTextStroke: `${size * 0.02}px rgba(255,255,255,0.6)` }}>HA</span>
+      </span>
+    );
+  }
+  if (type === "emphasize") {
+    const w = size * 0.71, h = size * 1.053;
+    return (
+      <svg data-slot="tapback-glyph" data-glyph="emphasize" className={className} style={base} width={w} height={h} viewBox="0 0 18 26.67" aria-hidden="true">
+        <defs><linearGradient id={`${id}-e`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#ff8c6e" /><stop offset="0.6" stopColor="#ff4f3f" /><stop offset="1" stopColor="#ff2a34" /></linearGradient></defs>
+        {[0, 10].map(x => (
+          <g key={x} transform={`translate(${x} 0)`}>
+            <path d="M0.2,3.6 A3.8,3.8 0 0 1 7.8,3.6 L6.3,16.3 A2.3,2.3 0 0 1 1.7,16.3 Z" fill={`url(#${id}-e)`} />
+            <circle cx="4" cy="23.1" r="3.5" fill={`url(#${id}-e)`} />
+            <ellipse cx="3" cy="3.8" rx="1.3" ry="2" fill="#fff" opacity="0.45" />
+          </g>
+        ))}
+      </svg>
+    );
+  }
+  if (type === "question") {
+    const w = size * 0.566, h = size * 0.987;
+    return (
+      <svg data-slot="tapback-glyph" data-glyph="question" className={className} style={base} width={w} height={h} viewBox="0 0 14.33 25" aria-hidden="true">
+        <defs><linearGradient id={`${id}-q`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#c4a8ff" /><stop offset="0.6" stopColor="#9b7cf5" /><stop offset="1" stopColor="#7a5ee0" /></linearGradient></defs>
+        <path d="M2.4,7.4 A4.9,4.9 0 1 1 8.1,12.1 C7.3,12.6 7.2,13.4 7.2,15.4" fill="none" stroke={`url(#${id}-q)`} strokeWidth="4.2" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="7.2" cy="22.4" r="2.5" fill={`url(#${id}-q)`} />
+        <path d="M4.4,5.4 A3.2,3.2 0 0 1 7.6,3.6" fill="none" stroke="#fff" strokeWidth="1.2" strokeLinecap="round" opacity="0.5" />
+      </svg>
+    );
+  }
+  return null;
+}
+
+export type TapbackProps = Omit<ComponentProps<"button">, "children" | "type"> & {
+  reaction?: TapbackType;
+  /** A custom emoji reaction instead of one of the six classics. */
+  emoji?: string;
+  /** Blue balloon (your own reaction) or the gray one for other people's. */
+  own?: boolean;
+  /** Which side of the bubble the balloon sits on; the trail points that way. Outgoing bubbles use "left". */
+  side?: "left" | "right";
+  selected?: boolean;
+  count?: number;
+  platform?: Platform;
+  /** Extra content, e.g. a screen-reader description. */
+  children?: ReactNode;
+  /**
+   * Pop the balloon in the way applying a Tapback does natively: it scales up past its size and
+   * settles, the trailing circles riding the same scale. Off by default, because reactions that were
+   * already on a message when the conversation opened do not animate; turn it on for one the person
+   * just applied.
+   */
+  animateIn?: boolean;
+  /** Scrub the entrance (0..1) instead of playing it. */
+  appearProgress?: number;
+};
+
+/**
+ * Timed on `references/macos/captures/tapback-apply-frames-100-123.png`, 24 consecutive 60 fps frames
+ * (f100 = 1667 ms, 16.67 ms apart). The menu is still whole at f101 and has gone at f112, a 183 ms
+ * dissolve (95%→5% in 134 ms). The balloon then appears at f118 = 1967 ms, 100 ms after the menu is
+ * gone, in the same frame the list starts opening the slot. Its fill diameter over the settled Ø28
+ * measures 0.19 (f118), 0.28 (f119), ≈0.52 (f120), ≈0.65 (f121), ≈0.75 (f122) and ≥0.80 (f123), so it
+ * needs ≈110 ms to reach full size counting from the last empty frame. The small trailing circle
+ * measures 0.49 / 0.64 / 0.71 / 0.81 across f120–f123, i.e. it rides the balloon's own scale with no
+ * delay of its own — hence `trailDelay: 0` and no separate animation for the trail.
+ *
+ * The strip ends at f123 = 2050 ms with the balloon still growing, so the overshoot past 1 and the
+ * settle after it are NOT in the capture: `duration` and the peak below are unverified.
+ */
+export const tapbackAppear = { duration: 420, growth: 110, trailDelay: 0 } as const;
+
+export function Tapback({ reaction = "love", emoji, own = true, side = "left", selected = false, count, platform: platformProp, className, onClick, style, children, animateIn = false, appearProgress, ...props }: TapbackProps) {
+  const contextPlatform = usePlatform();
+  const host = useRef<HTMLSpanElement & HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    const element = host.current;
+    if (!element || !animateIn) return;
+    const reduced = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+    if (reduced) return;
+    // The trailing circles are children, so the one scale below carries them: the capture shows them
+    // at the balloon's own scale in every frame, with no delay to animate separately.
+    const grow = tapbackAppear.growth / tapbackAppear.duration;
+    const balloon = element.animate(
+      [
+        { transform: "scale(0)", opacity: 0 },
+        { offset: grow * 0.08, transform: "scale(0.12)", opacity: 1 },
+        { offset: grow, transform: "scale(1)" },
+        { offset: grow * 1.26, transform: "scale(1.14)" },
+        { offset: 0.62, transform: "scale(0.94)" },
+        { offset: 0.84, transform: "scale(1.03)" },
+        { transform: "scale(1)" },
+      ],
+      { duration: tapbackAppear.duration, easing: "linear", fill: "both" },
+    );
+    if (appearProgress === undefined) balloon.play();
+    else { balloon.pause(); balloon.currentTime = Math.max(0, Math.min(1, appearProgress)) * tapbackAppear.duration; }
+    return () => balloon.cancel();
+  }, [animateIn, appearProgress]);
+  const platform = platformProp ?? contextPlatform;
+  const g = balloonGeometry[platform];
+  const fill = own ? "var(--im-tapback-own, #0088ff)" : "var(--im-tapback-theirs, #e9e9eb)";
+  // macOS paints the main circle with the measured opacity ramp and knocks the artwork out of
+  // whatever it laps with a 0.5 pt pane-coloured rim; the trailing circles stay flat and rimless.
+  const surface = platform === "macos" && own ? `var(--im-tapback-own-surface, ${fill})` : fill;
+  const rim = platform === "macos" ? `0 0 0 ${macosBalloonRim}px var(--im-bg, #fff)` : null;
+  const ring = selected ? `0 0 0 ${platform === "ios" ? 2 : 1.5}px var(--im-bg, #fff), 0 0 0 ${platform === "ios" ? 4 : 3}px var(--im-tapback-ring, ${tapbackColors.selectedRing})` : null;
+  // Reads on its own: "Love tapback, 2, from you" rather than a bare glyph name and a bracket.
+  const label = `${emoji ?? tapbackLabels[reaction]} tapback${count !== undefined && count > 1 ? `, ${count}` : ""}${own ? ", from you" : ""}`;
+  const pill = count !== undefined && count > 1;
+  const rootStyle: CSSProperties = {
+    position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center", boxSizing: "border-box",
+    width: pill ? undefined : g.main, minWidth: g.main, height: g.main, borderRadius: g.main / 2, background: surface,
+    paddingInline: pill ? g.main * 0.26 : 0, gap: g.main * 0.12, fontFamily: fontStack,
+    color: own ? "#fff" : "var(--im-incoming-text, #000)",
+    // The selected ring uses the same token as the picker, so dark gets #0064d2 rather than #26aeff.
+    boxShadow: [rim, ring].filter(Boolean).join(", ") || undefined,
+    ...style,
+  };
+  const content = (
+    <>
+      <TapbackGlyph type={emoji ? undefined : reaction} emoji={emoji} size={g.glyph} onAccent={own} style={{ marginTop: emoji ? 0 : 2 * (g.glyphOffsetY ?? 0) }} />
+      {pill && <span data-slot="tapback-count" style={{ fontSize: g.main * 0.38, fontWeight: 600, lineHeight: 1 }}>{count}</span>}
+      <BalloonTrail geometry={g} side={side} color={fill} />
+      {children}
+    </>
+  );
+  const shared = { "data-slot": "tapback", "data-reaction": emoji ? "emoji" : reaction, "data-own": own, "data-side": side, "data-platform": platform } as const;
+  if (!onClick) return <span ref={host as RefObject<HTMLSpanElement>} role="img" aria-label={label} className={cn("select-none", className)} style={{ ...rootStyle, transformOrigin: side === "left" ? "85% 85%" : "15% 85%" }} {...shared}>{content}</span>;
+  return (
+    <button ref={host as RefObject<HTMLButtonElement>} type="button" aria-label={label} aria-pressed={selected} className={cn("cursor-pointer select-none border-0 outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50", className)} style={{ ...rootStyle, transformOrigin: side === "left" ? "85% 85%" : "15% 85%" }} onClick={onClick} {...shared} {...props}>
+      {content}
+    </button>
+  );
+}

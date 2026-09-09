@@ -1,0 +1,43 @@
+# Conversation
+
+A complete, composable conversation for either platform: header, scrolling log with clusters and reactions, typing state, and a composer. Bring your own data and send handler.
+
+## Requirements
+
+React 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor.
+
+## Install
+
+```sh
+npx shadcn@latest add http://localhost:3100/r/conversation.json
+```
+
+## Usage
+
+```tsx
+"use client";
+
+import { useState } from "react";
+import { Conversation } from "@/components/imessage/conversation";
+import type { Message } from "@/components/imessage/message-list";
+
+export function Chat() {
+  const [messages, setMessages] = useState<Message[]>([
+    { id: "1", direction: "incoming", text: "Hey, you made it. 👋", sentAt: Date.now() - 60_000 },
+  ]);
+
+  return (
+    <Conversation
+      platform="ios"
+      name="Alex Morgan"
+      messages={messages}
+      onSend={(text) => setMessages(current => [
+        ...current,
+        { id: crypto.randomUUID(), direction: "outgoing", text, sentAt: Date.now() },
+      ])}
+    />
+  );
+}
+```
+
+Components render UI only. Supply your own message data, persistence, uploads, and send handlers. No iMessage or Apple service connection is included.

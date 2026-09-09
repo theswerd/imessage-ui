@@ -1,0 +1,15 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "use-screen-space",
+  "title": "Screen-space fill hook",
+  "description": "Keeps bubble fills aligned to the screen-space gradient while a list scrolls.",
+  "files": [
+    {
+      "path": "registry/imessage/use-screen-space.ts",
+      "content": "\"use client\";\n\nimport { useEffect, type RefObject } from \"react\";\n\n/**\n * Native bubbles are filled with one gradient fixed to the screen, so a bubble's color depends on\n * where it currently sits. This keeps every `[data-slot=\"message-bubble\"]` and every\n * `[data-slot=\"typing-indicator\"]` inside `container` in sync\n * by writing `--bubble-bottom` (the body's bottom edge relative to the screen frame) on scroll and\n * resize. It touches the DOM directly, so scrolling never re-renders React.\n *\n * `frame` is the element that represents the device screen (defaults to the container).\n */\nexport function useBubbleScreenSpace(container: RefObject<HTMLElement | null>, frame?: RefObject<HTMLElement | null>) {\n  useEffect(() => {\n    const root = container.current;\n    if (!root) return;\n    let raf = 0;\n    const update = () => {\n      raf = 0;\n      const screen = (frame?.current ?? root).getBoundingClientRect();\n      // The typing indicator is an incoming bubble too, so it needs the same screen-space fill.\n      root.querySelectorAll<HTMLElement>('[data-slot=\"message-bubble\"], [data-slot=\"typing-indicator\"]').forEach(bubble => {\n        // The typing indicator is its own body; a message bubble keeps its body in a child.\n        const body = bubble.querySelector<HTMLElement>('[data-slot=\"bubble\"], [data-slot=\"emoji\"]') ?? (bubble.dataset.slot === \"typing-indicator\" ? bubble : null);\n        if (!body) return;\n        const bottom = body.getBoundingClientRect().bottom - screen.top;\n        bubble.style.setProperty(\"--bubble-bottom\", `${bottom.toFixed(2)}px`);\n      });\n    };\n    const schedule = () => { if (!raf) raf = requestAnimationFrame(update); };\n    update();\n    root.addEventListener(\"scroll\", schedule, { passive: true });\n    const observer = new ResizeObserver(schedule);\n    observer.observe(root);\n    const mutations = new MutationObserver(schedule);\n    mutations.observe(root, { childList: true, subtree: true, characterData: true });\n    return () => { cancelAnimationFrame(raf); root.removeEventListener(\"scroll\", schedule); observer.disconnect(); mutations.disconnect(); };\n  }, [container, frame]);\n}\n",
+      "type": "registry:ui",
+      "target": "components/imessage/use-screen-space.ts"
+    }
+  ],
+  "type": "registry:ui"
+}

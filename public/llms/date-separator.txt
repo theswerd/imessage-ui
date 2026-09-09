@@ -1,0 +1,25 @@
+# Date separator
+
+Date headers: the iOS two-line header with its service line, the mid-list one-liner, and the macOS variant.
+
+## Requirements
+
+React 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor.
+
+## Install
+
+```sh
+npx shadcn@latest add http://localhost:3100/r/date-separator.json
+```
+
+## Usage
+
+```tsx
+import { DateSeparator } from "@/components/imessage/date-separator";
+
+<DateSeparator dateTime="2026-09-08T09:41:00-07:00">
+  Today 9:41 AM
+</DateSeparator>
+```
+
+Components render UI only. Supply your own message data, persistence, uploads, and send handlers. No iMessage or Apple service connection is included.

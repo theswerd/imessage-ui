@@ -1,0 +1,15 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "platform",
+  "title": "Platform context",
+  "description": "Tells every iMessage component whether to render iOS 26 or macOS 26 metrics.",
+  "files": [
+    {
+      "path": "registry/imessage/platform.tsx",
+      "content": "\"use client\";\n\nimport { createContext, useContext, type ReactNode } from \"react\";\n\n/** Which native Messages app to replicate. Sizes, spacing, and chrome all key off this. */\nexport type Platform = \"ios\" | \"macos\";\n\nconst PlatformContext = createContext<Platform>(\"ios\");\n\nexport function PlatformProvider({ platform, children }: { platform: Platform; children: ReactNode }) {\n  return <PlatformContext.Provider value={platform}>{children}</PlatformContext.Provider>;\n}\n\nexport function usePlatform(): Platform {\n  return useContext(PlatformContext);\n}\n",
+      "type": "registry:ui",
+      "target": "components/imessage/platform.tsx"
+    }
+  ],
+  "type": "registry:ui"
+}

@@ -1,0 +1,118 @@
+"use client";
+
+import type { ComponentProps, CSSProperties, ReactNode } from "react";
+import { cn } from "@/lib/utils";
+
+/**
+ * iOS 26 conversation nav bar (Liquid Glass), measured from `references/ios/captures/conv3-light.png`,
+ * `conv2-dark.png` and `grouped-light.png` (all three agree). The bar sits directly under the 54pt
+ * status bar and is 94pt tall: back button Ø44 centered (38, 84); avatar Ø60 at x 171–231, y 62–122
+ * (center 201, 92) with initials 28pt semibold (ink 32.33 × 19.67 cap); name pill x 107.33–294.67
+ * (187.33 wide) y 117.00–149.33 (32.33 tall, capsule radius 16.17, continuous corners) with 17pt bold
+ * text (native ink width matches Chrome's 700, not 600) whose ink runs 121.33–272.33, then a
+ * 4.67 × 12.67 chevron with a 2.6pt round stroke, ink 279.00–283.67.
+ *
+ * The **avatar paints over the pill**: its circle runs to y 122, 5pt below the pill's top edge, and
+ * the pill's glass is behind it. What shows on the glass under the avatar is the avatar's own soft
+ * shadow (offset 2, blur 4, 12%), measured at both x 180 (#ededed just below the circle) and x 201.
+ *
+ * Glass surfaces are 90% white with a backdrop blur and a soft drop shadow (capsules 0 6 36 spread 4
+ * at 6.5%, circles 0 5 20 spread 6 at 5.5%, clipped at the midpoint of gaps between neighbors so they
+ * do not add up, as on the device) in light; in dark #191919 under a 1pt specular rim that ramps
+ * inward, measured over black on the back button's integer box as 12.6% → 9.6% → 6.1% white across
+ * its three device rows. Shadows are painted on a layer beneath every surface so neighbors never
+ * shade each other. The bar's own background is transparent; content scrolls under it.
+ *
+ * Two sub-pixel offsets are transforms because Chrome quantizes paint, not layout: text baselines and
+ * inline-SVG paint offsets snap to whole CSS px, so the name and the chevron each carry a 1/3-px
+ * translate that the padding cannot express.
+ */
+export type IosNavBarProps = Omit<ComponentProps<"header">, "children"> & {
+  name: string;
+  initials?: string;
+  /** Replace the initials avatar (e.g. an <img>). */
+  avatar?: ReactNode;
+  onBack?: () => void;
+  onDetails?: () => void;
+};
+
+const font = "-apple-system, BlinkMacSystemFont, sans-serif";
+
+const vars =
+  "[--ios-nav-label:#1a1919] [--ios-nav-chevron:#bdbdbd] [--ios-nav-glass:rgba(255,255,255,0.9)] [--ios-nav-rim:none] [--ios-nav-shadow:0_6px_36px_4px_rgba(0,0,0,0.065)] [--ios-nav-shadow-round:0_5px_20px_6px_rgba(0,0,0,0.055)] [--ios-nav-avatar-shadow:rgba(0,0,0,0.12)] " +
+  "[--ios-nav-avatar-top:#a9c2e1] [--ios-nav-avatar-bottom:#747fb9] " +
+  "dark:[--ios-nav-label:#f4f3f4] dark:[--ios-nav-chevron:#5d5d5d] dark:[--ios-nav-glass:rgba(28,28,28,0.9)] dark:[--ios-nav-rim:inset_0_0_0_0.3333px_rgba(255,255,255,0.0385),inset_0_0_0_0.6667px_rgba(255,255,255,0.032),inset_0_0_0_1px_rgba(255,255,255,0.061)] dark:[--ios-nav-shadow:none] dark:[--ios-nav-shadow-round:none] dark:[--ios-nav-avatar-shadow:rgba(0,0,0,0.3)] " +
+  "dark:[--ios-nav-avatar-top:#575368] dark:[--ios-nav-avatar-bottom:#302649]";
+
+/** Apple's continuous corner (superellipse n≈2.2, measured on the pill). Browsers without corner-shape fall back to round. */
+const capsule = { cornerShape: "superellipse(1.14)" } as CSSProperties;
+
+/**
+ * Shadow layer (beneath every surface of the bar), then the blur, then the translucent surface. The
+ * parent must be `relative` and its content `relative`.
+ *
+ * `clip` stops the shadow at the midpoint of the 12pt gap toward a neighboring glass element, so the
+ * two shadows read as one (they never add up on the device).
+ *
+ * The blur rides its own span: `backdrop-filter` promotes an element to a composited layer whose
+ * bounds Chrome snaps to whole CSS px, which would drag the pill's edges from x 107.33/294.67 out to
+ * 107/295. Keeping the fill and the rim on an unfiltered span lets the surface paint on the exact
+ * fractional box.
+ */
+function GlassLayers({ round = false, clip }: { round?: boolean; clip?: "left" | "right" }) {
+  return (
+    <>
+      <span aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10 rounded-[inherit] [corner-shape:inherit]" style={{ boxShadow: round ? "var(--ios-nav-shadow-round)" : "var(--ios-nav-shadow)", clipPath: clip ? `inset(-60px ${clip === "right" ? "-6px" : "-60px"} -60px ${clip === "left" ? "-6px" : "-60px"})` : undefined }} />
+      <span aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-[inherit] [corner-shape:inherit]" style={{ backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)" }} />
+      <span aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-[inherit] [corner-shape:inherit]" style={{ background: "var(--ios-nav-glass)", boxShadow: "var(--ios-nav-rim)" }} />
+    </>
+  );
+}
+
+export function initialsOf(name: string): string {
+  return name.trim().split(/\s+/).slice(0, 2).map(part => part[0] ?? "").join("").toUpperCase();
+}
+
+export function IosNavBar({ name, initials, avatar, onBack, onDetails, className, style, ...props }: IosNavBarProps) {
+  const letters = initials ?? initialsOf(name);
+  return (
+    <header data-slot="ios-nav-bar" className={cn("relative isolate h-[94px] w-full select-none", vars, className)} style={{ fontFamily: font, ...style }} {...props}>
+      <button type="button" data-slot="back" aria-label="Back" onClick={onBack}
+        className="absolute flex items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-blue-500"
+        style={{ left: 16, top: 8, width: 44, height: 44 }}>
+        <GlassLayers round />
+        <svg aria-hidden="true" className="relative" width="44" height="44" viewBox="0 0 44 44" fill="none" stroke="var(--ios-nav-label)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M24.8 13.87 16.2 22.17 24.8 30.47" />
+        </svg>
+      </button>
+      {/* Padding and gap are solved, not chosen: they place the 17pt text run and the chevron on the
+          measured ink positions while the pill's own box comes out 187.33 wide, centered on x 201. */}
+      <button type="button" data-slot="title" aria-label={`${name}, details`} onClick={onDetails}
+        className="absolute flex items-center whitespace-nowrap rounded-full focus-visible:outline-2 focus-visible:outline-blue-500"
+        style={{ left: "50%", top: 63, height: 32.3333, transform: "translate(-50%, 0)", padding: "0.3333px 10.7188px 0 12.9531px", gap: 6.1875, ...capsule }}>
+        <GlassLayers />
+        <span data-slot="name" className="relative" style={{ transform: "translateY(0.3333px)", fontSize: 17, lineHeight: 1, fontWeight: 700, letterSpacing: 0, color: "var(--ios-nav-label)" }}>{name}</span>
+        <svg aria-hidden="true" className="relative" width="8.6667" height="16.6667" viewBox="-2 -2 8.6667 16.6667" style={{ margin: -2, transform: "translateX(-0.3333px)" }} fill="none" stroke="var(--ios-nav-chevron)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M1.3 1.3 3.37 6.3333 1.3 11.37" />
+        </svg>
+      </button>
+      <div aria-hidden="true" data-slot="avatar" className="absolute flex items-center justify-center overflow-hidden rounded-full text-white"
+        style={{ left: "calc(50% - 30px)", top: 8, width: 60, height: 60, fontSize: 28, lineHeight: 1, fontWeight: 600, background: "linear-gradient(var(--ios-nav-avatar-top), var(--ios-nav-avatar-bottom))", boxShadow: "0 2px 4px var(--ios-nav-avatar-shadow)" }}>
+        {avatar ?? letters}
+      </div>
+    </header>
+  );
+}
+
+/**
+ * The conversation list's large title ("Messages"): 34pt bold at x 16, cap height centered on
+ * y 140 of the screen (baseline 152). Occupies the 114pt between the status bar and the first row.
+ */
+export function IosLargeTitle({ children, className, style, ...props }: ComponentProps<"h1">) {
+  return (
+    <h1 data-slot="ios-large-title" className={cn("m-0 select-none [--ios-title:#000000] dark:[--ios-title:#ffffff]", className)}
+      style={{ height: 114, paddingTop: 68, paddingLeft: 16, fontFamily: font, fontSize: 34, lineHeight: 1, fontWeight: 700, letterSpacing: 0, color: "var(--ios-title)", boxSizing: "border-box", ...style }} {...props}>
+      {children}
+    </h1>
+  );
+}

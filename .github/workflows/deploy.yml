@@ -1,0 +1,39 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and deploy to Cloudflare
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://imessage.swerdlow.dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      # The registry's JSON and per-component agent docs are generated, and the build script fails if
+      # a declared registryDependency does not match the file's real imports. Running it here means a
+      # drifted manifest breaks the deploy rather than shipping a registry consumers cannot install.
+      - run: bun run registry:build
+        env:
+          REGISTRY_URL: https://imessage.swerdlow.dev
+      - run: bun run typecheck
+      - run: bun run lint
+      - run: bun test tests/unit
+      - name: Deploy
+        run: bunx opennextjs-cloudflare build && bunx opennextjs-cloudflare deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          REGISTRY_URL: https://imessage.swerdlow.dev
