@@ -290,6 +290,10 @@ Rounded translucent NSMenu, **302 wide**, at the cursor. Glyph rows centred 24.0
 
 **The highlighted row is not captured.** The gray band across the lower half of `ctxmenu-with-edit-light-2x.png` looks like one and is not: it is the blurred scene behind the translucent menu. It begins mid-way up the row above the separator and crosses the separator with no step, which a row highlight cannot do. So the kit draws the AppKit shape (inset 4 pt each side, radius 6, accent fill) and marks it unverified. Whatever a menu row's highlight does, the menu has to clip it: a full-bleed row otherwise paints a square corner past the menu's rounded one, which is what the iOS menu was doing until its row wrapper was clipped to the same continuous-corner path as its glass.
 
+### macOS sidebar inbox menu (list-options button)
+
+The three-bar button at the sidebar's top right opens a menu of inboxes. Its rows are ChatKit's own strings from `ChatKit.loctable`: **All Messages** (`ALL_MESSAGES`), **Known Senders** (`KNOWN_SENDERS`), **Unknown Senders** (`UNKNOWN_SENDERS`), **Unread Messages** (`UNREAD_MESSAGES`) and **Recently Deleted** (`RECENTLY_DELETED`), the set `CHANGE_FILTER_MODE_INTENT` calls inboxes, under the heading `FILTER_BY` ("Filter By"). The menu's chrome is the same 302 pt AppKit menu as the transcript's context menu. **UNMEASURED:** the row order, the grouping, and whether the chosen inbox carries a check mark — no capture in `references/` holds this menu open.
+
 ### macOS tapback picker (`ctxmenu-light.png`, `ctxmenu-dark.png`, both 2x)
 
 Two rows of six, both on the same 46.75 pitch. The row-2 emoji ink centres measure 40.00, 87.00,
