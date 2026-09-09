@@ -146,6 +146,32 @@ The two entry points are the whole apps:
 `<Conversation platform="ios" | "macos">` is the single pane without the app chrome, and every part
 is installable on its own. Applications own transport, storage, uploads and real calls.
 
+
+## Deploying
+
+The site runs on Cloudflare Workers through the OpenNext adapter, and every push to `main` deploys it.
+
+```sh
+bun run preview   # build and run the Worker locally
+bun run deploy    # build and deploy
+```
+
+Two GitHub Actions workflows: `ci.yml` runs typecheck, lint and the unit tests on every push and pull
+request, plus the full Playwright suite against a production build. That second job does not gate,
+because the visual baselines are rendered on macOS and a Linux runner rasterises glyphs differently,
+so it reports the diff rather than failing on it. `deploy.yml` runs the same checks and then deploys.
+
+`registry:build` runs before the deploy and fails when a component's declared `registryDependencies`
+do not match its real imports, so a drifted manifest breaks the deploy rather than shipping a registry
+that cannot be installed.
+
+The deploy needs two repository secrets: `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` (an
+"Edit Cloudflare Workers" token).
+
+**The custom domain is not attached yet.** A Workers custom domain requires the zone to live on the
+same Cloudflare account, and `swerdlow.dev` is on Vercel DNS. Until the zone moves, the deploy binds
+only the `workers.dev` hostname.
+
 ## Layout
 
 ```text

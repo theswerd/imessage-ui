@@ -32,11 +32,12 @@ import { cn } from "@/lib/utils";
  *
  * The bar's own background is transparent and content scrolls under it, which `dateheader-mid-light.png`
  * and `dateheader-mid-dark.png` show is not what the device does: an incoming bubble crossing the bar is
- * pulled toward the page background across the bar's whole width, outside every glass surface. Sampled
- * down x 95, dark #262629 (38,38,41) reads (9,9,10) at y 105, (23,23,25) at y 140, and only returns to
- * (38,38,41) at y 195; light #e9e9eb (233,233,235) reads (246,246,247) at y 105 and settles at y 150.
- * The light and dark ramps do not agree as one blend toward the page colour, in sRGB or in linear light,
- * so the mechanism is recorded and not built.
+ * pulled toward the page background across the bar's whole width, outside every glass surface. Down
+ * x 95, the dark incoming bubble #262629 (38,38,41) reads (9,9,9) at y 105, (23,23,25) at y 140 and
+ * (32,32,35) at y 160 where that bubble ends; the next one down, at x 30, is still (36,36,39) at y 175
+ * and reaches (38,38,41) only at y 195, 47 below the bar. Light #e9e9eb (233,233,235) reads
+ * (246,246,246) at y 105 and settles by y 150. The two ramps do not agree as one blend toward the page
+ * colour, in sRGB or in linear light, so the mechanism is recorded and not built.
  *
  * Two sub-pixel offsets are transforms because Chrome quantizes paint, not layout: text baselines and
  * inline-SVG paint offsets snap to whole CSS px, so the name and the chevron each carry a 1/3-px

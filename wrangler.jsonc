@@ -9,6 +9,10 @@
     "binding": "ASSETS"
   },
   "observability": { "enabled": true },
+  // imessage.swerdlow.dev is NOT attached yet, on purpose. A Workers custom domain requires the zone
+  // to be on this Cloudflare account, and swerdlow.dev is on Vercel DNS (ns1/ns2.vercel-dns.com).
+  // Once the zone moves to Cloudflare, add it back and the deploy will bind it:
+  //   "routes": [{ "pattern": "imessage.swerdlow.dev", "custom_domain": true }]
   "routes": [
     { "pattern": "imessage.swerdlow.dev", "custom_domain": true }
   ]
