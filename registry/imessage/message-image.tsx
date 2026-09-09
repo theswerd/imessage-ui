@@ -655,7 +655,19 @@ export function MessageImages({
                 /* eslint-disable-next-line @next/next/no-img-element */
                 <img key={attempt[image.src] ?? 0} src={image.src} data-src={image.src} data-tile={index} alt="" loading="lazy" decoding="async"
                   onLoad={measure} onError={measure}
-                  className="h-full w-full object-cover" style={{ opacity: loading ? 0 : 1 }} />
+                  className={cn("object-cover", card ? "absolute" : "h-full w-full")}
+                  style={card
+                    // A card's box lands on a fraction — the front one at x 67.375 — and WebKit
+                    // rounds the card's own background and the image inside it to different device
+                    // pixels there, leaving one column of the placeholder grey down the leading edge.
+                    // At 3x it measures (177, 204, 221) against (168, 199, 219) beside it, which is
+                    // the photo blended about 15% with #e9e9eb. Chromium does not do it, which is
+                    // exactly the shape of `tailSeamOverlap`: two layers must not share a fractional
+                    // edge. The image oversteps its clip by half a pixel on every side, so the clip
+                    // is what defines the edge and nothing behind it can show. Half a pixel of a
+                    // 286 pt crop is not a visible change to the photograph.
+                    ? { inset: -0.5, width: "calc(100% + 1px)", height: "calc(100% + 1px)", opacity: loading ? 0 : 1 }
+                    : { opacity: loading ? 0 : 1 }} />
               )}
               {/* Native puts the badge on the photo, not on the balloon, so a Live Photo in a group
                   gets one per tile. Hidden while the tile is still on the placeholder: a badge over a

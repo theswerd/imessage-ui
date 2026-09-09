@@ -23,11 +23,26 @@ async function evaluateSettled(page: Page, run: () => Promise<unknown>): Promise
   }
 }
 
+/**
+ * Every `<img>` in the frame, decoded. Fonts were already waited on; photographs were not, and a
+ * scene whose layout depends on one — the viewer sizing its page to the photo it is zooming into —
+ * settles a frame later than the rest of the scene does. Under four workers that landed on the wrong
+ * side of the screenshot often enough to fail a checkpoint that passes on its own, which is exactly
+ * the shape of flake to remove rather than retry.
+ */
+async function imagesDecoded(page: Page) {
+  await evaluateSettled(page, () => page.evaluate(async () => {
+    const images = Array.from(document.images).filter(image => image.src && !image.src.startsWith("data:"));
+    await Promise.all(images.map(image => image.decode().catch(() => undefined)));
+  }));
+}
+
 /** Opens one scenario checkpoint in the embedded harness and returns the device frame. */
 export async function openScene(page: Page, info: TestInfo, scene = "conversation", time = 0, theme = "light"): Promise<Locator> {
   await page.goto(`/harness?platform=${platformFor(info)}&scene=${scene}&t=${time}&theme=${theme}&embed=1`, { waitUntil: "load" });
   await expect(page.getByTestId("harness-ready")).toBeVisible();
   await evaluateSettled(page, () => page.evaluate(async () => { await document.fonts.ready; }));
+  await imagesDecoded(page);
   return page.getByTestId("device");
 }
 
