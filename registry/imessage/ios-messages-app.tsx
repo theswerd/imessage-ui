@@ -6,6 +6,7 @@ import { PlatformProvider } from "@/registry/imessage/platform";
 import { PaletteStyle } from "@/registry/imessage/palette";
 import { IosStatusBar } from "@/registry/imessage/ios-status-bar";
 import { IosNavBar } from "@/registry/imessage/ios-nav-bar";
+import { IosScrollEdge } from "@/registry/imessage/ios-scroll-edge";
 import { IosComposer } from "@/registry/imessage/ios-composer";
 import { IosConversationList, type IosConversation } from "@/registry/imessage/ios-conversation-list";
 import { IosNewMessageSheet } from "@/registry/imessage/ios-new-message-sheet";
@@ -905,6 +906,7 @@ export function IosMessagesApp({
       <MessageList messages={messages} typing={typing} group={isGroup} now={now} anchor="top"
         insetTop={iosScreen.listTop} insetBottom={iosScreen.listBottom} renderReactions={renderReactions}
         className="absolute inset-0" />
+      <IosScrollEdge />
       <IosNavBar name={contact.name} initials={contact.initials} avatar={navAvatar} className="absolute left-0" style={{ top: iosScreen.statusBar }} />
       <IosComposer className="absolute bottom-0 left-0" value={composer?.value} placeholder={composer?.placeholder} disabled />
     </div>
@@ -988,6 +990,9 @@ export function IosMessagesApp({
                 ))}
               </div>
             )}
+            {/* Between the transcript and the bar: a message scrolling up under the floating glass is
+                washed toward the page rather than arriving at full contrast. See `ios-scroll-edge`. */}
+            <IosScrollEdge />
             <IosNavBar name={contact.name} initials={contact.initials} avatar={navAvatar} onBack={onBack}
               onDetails={() => { setOwnDetails(true); onDetails?.(); }} className="absolute left-0" style={{ top: iosScreen.statusBar }} />
             {/* The recorder replaces the field rather than sitting beside it: the two boxes overlap,

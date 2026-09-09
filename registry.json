@@ -387,6 +387,7 @@
         "@imessage/date-separator",
         "@imessage/group-avatar",
         "@imessage/ios-notices",
+        "@imessage/ios-swipe-times",
         "@imessage/link-preview",
         "@imessage/message-attachment",
         "@imessage/message-audio",
@@ -431,6 +432,19 @@
           "path": "registry/imessage/ios-nav-bar.tsx",
           "type": "registry:ui",
           "target": "components/imessage/ios-nav-bar.tsx"
+        }
+      ]
+    },
+    {
+      "name": "ios-scroll-edge",
+      "type": "registry:ui",
+      "title": "iOS scroll edge",
+      "description": "The wash iOS 26 lays over a message scrolling up under the conversation's floating nav bar, measured per theme.",
+      "files": [
+        {
+          "path": "registry/imessage/ios-scroll-edge.tsx",
+          "type": "registry:ui",
+          "target": "components/imessage/ios-scroll-edge.tsx"
         }
       ]
     },
@@ -513,6 +527,7 @@
         "@imessage/ios-nav-bar",
         "@imessage/ios-new-message-sheet",
         "@imessage/ios-plus-menu",
+        "@imessage/ios-scroll-edge",
         "@imessage/ios-search",
         "@imessage/ios-select-mode",
         "@imessage/ios-status-bar",

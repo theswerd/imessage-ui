@@ -52,6 +52,8 @@ Units are points unless stated. Fractions come from the 3x/2x pixel grid; reprod
 
 Incoming bubbles mirror outgoing ones exactly: body left edge at x 16, the tail on the bottom-left (`incoming-light.png`: "Hi there" body 88×40 at (16, 662.67), tail tip ≈ 9.3 in from the left edge, 6.8 below the body).
 
+- **Content scrolling under the nav bar is washed toward the page.** The bar paints no background, so a bubble crossing it used to arrive at full contrast. Solving `t = (row - bubble) / (page - bubble)` over the clean rows of `dateheader-mid-light.png` and `dateheader-mid-dark.png` (columns x 68-103, between the back button and the name pill; rows whose pixels agree to 2/255) gives a straight line in y, rmse 0.012 and 0.015, with no useful quadratic term: **light −0.01025/pt, t = 1 at y 62.85 and t = 0 at y 160.39**; **dark −0.01212/pt, y 89.17 to y 171.71**. The two spans genuinely differ (97.53 against 82.54) and both are solved against bubble colours confirmed elsewhere in the same frame. **UNMEASURED:** where each ramp reaches full strength — the sample can only start at y 105, where the bubble does — and whether iOS 26's progressive blur rides along with the wash, which a flat bubble interior cannot separate. Only the wash is built.
+
 ### Long-press (tapback) state
 
 - Background: one dim overlay ≈ rgba(22,18,44,0.21) in both themes (white → #ceced2, black → #050409) plus blur. Glass surfaces show the content brighter than the dimmed layer (fit: rgba(229,229,231,0.69) + blur 9 / brightness 1.32 / saturate 1.35).
