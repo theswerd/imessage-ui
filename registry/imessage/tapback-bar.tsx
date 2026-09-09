@@ -108,10 +108,24 @@ export function TapbackBar({ layout = "ios", selected, recent = defaultRecent, o
   const selectedIndex = items.findIndex(item => isSelected(selected, item.type, item.emoji));
   const [focusIndex, setFocusIndex] = useState(selectedIndex >= 0 ? selectedIndex : 0);
 
+  /**
+   * Focus the bar, not a glyph.
+   *
+   * A glyph focused programmatically while the finger is still down matches `:focus-visible` in
+   * Chrome and paints a blue ring the captures do not have - two vertical bars inside the pill,
+   * since its rounding clips the ring's ends. The heuristic is not wrong so much as early: a
+   * touchStart that is still held has not resolved into a click or a scroll yet, so the modality is
+   * still whatever it was, and a programmatic focus inherits the keyboard default. Isolated:
+   * a mouse click then `focus()` does not match, a held touchStart then `focus()` does, and a held
+   * touchStart whose default is prevented does not.
+   *
+   * The container takes no ring, `onKeyDown` below still receives every key because it is on this
+   * element, and the first arrow key moves to a glyph - where a ring is right, because by then the
+   * person really is on the keyboard.
+   */
   useEffect(() => {
     if (!autoFocus) return;
-    root.current?.querySelector<HTMLButtonElement>(`[data-index="${focusIndex}"]`)?.focus({ preventScroll: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    root.current?.focus({ preventScroll: true });
   }, [autoFocus]);
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -151,7 +165,7 @@ export function TapbackBar({ layout = "ios", selected, recent = defaultRecent, o
     // rather than a second menu: `menuitemradio` needs a menu ancestor, and a nested `menu` would be
     // reported as a submenu that has no parent item.
     return (
-      <div ref={root} role="group" aria-label="Tapback" data-slot="tapback-bar" data-layout="macos" className={cn("select-none", className)} onKeyDown={onKeyDown}
+      <div ref={root} role="group" aria-label="Tapback" data-slot="tapback-bar" data-layout="macos" tabIndex={-1} className={cn("select-none outline-none", className)} onKeyDown={onKeyDown}
         style={{ fontFamily: fontStack, paddingInline: m.inset, ...style }}>
         <div data-slot="tapback-row" style={{ display: "flex", height: m.row1, alignItems: "center" }}>
           {classics.map((item, i) => glyphButton(item, i, m.glyph, m.slot, { height: m.rowHeight }))}
@@ -177,7 +191,7 @@ export function TapbackBar({ layout = "ios", selected, recent = defaultRecent, o
     boxShadow: "var(--im-glass-shadow, 0 6px 24px rgba(0,0,0,0.10)), inset 0 0 0 0.5px var(--im-glass-rim, rgba(255,255,255,0.55))",
   };
   return (
-    <div ref={root} role="menu" aria-label="Tapback" data-slot="tapback-bar" data-layout="ios" className={cn("select-none", className)} onKeyDown={onKeyDown}
+    <div ref={root} role="menu" aria-label="Tapback" data-slot="tapback-bar" data-layout="ios" tabIndex={-1} className={cn("select-none outline-none", className)} onKeyDown={onKeyDown}
       style={{ position: "relative", height, width, borderRadius: height / 2, fontFamily: fontStack, ...style }}>
       <div data-slot="tapback-pill" style={{ position: "absolute", inset: 0, borderRadius: height / 2, ...glass }} />
       <div data-slot="tapback-scroll" className="scrollbar-none" style={{ position: "absolute", inset: 0, borderRadius: height / 2, overflowX: "auto", overflowY: "hidden", display: "flex", alignItems: "center", paddingLeft: m.firstCenter - m.slot / 2, scrollbarWidth: "none" }}>

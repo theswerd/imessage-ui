@@ -175,14 +175,20 @@ export function ContextMenu({ variant = "ios", items, onAction, onClose, header,
   }, [open]);
   const m = contextMenuMetrics[variant];
 
-  // Opened for the keyboard: focus the first item, and hand focus back to whatever opened the menu
-  // when it goes. A layout effect, so the cleanup runs while the menu is still in the DOM.
+  // Move focus into the menu on open, and hand it back to whatever opened the menu when it goes. A
+  // layout effect, so the cleanup runs while the menu is still in the DOM.
+  //
+  // The menu itself takes the focus, not its first row. Focusing a row programmatically while a
+  // finger is still down makes Chrome match `:focus-visible` on it - the pointer interaction has not
+  // resolved, so the modality is still the keyboard default - which lights that row's highlight and
+  // draws a ring on a menu the person opened by touch. Focus lands here instead; `onKeyDown` below
+  // is on this element so every key still arrives, and the first arrow moves to a row, where the
+  // highlight is right because the person really is on the keyboard.
   useLayoutEffect(() => {
     if (!autoFocus) return;
     const menu = root.current;
     const opener = document.activeElement as HTMLElement | null;
-    // The first item of any kind, so a menu whose header is the Tapback row starts on a tapback.
-    menu?.querySelector<HTMLButtonElement>('[role="menuitem"]:not([aria-disabled="true"]), [role="menuitemradio"]:not([aria-disabled="true"]), [role="menuitemcheckbox"]:not([aria-disabled="true"])')?.focus({ preventScroll: true });
+    menu?.focus({ preventScroll: true });
     return () => {
       const active = document.activeElement;
       const inside = active instanceof Node && menu?.contains(active);
@@ -199,8 +205,15 @@ export function ContextMenu({ variant = "ios", items, onAction, onClose, header,
     const buttons = Array.from(root.current?.querySelectorAll<HTMLButtonElement>("[role=menuitem]:not([aria-disabled=true])") ?? []);
     if (!buttons.length) return;
     event.preventDefault();
+    // -1 when the focus is still on the menu itself, which is where it starts. From there Down has
+    // to reach the first row and Up the last; wrapping arithmetic on -1 lands on neither.
     const i = buttons.indexOf(document.activeElement as HTMLButtonElement);
-    const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : event.key === "ArrowDown" ? (i + 1) % buttons.length : (i - 1 + buttons.length) % buttons.length;
+    const last = buttons.length - 1;
+    const next = event.key === "Home" ? 0
+      : event.key === "End" ? last
+      : i < 0 ? (event.key === "ArrowDown" ? 0 : last)
+      : event.key === "ArrowDown" ? (i + 1) % buttons.length
+      : (i - 1 + buttons.length) % buttons.length;
     buttons[next]?.focus();
   }
 
@@ -244,7 +257,7 @@ export function ContextMenu({ variant = "ios", items, onAction, onClose, header,
 
   if (variant === "macos") {
     return (
-      <div ref={root} role="menu" aria-label={ariaLabel} data-slot="context-menu" data-variant="macos" className={cn("select-none", className)} onKeyDown={onKeyDown}
+      <div ref={root} role="menu" aria-label={ariaLabel} data-slot="context-menu" data-variant="macos" tabIndex={-1} className={cn("select-none outline-none", className)} onKeyDown={onKeyDown}
         style={{ width: width ?? m.width, boxSizing: "border-box", borderRadius: m.radius, overflow: "hidden", position: "relative", paddingTop: m.padding, paddingBottom: contextMenuMetrics.macos.paddingBottom, fontFamily: fontStack, color: "var(--im-menu-text, #242526)",
           background: "var(--im-menu-bg, rgba(247,248,251,0.92))", backdropFilter: "blur(30px) saturate(1.6)", WebkitBackdropFilter: "blur(30px) saturate(1.6)",
           boxShadow: "0 0 0 0.5px var(--im-menu-border, #b1b1b1), 0 8px 24px rgba(0,0,0,0.18), 0 1px 3px rgba(0,0,0,0.12)", ...style }}>
@@ -271,7 +284,7 @@ export function ContextMenu({ variant = "ios", items, onAction, onClose, header,
   // carries the shape twice: the clip for its fill, the mask for the backdrop it filters.
   const maskShape = `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${m.width}" height="${height}"><path d="${outline}" fill="#000"/></svg>`)}")`;
   return (
-    <div ref={root} role="menu" aria-label={ariaLabel} data-slot="context-menu" data-variant="ios" className={cn("select-none", className)} onKeyDown={onKeyDown}
+    <div ref={root} role="menu" aria-label={ariaLabel} data-slot="context-menu" data-variant="ios" tabIndex={-1} className={cn("select-none outline-none", className)} onKeyDown={onKeyDown}
       style={{ width: m.width, height, boxSizing: "border-box", fontFamily: fontStack, position: "relative", ...style }}>
       <style>{highlightStyle}</style>
       <div aria-hidden="true" data-slot="menu-shadow" style={{ position: "absolute", inset: 0, transform: "translateY(7px)", filter: "blur(11px)", pointerEvents: "none" }}>

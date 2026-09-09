@@ -97,7 +97,7 @@ test("the Tapback menu applies a reaction to the bubble and toggles it back off"
   const platform = platformFor(info);
   await openScene(page, info);
   const target = messageRow(page, "m6");
-  await expect(target.getByRole("img", { name: "Love (you)" })).toHaveCount(0);
+  await expect(target.getByRole("img", { name: "Love tapback, from you" })).toHaveCount(0);
 
   await openTapbackMenu(page, "m6", defaultGesture(platform));
   const menu = tapbackMenu(page);
@@ -105,14 +105,29 @@ test("the Tapback menu applies a reaction to the bubble and toggles it back off"
   await menu.getByRole("menuitemradio", { name: "Love", exact: true }).click();
 
   await expect(menu).toBeHidden();
-  await expect(target.getByRole("img", { name: "Love (you)" })).toBeVisible();
+  await expect(target.getByRole("img", { name: "Love tapback, from you" })).toBeVisible();
 
   // Re-opening shows the reaction as the chosen one; choosing it again removes it.
   await openTapbackMenu(page, "m6", defaultGesture(platform));
   await expect(tapbackMenu(page).getByRole("menuitemradio", { name: "Love", exact: true })).toBeChecked();
   await tapbackMenu(page).getByRole("menuitemradio", { name: "Love", exact: true }).click();
   await expect(tapbackMenu(page)).toBeHidden();
-  await expect(target.getByRole("img", { name: "Love (you)" })).toHaveCount(0);
+  await expect(target.getByRole("img", { name: "Love tapback, from you" })).toHaveCount(0);
+});
+
+test("several people reacting to one message is one balloon, not one each", async ({ page }, info) => {
+  await openScene(page, info, "reactions");
+  // m3 carries a laugh from them and an emphasize from me. ChatKit collapses that into a single
+  // CKAggregateAcknowledgmentChatItem with one acknowledgmentImageName, so the transcript shows the
+  // most recent reaction once and says how many there are - not a balloon per person.
+  const both = messageRow(page, "m3");
+  await expect(both.getByRole("img")).toHaveCount(1);
+  await expect(both.getByRole("img", { name: "Emphasize tapback, 2, from you" })).toBeVisible();
+
+  // One reaction still reads as one reaction, with no count.
+  const one = messageRow(page, "m1");
+  await expect(one.getByRole("img")).toHaveCount(1);
+  await expect(one.getByRole("img", { name: "Love tapback, from you" })).toBeVisible();
 });
 
 test("every gesture that opens the reaction menu offers the six classic Tapbacks", async ({ page }, info) => {
