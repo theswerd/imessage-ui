@@ -179,15 +179,42 @@ export const balloonSlot: Record<Platform, { marginTop: number; top: number; sid
   macos: { marginTop: 27.4, top: -22.05, side: -11.79 },
 };
 
+/**
+ * More than one person reacting does not make a pill with a number on it - that was invented here.
+ * ChatKit draws an aggregate balloon out of its own artwork: `-[CKUIBehavior
+ * aggregateAcknowledgmentStackName2:]` and `...StackName3:` name `AcknowledgmentStack-2` and
+ * `AcknowledgmentStack-3`, and `aggregateAcknowledgmentTranscriptBalloonSize` is {46, 40} on the
+ * phone against {36, 36} for a single balloon, {35, 30} against {29, 29} on the Mac. Pulling those
+ * renditions out of `ChatKit.framework/Resources/Assets.car` at both idioms and reading their alpha
+ * shows what the extra width is: the frontmost balloon carries the glyph and one or two more sit
+ * behind it, each shifted along the tail's direction, so only a crescent of each shows. Two
+ * reactions draw one crescent, three or more draw two - there is no fourth asset and no number.
+ *
+ * The widest row of `AcknowledgmentStack-3` at 2x measures, in points: fill 1.00..34.00, gap to
+ * 35.00, crescent to 37.00, gap to 38.00, crescent to 40.00. So the phone's artwork is a 33.0 ball
+ * with a 1.0 gap and a 3.0 pitch, and the whole silhouette's ink runs 1.00..42.00 for -2 against
+ * 1.00..45.00 for -3, which is the same 3.0 read a second way. The Mac's is a 25.0 ball with a 0.5
+ * gap and a 2.5 pitch (ink 0.50..32.00 against 0.50..34.50). `AcknowledgmentStackBackground-*` is
+ * the same silhouette 1.0 (phone) / 0.5 (Mac) larger on every side: the gaps are that rim showing
+ * through between the balls, so one rim value draws both.
+ *
+ * Our balls are 34 and 28, measured off captures rather than off the artwork, so the pitch and gap
+ * are scaled by 34/33 and 28/25 to keep the artwork's proportions against the ball we actually draw.
+ */
+export const aggregateStack: Record<Platform, { pitch: number; gap: number; max: number }> = {
+  ios: { pitch: 3 * (34 / 33), gap: 1 * (34 / 33), max: 2 },
+  macos: { pitch: 2.5 * (28 / 25), gap: 0.5 * (28 / 25), max: 2 },
+};
+
 /** The emoji-picker "thought bubble" beside a long-pressed message is the same shape at ~1.3x. */
 export const pickerBalloonGeometry: BalloonGeometry = { main: 44, medium: 14.6, small: 8, mediumOffset: [-13.2, 20.3], smallOffset: [-22.2, 30.7], glyph: 24 };
 
 /** Renders the trailing circles of a balloon; the parent is the main circle (position: relative). */
-export function BalloonTrail({ geometry, side, color }: { geometry: BalloonGeometry; side: "left" | "right"; color: string }) {
+export function BalloonTrail({ geometry, side, color, ring }: { geometry: BalloonGeometry; side: "left" | "right"; color: string; /** The rim an aggregate stack needs, so the ball behind shows as a crescent beside this one too. */ ring?: string }) {
   const half = geometry.main / 2;
   const place = (d: number, [dx, dy]: [number, number]): CSSProperties => ({
     position: "absolute", width: d, height: d, borderRadius: "50%", background: color, top: half + dy - d / 2,
-    [side === "left" ? "left" : "right"]: half + dx - d / 2,
+    [side === "left" ? "left" : "right"]: half + dx - d / 2, boxShadow: ring,
   });
   return (
     <>
@@ -354,21 +381,41 @@ export function Tapback({ reaction = "love", emoji, own = true, side = "left", s
   const ring = selected ? `0 0 0 ${platform === "ios" ? 2 : 1.5}px var(--im-bg, #fff), 0 0 0 ${platform === "ios" ? 4 : 3}px var(--im-tapback-ring, ${tapbackColors.selectedRing})` : null;
   // Reads on its own: "Love tapback, 2, from you" rather than a bare glyph name and a bracket.
   const label = `${emoji ?? tapbackLabels[reaction]} tapback${count !== undefined && count > 1 ? `, ${count}` : ""}${own ? ", from you" : ""}`;
-  const pill = count !== undefined && count > 1;
+  // See `aggregateStack`: extra reactions are crescents of the same balloon behind this one, capped
+  // at two because ChatKit's artwork stops at `AcknowledgmentStack-3`.
+  const a = aggregateStack[platform];
+  const behind = Math.min(Math.max((count ?? 1) - 1, 0), a.max);
+  // One rim, not two: the Mac already knocks a 0.51 pt pane rim out of what the ball laps, and the
+  // stack's gap is 0.56, so the wider of the pair is the only one that shows.
+  const gapRing = `0 0 0 ${Math.max(a.gap, platform === "macos" ? macosBalloonRim : 0)}px var(--im-bg, #fff)`;
   const rootStyle: CSSProperties = {
     position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center", boxSizing: "border-box",
-    width: pill ? undefined : g.main, minWidth: g.main, height: g.main, borderRadius: g.main / 2, background: surface,
-    paddingInline: pill ? g.main * 0.26 : 0, gap: g.main * 0.12, fontFamily: fontStack,
+    width: g.main, minWidth: g.main, height: g.main, borderRadius: g.main / 2,
+    // Stacked, the front ball is a layer of its own so the ones behind it can paint first; the root
+    // would otherwise paint its background before any child and cover them.
+    background: behind ? undefined : surface,
+    gap: g.main * 0.12, fontFamily: fontStack,
     color: own ? "#fff" : "var(--im-incoming-text, #000)",
     // The selected ring uses the same token as the picker, so dark gets #0064d2 rather than #26aeff.
-    boxShadow: [rim, ring].filter(Boolean).join(", ") || undefined,
+    boxShadow: behind ? ring ?? undefined : [rim, ring].filter(Boolean).join(", ") || undefined,
     ...style,
   };
+  const ball = (index: number) => (
+    <span key={index} aria-hidden="true" data-slot={index ? "balloon-behind" : "balloon-front"} style={{
+      position: "absolute", width: g.main, height: g.main, borderRadius: "50%", background: surface, top: 0,
+      [side === "left" ? "left" : "right"]: -index * a.pitch,
+      boxShadow: gapRing,
+    }}>
+      <BalloonTrail geometry={g} side={side} color={fill} ring={gapRing} />
+    </span>
+  );
   const content = (
     <>
-      <TapbackGlyph type={emoji ? undefined : reaction} emoji={emoji} size={g.glyph} onAccent={own} style={{ marginTop: emoji ? 0 : 2 * (g.glyphOffsetY ?? 0) }} />
-      {pill && <span data-slot="tapback-count" style={{ fontSize: g.main * 0.38, fontWeight: 600, lineHeight: 1 }}>{count}</span>}
-      <BalloonTrail geometry={g} side={side} color={fill} />
+      {behind > 0 && Array.from({ length: behind }, (_, i) => ball(behind - i)).concat(ball(0))}
+      {/* Positioned, because the stacked balls are and CSS paints every positioned descendant after
+          the in-flow content however the DOM is ordered - without this the front ball covers the glyph. */}
+      <TapbackGlyph type={emoji ? undefined : reaction} emoji={emoji} size={g.glyph} onAccent={own} style={{ position: "relative", marginTop: emoji ? 0 : 2 * (g.glyphOffsetY ?? 0) }} />
+      {behind === 0 && <BalloonTrail geometry={g} side={side} color={fill} />}
       {children}
     </>
   );

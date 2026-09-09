@@ -57,6 +57,8 @@ type SceneSpec = {
   selected?: boolean;
   /** The clock in the capture this scene reconstructs, read off its status bar. */
   time?: { light: string; dark: string };
+  /** How many people reacted, so the balloon draws `aggregateStack`'s crescents behind it. */
+  count?: number;
   peer?: Peer;
 };
 /**
@@ -93,6 +95,13 @@ const scenes: Record<string, SceneSpec> = {
   "incoming-balloon": { items: conv3Hi, direction: "incoming", top: 201, balloon: "ok", time: { light: "3:33", dark: "3:34" }, peer: KB },
   "longpress-incoming": { items: conv3Hi, direction: "incoming", top: 201, balloon: "ok", press: "hi", time: { light: "3:39", dark: "3:39" }, peer: KB },
   "macos-balloon": { items: macPane, direction: "outgoing", top: 6.03, balloon: "second" },
+  // Nothing measured here beyond `aggregateStack` itself: no capture holds a message with more than
+  // one reaction on it, so these two are the artwork's geometry drawn out, not a diff against pixels.
+  "balloon-2": { items: conv3, direction: "outgoing", top: IOS_FIRST_BODY_TOP, balloon: "ok", count: 2, time: { light: "2:13", dark: "2:14" } },
+  "balloon-3": { items: conv3, direction: "outgoing", top: IOS_FIRST_BODY_TOP, balloon: "ok", count: 4, time: { light: "2:13", dark: "2:14" } },
+  "incoming-balloon-3": { items: conv3Hi, direction: "incoming", top: 201, balloon: "ok", count: 4, time: { light: "3:33", dark: "3:34" }, peer: KB },
+  "macos-balloon-2": { items: macPane, direction: "outgoing", top: 6.03, balloon: "second", count: 2 },
+  "macos-balloon-3": { items: macPane, direction: "outgoing", top: 6.03, balloon: "second", count: 4 },
 };
 
 /** The macOS crop starts 28 pt below the window origin the bubble gradient is anchored to. */
@@ -110,7 +119,7 @@ export function TapbackLabScene({ scene, theme, progress }: { scene: string; the
   const platform: Platform = scene.startsWith("macos") ? "macos" : "ios";
   const m = bubbleMetrics[platform];
   const vars = { ...paletteVars(palettes[platform][theme]), ...tapbackVars(theme, platform) } as CSSProperties;
-  const size = platform === "ios" ? { width: 402, height: 874 } : scene === "macos-balloon" ? { width: 260, height: 150 } : { width: 315, height: 295 };
+  const size = platform === "ios" ? { width: 402, height: 874 } : scene.startsWith("macos-balloon") ? { width: 260, height: 150 } : { width: 315, height: 295 };
   const frame = useRef<HTMLDivElement>(null);
   const screen = useRef<HTMLDivElement>(null);
   const pressedBubble = useRef<HTMLDivElement>(null);
@@ -130,7 +139,7 @@ export function TapbackLabScene({ scene, theme, progress }: { scene: string; the
   const pressed = spec?.press ? spec.items.find(item => item.id === spec.press) : undefined;
   const outgoing = spec?.direction !== "incoming";
   const slot = balloonSlot[platform];
-  const balloon = (own: boolean) => <Tapback reaction="love" own={own} side={outgoing ? "left" : "right"} />;
+  const balloon = (own: boolean) => <Tapback reaction="love" own={own} side={outgoing ? "left" : "right"} count={spec.count} />;
   // The status bar, nav bar and composer go under the overlay's dim with the list, unblurred and not
   // re-drawn above it; see the fit in `app/lab/ios-chrome/scene.tsx`. Without them the frame's top
   // 168 pt and its bottom composer band are flat dim over the page colour, which is the whole of the
@@ -140,7 +149,7 @@ export function TapbackLabScene({ scene, theme, progress }: { scene: string; the
 
   return (
     <PlatformProvider platform={platform}>
-      <div ref={frame} data-testid="lab" className={theme} style={{ ...vars, ...size, position: "relative", overflow: "hidden", background: platform === "ios" || scene === "macos-balloon" ? "var(--im-bg)" : theme === "light" ? "#e6e6e6" : "#2c2c2e" }}>
+      <div ref={frame} data-testid="lab" className={theme} style={{ ...vars, ...size, position: "relative", overflow: "hidden", background: platform === "ios" || scene.startsWith("macos-balloon") ? "var(--im-bg)" : theme === "light" ? "#e6e6e6" : "#2c2c2e" }}>
         <style>{pressedStyle}</style>
         {/* The screen frame the bubble gradient is measured from; on macOS the crop sits below the window origin. */}
         <div ref={screen} aria-hidden="true" style={{ position: "absolute", left: 0, top: platform === "macos" ? -MACOS_PANE_OFFSET : 0, width: 0, height: 0 }} />

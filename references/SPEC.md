@@ -60,6 +60,7 @@ Incoming bubbles mirror outgoing ones exactly: body left edge at x 16, the tail 
 - Emoji-picker "thought bubble" (Ø44 blob with two trailing circles, smiley inside) centred 14.67 below the pill and 6 beside the bubble, on the side away from the screen edge.
 - Context menu 17 below the bubble: x 136–386, 188 tall (10 + 4×42 + 10): Copy, Translate, Select, More… with SF Symbols. Its "tint" is the bubble behind it seen through the glass plus a faint wash, not a painted gradient.
 - Applying a tapback shifts the bubble down **28** (balloon Ø34; own-reaction blue #0088ff in both themes).
+- **More than one reaction is a stack, not a count.** `aggregateAcknowledgmentStackName2:` / `...StackName3:` name `AcknowledgmentStack-2` and `AcknowledgmentStack-3` in `ChatKit.framework/Resources/Assets.car`, and `aggregateAcknowledgmentTranscriptBalloonSize` is **{46, 40}** on the phone against {36, 36} for a single balloon (**{35, 30}** against {29, 29} on the Mac). The extra width is one or two more balloons sitting behind the frontmost one, shifted along the tail's direction so only a crescent of each shows; there is no fourth asset and no number. Reading the artwork's alpha at 2x: the phone is a **33.0** ball with a **1.0** gap and a **3.0** pitch, the Mac a **25.0** ball with **0.5** and **2.5**, and `AcknowledgmentStackBackground-*` is the same silhouette one rim larger on every side, which is what the gaps are. **UNMEASURED against pixels:** no capture on either platform holds a message with more than one reaction.
 - Captures: `references/ios/captures/longpress-light.png` (mid-animation), `longpress-light-settled.png` (settled), `longpress-dark.png`, `longpress-ok-light.png`, `longpress-incoming-light.png`.
 
 ### Conversation list
@@ -2080,3 +2081,155 @@ diffs at 0.07% full-frame against `search-active-light.png`, `noresults&theme=da
 `search-noresults-dark.png`, and the composited bar at `scene=open&progress=0` diffs at 0.02% against
 `list-light.png` with an interior mean of −0.01, which is what proves the search screen replaces the
 list's bar rather than stacking a second one on it.
+
+## Unread
+
+The state that had never been on screen. Both conversation lists have carried an unread dot since
+they were written and neither had ever drawn one, on either platform, in any lab or in the harness.
+Driven headless before any of the work below, at 3x for iOS and 2x for macOS:
+
+```
+/harness?platform=ios&scene=list&embed=1     6 rows, 0 [data-slot="unread"]
+/harness?platform=macos&scene=list&embed=1   5 rows, 0 [data-slot="row-unread"], 0 pinned-unread
+/lab/ios-chrome?scene=list                   0 dots
+/lab/macos-chrome                            0 dots
+```
+
+**Why, exactly.** Two independent breaks, both outside the components:
+
+1. `harness/scenarios.ts` → `conversationList`, the fixture both platforms share, has six entries and
+   not one of them sets `unread`. Nothing in `harness/`, `app/lab/` or `tests/` did, before
+   `/lab/unread`.
+2. `harness/preview.tsx` re-maps that fixture **field by field** on its way into each shell — line 286
+   for iOS, line 363 for macOS — naming `id, name, initials, preview, time` (plus `pinned, muted` on
+   the Mac) and silently dropping every field it does not name. So even with the fixture fixed the
+   harness would still draw nothing. Both breaks have to be fixed together or the first one looks
+   like a component bug.
+
+Neither shell is at fault: `IosMessagesApp` forwards `conversations` untouched and `MacMessagesApp`
+spreads each item (`{ ...conversation, members }`), so both pass `unread` straight through. Proved by
+rendering the same fixtures through the shells in `/lab/unread?scene=shell` — five dots on each.
+
+### What ChatKit says, at both idioms
+
+One probe, `-[UIDevice userInterfaceIdiom]` swizzled *before* `dlopen`, reading
+`+[CKUIBehaviorPhone sharedBehaviors]` at idiom 0 and `+[CKUIBehaviorMac sharedBehaviors]` at idiom 5
+in the same run. The image colours are the rendered centre pixel of the framework's own asset under a
+light and a dark `UITraitCollection`, not a constant read off a header.
+
+| | iOS (idiom 0) | macOS (idiom 5) |
+|---|---|---|
+| `unreadIndicatorImageViewSize` | **{11, 11}** | **{9, 9}** |
+| `conversationListCellLeftMargin` | 26 | 18 (= 9 + `unreadIndicatorTotalMargins` 9, which is Mac-only) |
+| `unreadIndicatorTintedImage` | Ø12 opaque disc, #0088ff light / #0091ff dark | identical |
+| `unreadIndicatorSelectedImage` | #1a1919 (unreachable) | **#ffffff** in both appearances |
+| `shouldUnreadIndicatorChangeOnSelection` | **NO** | **YES** |
+| `hidesUnreadIndicatorWhenEditing` | NO | NO |
+| `conversationListSummaryFont` | SF Regular 15 | SF Regular 12 |
+| `+cellHeightForDisplayScale:` | 86.666667 at 3 | 84.0 at 2 (the capture's 80.5 wins; see the idiom trap above) |
+
+`-[CKUIThemeMac unreadIndicatorColor]` is #0088ff / #0091ff opaque and `readSelectedIndicatorColor`
+opaque #ffffff; the phone reads the same two off `CKUITheme` (there is **no** `CKUIThemePhone`, which
+is why an earlier probe came back empty) and its `readSelectedIndicatorColor` is nil, consistent with
+the NO above.
+
+**Beyond the dot, four things settled by disassembly rather than by memory:**
+
+- **No bold preview.** `conversationListBoldSummaryFont` exists (SF **Semibold** 15 / 12) and is not
+  the unread font. Scanning every BL instruction in ChatKit's 11 748 064-byte `__TEXT,__text` for the
+  selector's stub finds one consumer, `-[CKUIBehavior conversationCellSummaryBoldPreviewTextAttributes]`,
+  whose only consumer in turn is `-[CKConversationListCell _makeSummaryAttributedStringWithText:multiwayConversation:]`
+  — inside its `conversationIsVideoCall:` / `conversationIsAVLessSharePlay:` branch, next to
+  `conversationListFacetimeVideoIcon`. It is the "FaceTime Video" summary line, not unread. An unread
+  row's name and preview keep the same font, weight and colour a read row's have.
+- **No count, anywhere.** `-[CKConversationListCell unreadMessageCount]` has five call sites and none
+  of them draws: `_chatHasRelevantUnreadLastMessage:`, `keyCommandToggleUnreadState:`, the
+  mark-as-read-on-push block, `summaryAttributedTextForBlockedConversationWithIcon:` and the Swift
+  `CKConversation.showUnreadIndicator` getter, which is `chat.unreadMessageCount > 0 ||
+  shouldShowSatelliteSummary` and nothing more. A number is announcement only, on both platforms.
+- **Mute changes nothing.** `-[CKConversationListCell unreadIndicatorImageForVisibility:withMuteState:]`
+  is `visibility ? (shouldLabelsBeHighlighted && shouldUnreadIndicatorChangeOnSelection ?
+  unreadIndicatorSelectedImage : unreadIndicatorTintedImage) : nil`; the disassembly branches on `w2`
+  and **never reads `w3`**, the mute argument. `unreadIndicatorMutedImage` (a 19 × 20.5 glyph at black
+  23.9% / #3a3a3a 22.7%) has **zero** BL call sites in the whole framework. A muted unread row is a
+  plain blue dot plus the row's own mute glyph.
+- **No app-icon badge in this kit's scope.** ChatKit contains no reference to
+  `setApplicationIconBadgeNumber:` or `applicationIconBadgeNumber` at all; the only "IconBadge"
+  selectors are `extensionIconBadgeRectForOrientation:` and friends, about app-extension badges on
+  balloons. The Springboard badge belongs to Messages.app, not to the framework this kit reproduces,
+  so nothing here can claim to draw it.
+
+**The list header carries no count either.** The only unread strings ChatKit vends for chrome are
+`CATALYST_VIEW_MENU_FILTER_TITLE` `"%@%#@Unread@"` → `" (%tu Unread)"`, an AppKit **View ▸ Filter**
+menu item this kit has no menu bar for; `UNREAD_MESSAGES` "Unread Messages" with
+`NO_UNREAD_MESSAGES_DESCRIPTION` "Messages that are unread will appear here.", the title and empty
+state of the *Unread* filter list; and `UNREAD_MESSAGES_FORMAT` `"No Unread"` / `"%lu Unread"`.
+Nothing puts a number in the iOS large title or in the macOS sidebar header.
+
+**The leading swipe action, since it is the unread gesture.**
+`-[CKConversationListCollectionViewController _markUnreadSwipeActionForIndexPath:]` builds a
+`UIContextualAction` titled `MARK_AS_READ` "Mark as Read" when `conversation.hasUnreadMessages`, else
+`MARK_AS_UNREAD` "Mark as Unread"; image `checkmark.message.fill` / `message.badge.fill`; background
+`sharedBehaviors.theme.unreadIndicatorColor`, i.e. the dot's own #0088ff / #0091ff.
+`leadingSwipeActionsConfigurationForIndexPath:` appends the pin action after it when
+`isPinActionEnabled`, and sets `performsFirstActionWithFullSwipe:`. This is the swipe-*right* gesture;
+swipe-left for times is a different configuration.
+
+### Two placement corrections, both half a device pixel
+
+`-[CKConversationListStandardCell _calculateIndicatorFrameForSize:trailing:displayScale:insets:]` does
+**not** place the dot at the round `(leftMargin − size) / 2`. It floors at the screen scale first and
+only then rounds at the display scale:
+
+```
+x = frinta(frintm(((leftMargin − size)·0.5 + containerBounds.x)·screenScale)/screenScale · displayScale)/displayScale
+y = frinta(frintm((containerBounds.y + (cellHeight − size)·0.5)·screenScale)/screenScale · displayScale)/displayScale
+```
+
+`frintm` is floor and `frinta` rounds ties away from zero; `screenScale` is a cached
+`UIScreen.mainScreen.scale` (guarded to 1 before the screen exists) and `displayScale` is the cell's
+own trait, the same number here. Substituting each platform's measured row:
+
+| | component draws | ChatKit computes | delta |
+|---|---|---|---|
+| iOS x | 7.5 | floor(22.5)/3 = **7.3333** | 0.1667 = ½ device px at 3x |
+| iOS y (row 86.6667) | 37.8333 | floor(113.5)/3 = **37.6667** | 0.1667 |
+| macOS x | 4.5 | floor(9)/2 = **4.5** | 0 |
+| macOS y (row 80.5) | 35.75 | floor(71.5)/2 = **35.5** | 0.25 = ½ device px at 2x |
+
+Both are `(row − size)/2` and `(margin − size)/2` written straight, without the floor. Neither is
+visible at 1x and both are a whole device pixel of ink at native scale, which is the scale this kit is
+measured at. `app/lab/unread/chatkit.ts` carries the transcription; `/lab/unread?frames=1` draws the
+computed frame as a 1-device-pixel #ff2d55 ring over the component's dot so the offset is readable
+off a screenshot.
+
+### Lab
+
+`/lab/unread?platform=ios|macos&theme=light|dark&scene=list|shell|row&selected=<id>&frames=1&active=0|1`
+
+Native geometry — 402 × 874 at 3x, the 960 × 640 window at 2x — with a fixture set that puts every
+case ChatKit distinguishes on one screen: read, unread, unread group, unread muted, unread with a
+two-line preview, unread with a count, unread pinned (macOS), and a long name for truncation.
+`scene=shell` runs the same fixtures through `IosMessagesApp` / `MacMessagesApp`, which is the path
+the harness takes.
+
+Driven after building it, real gestures only — a CDP `Input.dispatchTouchEvent` hold for touch,
+`page.mouse` for the Mac:
+
+```
+iOS light   5 dots, 11.0 × 11.0 at (7.5, 37.8281) in the row, rgb(0,136,255); painted pixel #0088ff
+iOS dark    same geometry, rgb(0,145,255); painted pixel #0091ff
+  touch on the unread row   rowBg rgba(0,0,0,0) → rgb(220,220,220) → rgba(0,0,0,0)   (dark: → rgb(70,70,70))
+  dot through the hold      rgb(0,136,255) → rgb(0,136,255) → rgb(0,136,255)          unmoved, unchanged
+  :focus-visible            false at every phase, including 650 ms in and after release
+macOS light 5 row dots + 1 pinned dot, 9.0 × 9.0 at (4.5, 35.75), rgb(0,136,255)
+macOS dark  same geometry, rgb(0,145,255)
+  hover     row-hover fill rgba(0,0,0,0) → rgba(0,0,0,0)      (native draws no hover; the seam is transparent)
+  press     rowBg → rgb(52,120,246) and the dot → rgb(255,255,255) in the same frame
+  release   selection sticks: rowBg rgb(52,120,246), dot rgb(255,255,255), data-selected="true"
+  inactive  window not key: rowBg → rgb(226,226,226) and the dot stays rgb(0,136,255)
+```
+
+The white-on-selection is `shouldUnreadIndicatorChangeOnSelection` YES on the Mac and NO on the phone,
+observed rather than asserted: the iOS dot holds its blue through a 650 ms touch, the macOS dot goes
+white the instant the selection fill arrives and comes back blue on an inactive window.
