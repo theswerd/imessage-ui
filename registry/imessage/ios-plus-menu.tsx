@@ -158,6 +158,14 @@ export const plusMenuMetrics = {
   left: 8.6667, top: 371, width: 322.6667, height: 460.6667, radius: 24,
   rowPitch: 66.5, firstRowCenter: 425.8333, iconSize: 39, iconCenterX: 63.1667, labelX: 108, labelSize: 24,
   labelMaxWidth: 107.9,
+  /**
+   * **UNMEASURED.** `plus-menu-open-light.png` has no row under a finger in it, exactly as
+   * `context-menu`'s own note says of the long-press menu. Rather than invent a second shape, these
+   * are that menu's iOS numbers scaled to this sheet's row: the inset by the width ratio
+   * (5 x 322.67/250), the vertical inset and the corner by the height ratio (1 and 10 x 66.5/42).
+   * The colour is the same `--im-menu-highlight` token, so the two menus cannot drift apart.
+   */
+  highlightInset: 6.4533, highlightInsetY: 1.5833, highlightRadius: 15.8333,
 } as const;
 
 /**
@@ -408,6 +416,7 @@ export function IosPlusMenu({ items = defaultPlusMenuItems, progress, open = tru
   const sheet = useRef<HTMLDivElement>(null);
   // One tab stop for the sheet; the arrow keys walk the rows, as a menu does.
   const [focusIndex, setFocusIndex] = useState(0);
+  const [pressed, setPressed] = useState<string | null>(null);
 
   // A seeked dismissal has no spring to report it: the caller owns the clock, so it is over when the
   // sheet reads 0 and is back inside the `+`. Reported once, and from a ref rather than state, so
@@ -490,6 +499,16 @@ export function IosPlusMenu({ items = defaultPlusMenuItems, progress, open = tru
   const glass = easeOut(clamp01(t / mo.glassFade));
   const attach = easeOut(clamp01(t / mo.attachFade));
   const filter = `blur(${lerp(mo.buttonBlur, mo.sheetBlur, t).toFixed(2)}px) saturate(${lerp(1, mo.sheetSaturate, t).toFixed(2)})`;
+  // Where the first row's box starts inside the sheet, so the scroller can begin there and the rows
+  // inside it can be laid out from zero.
+  const rowsTop = m.firstRowCenter - m.rowPitch / 2 - m.top;
+  // Hover does not exist on a phone and `:focus-visible` stays off for a pointer, so a finger on a
+  // row would light nothing at all. `:active` is not the answer either: it depends on the engine's
+  // own gesture arbitration and does not fire for a dispatched touch, which makes it untestable
+  // here. So the press is state, the way `ios-conversation-list` holds its row highlight, and the
+  // pointer events that end it include `pointercancel` - the one a scroll of this list sends.
+  const highlightStyle = `[data-slot="item"] > [data-slot="item-highlight"]{opacity:0;transition:opacity 60ms linear}
+[data-slot="item"]:hover > [data-slot="item-highlight"],[data-slot="item"]:focus-visible > [data-slot="item-highlight"],[data-slot="item"][data-pressed="true"] > [data-slot="item-highlight"]{opacity:1}`;
   const alive = t > 0 || open;
 
   return (
@@ -535,8 +554,15 @@ export function IosPlusMenu({ items = defaultPlusMenuItems, progress, open = tru
             them, so they fade in where they belong instead of sliding out of the `+` with the box. */}
         <div data-slot="sheet-content" className="absolute"
           style={{ left: m.left - box.left, top: m.top - box.top, width: m.width, height: m.height }}>
+          {/* The capture cuts "Check In" off at the sheet's bottom edge, which is a list saying it has
+              more below - so it scrolls, and only once the box has finished growing: mid-entrance the
+              sheet is smaller than this region and a scroller inside it would let the rows escape the
+              corner. The scroll indicator is hidden because a menu does not carry one. */}
+          <style>{highlightStyle}</style>
+          <div data-slot="rows" onScroll={() => setPressed(null)} className="absolute left-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            style={{ top: rowsTop, width: m.width, height: m.height - rowsTop, overflowY: t >= 1 ? "auto" : "hidden", overscrollBehavior: "contain" }}>
+          <div style={{ position: "relative", height: items.length * m.rowPitch }}>
           {items.map((item, index) => {
-            const center = m.firstRowCenter + index * m.rowPitch - m.top;
             const iconSize = item.iconSize ?? m.iconSize;
             const iconCenterX = item.iconCenterX ?? m.iconCenterX;
             // Staggered away from the `+`, so the row the growing box uncovers first is also the
@@ -545,15 +571,23 @@ export function IosPlusMenu({ items = defaultPlusMenuItems, progress, open = tru
             const row = easeOut(clamp01((t - mo.rowStart - (items.length - 1 - index) * mo.rowStagger) / mo.rowSpan));
             return (
               <button key={item.id} type="button" role="menuitem" data-slot="item" data-item={item.id} onClick={item.onSelect}
+                data-pressed={pressed === item.id ? "true" : undefined}
+                onPointerDown={() => setPressed(item.id)} onPointerUp={() => setPressed(null)}
+                onPointerCancel={() => setPressed(null)} onPointerLeave={() => setPressed(null)}
                 tabIndex={index === focusIndex ? 0 : -1} onFocus={() => setFocusIndex(index)}
                 className="absolute left-0 flex w-full items-center text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#0088ff]"
                 style={{
-                  top: center - m.rowPitch / 2, height: m.rowPitch,
+                  top: index * m.rowPitch, height: m.rowPitch,
                   // A settled row carries neither, so the sheet at rest renders exactly as it did
                   // before there was an entrance at all.
                   opacity: row >= 1 ? undefined : row,
                   transform: row >= 1 ? undefined : `translateY(${((1 - row) * mo.rowLift).toFixed(2)}px)`,
                 }}>
+                {/* Inset and rounded, never a full-bleed line, and a child rather than the button's
+                    own background so it can sit inside the row. See `highlightInset`. */}
+                <span aria-hidden="true" data-slot="item-highlight" className="pointer-events-none absolute"
+                  style={{ left: m.highlightInset, right: m.highlightInset, top: m.highlightInsetY, bottom: m.highlightInsetY,
+                    borderRadius: m.highlightRadius, background: "var(--im-menu-highlight, rgba(0,0,0,0.05))" }} />
                 <span aria-hidden="true" className="absolute flex items-center justify-center"
                   style={{ left: iconCenterX - m.left - iconSize / 2, top: (m.rowPitch - iconSize) / 2, width: iconSize, height: iconSize }}>
                   <AppIcon icon={item.icon} size={iconSize} />
@@ -562,6 +596,8 @@ export function IosPlusMenu({ items = defaultPlusMenuItems, progress, open = tru
               </button>
             );
           })}
+          </div>
+          </div>
         </div>
       </div>
     </div>

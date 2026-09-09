@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { fontStack } from "@/registry/imessage/tokens";
 
@@ -222,8 +222,14 @@ export function ContextMenu({ variant = "ios", items, onAction, onClose, header,
 
   // The highlight is a child rather than the button's own background so it can sit inset the way
   // AppKit draws it. Driving its opacity from CSS keeps it out of React state on every pointer move.
+  // The touch half of this. Hover does not exist on a phone and `:focus-visible` stays off for a
+  // pointer, so without it a finger on a row lit nothing at all - the menu looked dead under the
+  // very gesture it is driven by. `:active` is not the answer: it depends on the engine's own
+  // gesture arbitration and does not fire for a dispatched touch, which makes it untestable. So the
+  // press is state, the way `ios-conversation-list` holds its row highlight.
+  const [pressed, setPressed] = useState<string | null>(null);
   const highlightStyle = `[data-slot="menu-item"] > [data-slot="menu-highlight"]{opacity:0;transition:opacity 60ms linear}
-[data-slot="menu-item"]:hover > [data-slot="menu-highlight"],[data-slot="menu-item"]:focus-visible > [data-slot="menu-highlight"]{opacity:1}
+[data-slot="menu-item"]:hover > [data-slot="menu-highlight"],[data-slot="menu-item"]:focus-visible > [data-slot="menu-highlight"],[data-slot="menu-item"][data-pressed="true"] > [data-slot="menu-highlight"]{opacity:1}
 [data-slot="menu-item"][aria-disabled="true"] > [data-slot="menu-highlight"]{opacity:0}`;
 
   const rows = items.map((item, index) => {
@@ -236,6 +242,9 @@ export function ContextMenu({ variant = "ios", items, onAction, onClose, header,
     const gapBottom = 0;
     return (
       <button key={item.id} type="button" role="menuitem" aria-disabled={item.disabled || undefined} tabIndex={item.disabled ? -1 : undefined} data-slot="menu-item" data-id={item.id} onClick={() => !item.disabled && onAction?.(item.id)}
+        data-pressed={pressed === item.id && !item.disabled ? "true" : undefined}
+        onPointerDown={() => setPressed(item.id)} onPointerUp={() => setPressed(null)}
+        onPointerCancel={() => setPressed(null)} onPointerLeave={() => setPressed(null)}
         className={cn("flex w-full cursor-default items-center border-0 bg-transparent text-left outline-none",
           item.destructive ? "text-[var(--im-menu-destructive,#ff3b30)]" : "text-[var(--im-menu-text,#000)]",
           !item.disabled && variant === "macos" && "hover:text-white focus-visible:text-white")}
