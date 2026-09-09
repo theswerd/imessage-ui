@@ -425,7 +425,10 @@ described as measured:
 - Group-chat sender-name **type**. Its placement is settled: `-[CKUIBehavior senderTranscriptInsets]`
   is **{0, 14, 0, 0}** on iPhone and **{0, 12, 0, 0}** at idiom 5 - a leading inset only, nothing
   on the other three edges. The kit used to spend the same 14 on both sides and on both platforms.
-- "Yesterday" and weekday date-header wording, and whether later headers drop the service line.
+- "Yesterday" and weekday date-header **wording**. Whether later headers drop the service line is
+  not open and has not been for a while - `dateheader-mid-light.png` shows a single centred line,
+  "**Today** 3:57 AM", with no service above it, and the row for it in the iOS table above
+  already carries its gaps. `date-separator.tsx` drops the service on `variant="mid"`.
 - **Message effects** (`message-effects.tsx`, `screen-effects.tsx`): the four bubble effects and the
   nine screen effect animations. Shapes and timings follow the documented look. Screen effects that
   happen against a night sky (fireworks, lasers, shooting star) dim the screen under them, as native
