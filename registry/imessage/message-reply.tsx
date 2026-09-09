@@ -53,26 +53,62 @@ export type ReplyQuote = {
 };
 
 /**
- * Provisional stub numbers. `stubScale` and `stubOpacity` are the two values SPEC.md carries for
- * replies; `stubMaxLines` follows the measured 2-line conversation-list preview.
+ * The stub is **not** a scaled bubble, which is what this file used to assume. ChatKit gives it its
+ * own type, its own corner and its own box, and none of them is 0.76 of the bubble's:
+ *
+ * | value | ChatKit | what `stubScale` 0.76 gave |
+ * |---|---|---|
+ * | font | `_replyBalloonTextFont` .SFNS-Regular **11.00** | 12.93 |
+ * | corner | `textReplyBalloonCornerRadius` **17.5** | 15.21 |
+ * | min height | `replyBalloonMinHeight` **26** | 30.4 |
+ * | min width | `replyPreviewBalloonMinWidth` **48** | 36.5 |
+ * | text inset | `replyBalloonTextContainerInset` **{6.5, 0, 6.5, 0}** | 7.6 / 10.5 |
+ * | max lines | `replyBalloonMaximumNumberOfLines` **3** | 2 |
+ *
+ * The corner is nearly as round as a full bubble's while the type is two thirds the size, so a
+ * uniform scale could never have produced it. `stubOpacity` survives: `replyPreviewBalloonImageAlpha`
+ * is 0.55, exactly what SPEC already carried.
+ *
+ * `stubScale` is kept for the parts ChatKit says nothing about - the tail, and the maximum width -
+ * so those stay derived from the bubble as before, and it is no longer used for anything ChatKit
+ * settles. `CKUIBehaviorMac` inherits every one of these, so macOS takes the same numbers.
  */
 export const replyMetrics: Record<Platform, { stubScale: number; stubOpacity: number; stubMaxLines: number }> = {
-  ios: { stubScale: 0.76, stubOpacity: 0.55, stubMaxLines: 2 },
-  macos: { stubScale: 0.78, stubOpacity: 0.55, stubMaxLines: 2 },
+  ios: { stubScale: 0.76, stubOpacity: 0.55, stubMaxLines: 3 },
+  macos: { stubScale: 0.78, stubOpacity: 0.55, stubMaxLines: 3 },
 };
 
-/** The stub's geometry: the platform's measured bubble metrics scaled by `stubScale`. */
+/** What ChatKit fixes about the stub, on both idioms. */
+const stubChatKit = {
+  /** `_replyBalloonTextFont`. */
+  fontSize: 11,
+  /** `replyBalloonTextContainerInset` {6.5, 0, 6.5, 0}: vertical only, no horizontal inset of its own. */
+  insetY: 6.5,
+  /** `textReplyBalloonCornerRadius`. */
+  radius: 17.5,
+  /** `replyBalloonMinHeight`. */
+  minHeight: 26,
+  /** `replyPreviewBalloonMinWidth`, the same 48 a full bubble uses. */
+  minWidth: 48,
+} as const;
+
+/** The stub's geometry: ChatKit's own numbers, and the bubble's only where ChatKit is silent. */
 export function replyStubMetrics(platform: Platform) {
   const m = bubbleMetrics[platform];
   const scale = replyMetrics[platform].stubScale;
+  // The line box has to carry the 26 minimum on one line: 26 - 2 * 6.5 = 13.
+  const lineHeight = stubChatKit.minHeight - stubChatKit.insetY * 2;
   return {
     scale,
-    fontSize: m.fontSize * scale,
-    lineHeight: m.lineHeight * scale,
+    fontSize: stubChatKit.fontSize,
+    lineHeight,
+    // No horizontal text inset of ChatKit's own, so the balloon's own padding is the bubble's,
+    // scaled - the one place the old uniform scale still has to answer.
     paddingX: m.paddingX * scale,
-    paddingY: m.paddingY * scale,
-    radius: m.radius * scale,
-    minWidth: m.minWidth * scale,
+    paddingY: stubChatKit.insetY,
+    radius: stubChatKit.radius,
+    minWidth: stubChatKit.minWidth,
+    minHeight: stubChatKit.minHeight,
     letterSpacing: m.letterSpacing * scale,
     tailScale: m.tailScale * scale,
     /** How far the tail hangs below the body. It is drawn outside the body and takes no space. */

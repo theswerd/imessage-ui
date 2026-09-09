@@ -425,9 +425,17 @@ described as measured:
   because no iOS capture contains a blue conversation bubble: the simulator has no iMessage account,
   so every outgoing message there is SMS green. The one blue directly measured on iOS is the flat
   #0088ff of the effects preview, and it is flat by design, so it says nothing about the ramp.
-- **Inline replies** (`message-reply.tsx`): the quoted stub above a reply is a 0.76-scaled, 55%-opacity
-  copy of the quoted bubble; the thread view dims and blurs the rest of the conversation. Structure
-  from documented behaviour, numbers provisional.
+- **Inline replies** (`message-reply.tsx`): the quoted stub is **not** a scaled copy of the quoted
+  bubble, which is what this said before. ChatKit gives it its own box: `_replyBalloonTextFont`
+  .SFNS-Regular **11**, `textReplyBalloonCornerRadius` **17.5**, `replyBalloonMinHeight` **26**,
+  `replyPreviewBalloonMinWidth` **48**, `replyBalloonTextContainerInset` **{6.5, 0, 6.5, 0}** and
+  `replyBalloonMaximumNumberOfLines` **3**. A corner nearly as round as a full bubble's over type
+  two thirds the size cannot come from one scale factor; the 0.76 recorded here would have given
+  12.93 / 15.21 / 30.4 / 36.5 / 7.6 / 2. `CKUIBehaviorMac` inherits all of them. The one number that
+  survives is the opacity: `replyPreviewBalloonImageAlpha` is **0.55**. Still not measured, because
+  ChatKit is silent on them: the stub's horizontal padding, its tail, and its maximum width, which
+  stay derived from the bubble. The thread view dims and blurs the rest of the conversation, from
+  documented behaviour.
 - **Photo messages** (`message-image.tsx`): photos take the measured bubble outline including the tail.
   The tail is filled by sampling the photo's own trailing-bottom edge. Grid: one photo keeps its
   aspect ratio, two are side by side, three put a tall tile first, four or more show four tiles with
