@@ -868,7 +868,7 @@ export function MacMessagesApp({
               }}>
               <div data-slot="pane-content" className="absolute inset-0">
                 <MessageList ref={list} frameRef={pane} messages={transcript} typing={composing ? false : typing} group={isGroup} now={now} anchor="bottom" selectedIds={selection}
-                  insetTop={macScreen.listTop} insetBottom={macScreen.listBottom} renderReactions={renderReactions} messageActions={Boolean(onContextMenu)}
+                  insetTop={macScreen.listTop} insetBottom={macScreen.listBottom} renderReactions={renderReactions} messageActions={Boolean(onContextMenu)} openMenuId={menu?.id ?? null}
                   onOpenImage={(id, index) => quickLook(id, index)} className="absolute inset-0" />
               </div>
               {/* The conversation that is leaving, under the header's glass so it is washed like the one
@@ -894,6 +894,8 @@ export function MacMessagesApp({
                 </div>
               )}
               <MacComposer className="absolute bottom-0 left-0 w-full" value={composer?.value} disabled={composer?.disabled} onChange={composer?.onChange}
+                // `aria-haspopup` on the "+" is only half a statement without this beside it.
+                attachExpanded={plusOpen || popoverUp}
                 onSend={composer?.onSend ?? (() => {})} onAudio={composer?.onAudio}
                 /* The smiley is the sticker browser, the same surface the "+" menu's Stickers row
                    opens, and it toggles like the "+" does rather than stacking a second popover on
@@ -1046,7 +1048,7 @@ export function MacMessagesApp({
             <>
             <MacSidebar conversations={filteredRows} selectedId={composing ? macCompose.rowId : selectedId}
               onSelect={id => { if (id === macCompose.rowId) return; closeCompose(); onSelectConversation?.(id); }} active={active} footer={footer}
-              searchQuery={searchQuery} onSearch={onSearch} onOptions={() => setListFilterOpen(open => !open)} className="absolute inset-0" />
+              searchQuery={searchQuery} onSearch={onSearch} onOptions={() => setListFilterOpen(open => !open)} optionsExpanded={listFilterOpen} className="absolute inset-0" />
             {/* Under the button, inside the sidebar, in the sidebar's own coordinates: the menu's box
                 is `contextMenuMetrics.macos`, and 302 is wider than the sidebar, so it is pulled back
                 to the sidebar's trailing edge the way AppKit pulls a menu inside its window. */}

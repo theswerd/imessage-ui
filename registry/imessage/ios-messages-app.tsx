@@ -909,7 +909,9 @@ export function IosMessagesApp({
         className="absolute inset-0" />
       <IosScrollEdge />
       <IosNavBar name={contact.name} initials={contact.initials} avatar={navAvatar} className="absolute left-0" style={{ top: iosScreen.statusBar }} />
-      <IosComposer className="absolute bottom-0 left-0" value={composer?.value} placeholder={composer?.placeholder} disabled />
+      {/* `attachExpanded` even here: the backdrop is `inert` and `aria-hidden`, but a `+` that says it
+          has a menu and never says whether the menu is open is half an attribute wherever it sits. */}
+      <IosComposer className="absolute bottom-0 left-0" value={composer?.value} placeholder={composer?.placeholder} attachExpanded={false} disabled />
     </div>
   );
 
@@ -963,7 +965,7 @@ export function IosMessagesApp({
             <IosSelectMode active={selecting} progress={selectValue?.progress} onExited={selectLatch.exited}>
             {selectShown && <style>{selectModeRules(selectTransition.timing)}</style>}
             <MessageList ref={list} frameRef={frame} messages={messages} typing={typing} group={isGroup} now={now} anchor="top"
-              insetTop={iosScreen.listTop} insetBottom={listBottom} renderReactions={renderReactions} messageActions={Boolean(onLongPress)}
+              insetTop={iosScreen.listTop} insetBottom={listBottom} renderReactions={renderReactions} messageActions={Boolean(onLongPress)} openMenuId={overlayMessage?.id ?? null}
               onOpenThread={onOpenThread} onOpenImage={openPhoto} systemArrival={systemArrival} className="absolute inset-0" />
             {/* Over the log and under the nav bar, so a circle scrolled up behind the bar is covered
                 by it the way the bubbles are. */}

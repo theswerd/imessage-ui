@@ -192,6 +192,12 @@ export type MessageListProps = Omit<ComponentProps<"div">, "children" | "ref"> &
    */
   messageActions?: boolean;
   /**
+   * The message whose actions menu is open, if one is. `aria-haspopup` on a row only says a popup
+   * exists; this is what lets `aria-expanded` beside it say whether the popup is *up*, which is the
+   * other half of what the attribute is for.
+   */
+  openMenuId?: string | null;
+  /**
    * Ids of the messages a click has selected. Passing this (even empty) turns the rows into a
    * multi-select listbox and paints the selection overlay on their bubbles. macOS only: iOS has no
    * click-to-select, it has the checkbox select mode in `ios-select-mode.tsx`.
@@ -352,7 +358,7 @@ function EmojiMessage({ message, platform }: { message: Message; platform: Platf
 
 export function MessageList({
   messages, typing = false, group = false, now, frameRef, platform: platformProp, serviceLabel, renderReactions, autoScroll = true,
-  firstDateHeader = true, messageActions = false, selectedIds, onOpenThread, onJumpToMessage, openThreadId, flash, onOpenImage, systemArrival,
+  firstDateHeader = true, messageActions = false, openMenuId = null, selectedIds, onOpenThread, onJumpToMessage, openThreadId, flash, onOpenImage, systemArrival,
   swipeTimes, anchor = "top", insetTop, insetBottom, ref, className, style, onScroll, onKeyDown, ...props
 }: MessageListProps) {
   const contextPlatform = usePlatform();
@@ -637,7 +643,12 @@ export function MessageList({
               // The row advertises one popup, and the actions menu keeps it when a shell binds one:
               // that is what Enter and Space do there. The reply count under the message carries the
               // thread's own `aria-haspopup="dialog"`, so a thread is announced either way.
+              //
+              // `aria-haspopup` on its own only says a popup exists; without `aria-expanded` beside
+              // it nothing can say whether the popup is *open*, which is half of what the attribute
+              // is for. The row knows: `openMenuId` is the message whose menu is up.
               aria-haspopup={messageActions ? "menu" : tapOpensThread ? "dialog" : undefined}
+              aria-expanded={messageActions ? openMenuId === message.id : tapOpensThread ? openThreadId === message.id : undefined}
               onPointerDown={tapOpensThread ? (event: PointerEvent<HTMLDivElement>) => { press.current = { x: event.clientX, y: event.clientY, at: event.timeStamp }; } : undefined}
               onClick={tapOpensThread ? (event: MouseEvent<HTMLDivElement>) => { if (plainTap(event)) onOpenThread!(message.id, "message"); } : undefined}
               data-effect={message.effect} className={cn("flex min-w-0 flex-col focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff]", incomingInGroup && "relative", outgoing ? "items-end" : "items-start")}

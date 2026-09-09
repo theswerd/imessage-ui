@@ -1049,3 +1049,28 @@ test("a live gesture takes the workbench's state back from the frame", async ({ 
   await expect(bubbles, "the deleted message is gone").toHaveCount(count - 1);
   await expect(circles, "and the mode closes behind it").toHaveCount(0);
 });
+
+/**
+ * `aria-haspopup` on its own only says a popup exists; without `aria-expanded` beside it nothing can
+ * say whether the popup is *up*, which is the other half of what the attribute is for. Three places
+ * carried the first without the second: the composer's "+", the sidebar's list-options button, and
+ * every message row that binds an actions menu.
+ */
+test("everything that says it has a popup also says whether the popup is open", async ({ page }, info) => {
+  const platform = platformFor(info);
+  for (const scene of platform === "ios" ? ["conversation", "list", "details", "long-press"] : ["conversation", "list", "details", "context-menu"]) {
+    await openScene(page, info, scene);
+    const missing = await page.evaluate(() => [...document.querySelectorAll("[aria-haspopup]")]
+      .filter(el => el.getClientRects().length && !el.closest("nextjs-portal") && el.getAttribute("aria-expanded") === null)
+      .map(el => `${el.getAttribute("data-slot") || el.tagName}:${el.getAttribute("aria-haspopup")}`));
+    expect(missing, `${scene} has no half-stated popup`).toEqual([]);
+  }
+  // And the state is real, not a constant: opening the menu flips it.
+  if (platform === "macos") {
+    await openScene(page, info, "conversation");
+    const button = page.locator('[data-slot="sidebar-options"]');
+    await expect(button).toHaveAttribute("aria-expanded", "false");
+    await button.click();
+    await expect(button).toHaveAttribute("aria-expanded", "true");
+  }
+});

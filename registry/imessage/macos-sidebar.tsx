@@ -223,6 +223,8 @@ export type MacSidebarProps = Omit<ComponentProps<"nav">, "onSelect"> & {
   defaultSearchQuery?: string;
   onSearch?: (query: string) => void;
   onOptions?: () => void;
+  /** Whether the list-options menu is open, so `aria-haspopup` on the button is not the only half of it. */
+  optionsExpanded?: boolean;
 };
 
 /** ChatKit's own strings, out of `ChatKit.loctable` (en). */
@@ -432,7 +434,7 @@ function unreadLabel(unread: boolean | number): string {
   return unread === 1 ? "1 unread message" : `${unread} unread messages`;
 }
 
-export function MacSidebar({ conversations, selectedId, onSelect, active = true, pressedId, footer, searchQuery, defaultSearchQuery = "", onSearch, onOptions, className, style, ...props }: MacSidebarProps) {
+export function MacSidebar({ conversations, selectedId, onSelect, active = true, pressedId, footer, searchQuery, defaultSearchQuery = "", onSearch, onOptions, optionsExpanded, className, style, ...props }: MacSidebarProps) {
   const m = macSidebarMetrics;
   const headerId = useId();
   // The field owns its text unless the caller does, so it works with nothing wired — the same rule
@@ -508,7 +510,7 @@ export function MacSidebar({ conversations, selectedId, onSelect, active = true,
           boxShadow: "0 0 20px rgba(0,0,0,0.05), inset 0 0 0 0.5px var(--sb-rim), inset 0 0 0 1px var(--sb-rim-inner)" }}
       />
 
-      <button type="button" data-slot="sidebar-options" aria-label="Conversation list options" aria-haspopup="menu" onClick={onOptions}
+      <button type="button" data-slot="sidebar-options" aria-label="Conversation list options" aria-haspopup="menu" aria-expanded={optionsExpanded} onClick={onOptions}
         className="absolute flex size-[26px] items-center justify-center rounded-full text-[var(--sb-glyph)] hover:bg-black/5 dark:hover:bg-white/10"
         style={{ left: m.options.centerX - 13, top: m.options.centerY - 13 }}>
         <OptionsIcon />
