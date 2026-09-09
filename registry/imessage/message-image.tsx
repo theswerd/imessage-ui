@@ -589,7 +589,11 @@ export function MessageImages({
           old shape, where the box *is* the balloon. */}
       <div ref={gridRef} data-slot={single ? "image-grid" : "photo-stack"} style={single
         ? { display: "block", width: "100%", aspectRatio: `${groupWidth} / ${height}`, borderRadius: m.radius, overflow: "hidden", clipPath: tail ? bodyClipPath(side, m.tailScale, tailSeamOverlap[platform]) : undefined, background: "var(--im-gray-top)" }
-        : { position: "relative", width: "100%", aspectRatio: `${groupWidth} / ${height}` }}>
+        // `isolation: isolate` is load-bearing, not tidiness: the cards carry a `zIndex` so the front
+        // one paints last, and without a stacking context here those numbers escape to the nearest
+        // ancestor that has one - which put the whole stack on top of the open photo viewer, a card
+        // floating over the full-screen photo it had just been tapped to open.
+        : { position: "relative", isolation: "isolate", width: "100%", aspectRatio: `${groupWidth} / ${height}` }}>
         {tiles.map((image, index) => {
           const state = phase[image.src];
           // Two ways into the same affordance: the transfer was never fetched (`pending`), or it was

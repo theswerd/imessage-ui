@@ -913,3 +913,39 @@ test("a macOS attachment popover opened by clicking lands on its button", async 
     await page.keyboard.press("Escape");
   }
 });
+
+/**
+ * Opening a photo from a stack must leave the stack behind it. The cards carry a `zIndex` so the
+ * front one paints last, and a `zIndex` on an absolutely positioned element hoists it to the nearest
+ * ancestor *stacking context* — which, with none between the stack and the screen, was above the
+ * photo viewer: tapping a photo opened the viewer with the stack still floating over the full-screen
+ * image it had just opened. `isolation: isolate` on the stack is what contains them, and this is the
+ * check that keeps it there.
+ */
+test("opening a photo from the stack leaves the stack behind the viewer", async ({ page }, info) => {
+  test.skip(platformFor(info) !== "ios", "the transcript stack and its viewer are driven here on the phone");
+  await openScene(page, info, "photos");
+  const front = page.locator('[data-slot="photo-tile"][data-index="0"]');
+  const box = (await front.boundingBox())!;
+  await front.tap();
+  await expect(page.locator('[data-slot="image-viewer"]')).toBeVisible();
+  await page.waitForTimeout(600);
+
+  // The viewer covers the whole screen, so whatever is painted at the middle of where the front card
+  // used to be has to belong to the viewer and not to the transcript underneath it.
+  const owner = await page.evaluate(point => {
+    const el = document.elementFromPoint(point.x, point.y);
+    return {
+      inViewer: !!el?.closest('[data-slot="image-viewer"]'),
+      slot: el?.closest("[data-slot]")?.getAttribute("data-slot") ?? el?.tagName ?? "none",
+    };
+  }, { x: box.x + box.width / 2, y: box.y + box.height / 2 });
+  expect(owner.inViewer, `the viewer owns that point, not ${owner.slot}`).toBe(true);
+
+  // And the stack itself is contained: a stacking context of its own, so its cards cannot climb out.
+  const isolated = await page.evaluate(() => {
+    const stack = document.querySelector('[data-slot="photo-stack"]');
+    return stack ? getComputedStyle(stack).isolation : null;
+  });
+  expect(isolated, "the stack makes its own stacking context").toBe("isolate");
+});
