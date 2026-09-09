@@ -27,7 +27,7 @@ import { IosPlusMenu, defaultPlusMenuItems, type PlusMenuItem } from "@/registry
 import { PhotoPicker, PhotoPickerAttachments, photoPickerChipMetrics, photoPickerSamples, type PhotoPickerDetent, type PhotoPickerPhoto } from "@/registry/imessage/photo-picker";
 import { StickerPicker, stickerPickerMetrics, type Sticker, type StickerPlacement } from "@/registry/imessage/sticker-picker";
 import { AudioRecorder, audioRecorderMetrics, type AudioRecorderState, type AudioTake } from "@/registry/imessage/audio-recorder";
-import { IosDetails, type IosDetailsItem, type IosDetailsPhoto, type IosDetailsSection } from "@/registry/imessage/ios-details";
+import { IosDetails, type IosDetailsAction, type IosDetailsItem, type IosDetailsPhoto, type IosDetailsSection } from "@/registry/imessage/ios-details";
 import { GroupDetails } from "@/registry/imessage/group-details";
 import { TapbackDetailsPlatter, tapbackDetailsPlatterMetrics, type TapbackReactor } from "@/registry/imessage/tapback-details";
 import { IosSearch, type IosSearchResult, type IosSearchSection, type IosSearchSectionKind } from "@/registry/imessage/ios-search";
@@ -227,6 +227,16 @@ export type IosMessagesAppProps = {
     onAddContact?: () => void;
     onLeave?: () => void;
     onBlock?: () => void;
+    /**
+     * The three glass circles under the name. Leave it out and the screen still draws all three,
+     * which is what `details-light.png` shows: an action this contact cannot take keeps its circle
+     * and drops the glyph to the tertiary label colour, it does not disappear. FaceTime picks up
+     * Each of the three becomes live when it is given a handler here.
+     */
+    actions?: IosDetailsAction[];
+    onAudioCall?: () => void;
+    onFaceTime?: () => void;
+    onMail?: () => void;
   };
   /** The group's name was committed from the details screen. */
   onGroupNameChange?: (name: string) => void;
@@ -770,6 +780,14 @@ export function IosMessagesApp({
    * duplicate carries no tab stops, and it comes after the live layer in the document, so every
    * `[data-message-id]` lookup in this file still finds the real row first.
    */
+  // Native always draws all three circles; `details-light.png` has Call live and FaceTime and Mail
+  // in the tertiary label colour, circle intact. So the default is the row, not an empty space.
+  const detailsActions: IosDetailsAction[] = detailsContent?.actions ?? [
+    { id: "call", label: "Call", icon: "phone", disabled: !detailsContent?.onAudioCall, onPress: detailsContent?.onAudioCall },
+    { id: "facetime", label: "FaceTime", icon: "video", disabled: !detailsContent?.onFaceTime, onPress: detailsContent?.onFaceTime },
+    { id: "mail", label: "Mail", icon: "mail", disabled: !detailsContent?.onMail, onPress: detailsContent?.onMail },
+  ];
+
   const detailsBackdrop = () => (
     <div inert className="absolute inset-0" style={{ background: "var(--im-bg)" }}>
       <MessageList messages={messages} typing={typing} group={isGroup} now={now} anchor="top"
@@ -994,7 +1012,7 @@ export function IosMessagesApp({
             backdrop={detailsBackdrop()} />
         ) : (
           <IosDetails className="absolute inset-0 z-30"
-            name={contact.name} initials={contact.initials}
+            name={contact.name} initials={contact.initials} actions={detailsActions}
             phone={detailsContent?.phone} phoneLabel={detailsContent?.phoneLabel} tag={detailsContent?.tag}
             hideAlerts={detailsContent?.hideAlerts} onHideAlertsChange={detailsContent?.onHideAlertsChange}
             photos={detailsContent?.photos} sharedLinks={detailsContent?.sharedLinks} attachments={detailsContent?.attachments}

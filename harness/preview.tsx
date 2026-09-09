@@ -314,7 +314,12 @@ export function HarnessPreview({ platform, scenario, time, interactive = true, o
           onAudioRecorderClose={() => onEvent?.("audio.close")}
           onAudioSend={take => onEvent?.(`audio.send ${take.duration.toFixed(2)}s`)}
           details={frame.details ?? undefined}
-          detailsContent={iosDetailsContent}
+          detailsContent={{ ...iosDetailsContent,
+            // A contact with a phone number can be called and FaceTimed; Mail has no address here,
+            // so it stays in the tertiary state the capture shows for an action that is not offered.
+            onAudioCall: () => onEvent?.("details.call"),
+            onFaceTime: () => onEvent?.("details.facetime"),
+            onBlock: () => onEvent?.("details.block") }}
           onDetails={() => onEvent?.("navigation.details")}
           onCloseDetails={() => onEvent?.("navigation.details.close")}
           onGroupEvent={event => onEvent?.(`group.${event.type}`)}
