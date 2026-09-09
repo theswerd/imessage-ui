@@ -856,8 +856,20 @@ export function ImageViewer({
     };
   }, [open, scrubbed, progress, sourceKey, m.ease, m.timing.zoom, m.timing.fade, m.timing.backdrop, m.timing.chrome, m.timing.chromeDelay]);
 
-  // Modal, so it takes focus when it opens. A scrubbed entrance does not: the harness seeks frames
-  // and must not move the caret.
+  /**
+   * Modal, so it takes focus when it opens. A scrubbed entrance does not: the harness seeks frames
+   * and must not move the caret.
+   *
+   * The focus lands on the root and not on the close button, and that is load-bearing rather than
+   * incidental. A control focused programmatically while the pointer that opened the viewer is still
+   * down matches `:focus-visible` in Chrome and WebKit alike - the gesture has not resolved, so the
+   * modality is still the keyboard default - and paints a ring on a photo the person opened by
+   * touch. The root carries `outline-none`, so it holds the focus and paints nothing; `onKeyDown`
+   * below is on this element, so Escape, the arrows and the Tab trap all still arrive, and the first
+   * Tab moves to a control where a ring is right. See `tapback-bar.tsx` for the same shape and
+   * `audio-recorder.tsx` for the other one, where a single control keeps the focus and passes
+   * `focusVisible: false` instead.
+   */
   useEffect(() => {
     if (!open || scrubbed) return;
     root.current?.focus({ preventScroll: true });

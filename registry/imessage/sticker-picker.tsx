@@ -688,6 +688,12 @@ export function StickerPicker({
   /**
    * A modal sheet owns the focus while it is up. Opening moves focus into it and Tab cycles inside
    * it, so the keyboard cannot walk out into the conversation the sheet is covering.
+   *
+   * The focus lands on the sheet, never on a tile. A tile focused programmatically while the finger
+   * that opened the sheet is still down matches `:focus-visible` in both engines - the gesture has
+   * not resolved, so the modality is still the keyboard default - and paints a blue ring around a
+   * sticker in a capture that has none. The sheet carries `outline-none`, so holding the focus here
+   * paints nothing, and `onSheetKeyDown` hands the first arrow to the grid.
    */
   useEffect(() => {
     if (!open) return;
@@ -744,6 +750,28 @@ export function StickerPicker({
     event.preventDefault();
     setActive(next);
     event.currentTarget.querySelector<HTMLButtonElement>(`[data-index="${next}"]`)?.focus();
+  };
+
+  /**
+   * The sheet holds the focus when it opens (above), which is what keeps a ring off a sticker the
+   * finger has not let go of yet: a tile focused programmatically while the touch that opened the
+   * sheet is still down matches `:focus-visible` in Chrome and WebKit alike, because the gesture has
+   * not resolved and the modality is still the keyboard default. The cost of holding it here is that
+   * the sheet's own arrow keys have to know what "on the container" means, or the first arrow does
+   * nothing - measured: ArrowRight and ArrowDown were both dead until a Tab moved off the sheet.
+   * From the sheet the first arrow enters the grid at the roving tab stop, and every arrow after
+   * that is the grid's own; a ring is right from there on, because by then the person is on the
+   * keyboard. See `tapback-bar.tsx` for the same shape.
+   */
+  const onSheetKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) return;
+    if (!["ArrowRight", "ArrowLeft", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+    const index = event.key === "Home" ? 0 : event.key === "End" ? Math.max(0, stickers.length - 1) : activeIndex;
+    const tile = sheet.current?.querySelector<HTMLButtonElement>(`[data-slot="sticker"][data-index="${index}"]`);
+    if (!tile) return;
+    event.preventDefault();
+    setActive(index);
+    tile.focus();
   };
 
   const onTabsKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -1002,6 +1030,7 @@ export function StickerPicker({
         // A closed sheet is not just off screen: `inert` takes its grid and strip out of the tab
         // order and out of the accessibility tree, which a transform alone would not.
         inert={!open}
+        onKeyDown={onSheetKeyDown}
         className="pointer-events-auto absolute overflow-hidden outline-none"
         style={{
           left,

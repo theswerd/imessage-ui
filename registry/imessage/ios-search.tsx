@@ -950,7 +950,17 @@ export function IosSearch({
     return () => document.removeEventListener("keydown", onKey);
   }, [open, onCancel]);
 
-  /** Opening for real takes the caret; a scrubbed frame must not, or the harness moves focus. */
+  /**
+   * Opening for real takes the caret; a scrubbed frame must not, or the harness moves focus.
+   *
+   * A text field is the one surface here that keeps the focus on a control rather than parking it on
+   * its container, and the one that needs no `focusVisible: false` either. Both engines match
+   * `:focus-visible` on a text input however it was focused - by tap, by click or by Tab - so there
+   * is nothing a modality heuristic could get right or wrong. What keeps the ring off the capture is
+   * that the field draws none at all: `outline-none` below and no `focus-visible:outline` beside it,
+   * because in a text field the caret *is* the focus indicator, and iOS draws nothing around this
+   * one. The rows and the trailing circle do carry rings, and should: they are not text.
+   */
   useEffect(() => {
     if (!open || progress !== undefined) return;
     input.current?.focus({ preventScroll: true });

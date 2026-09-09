@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, type ComponentProps, type CSSProperties } from "react";
+import { useId, useState, type ComponentProps, type CSSProperties, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/registry/imessage/avatar";
 import { GroupAvatar, groupAvatarPlate } from "@/registry/imessage/group-avatar";
@@ -74,7 +74,44 @@ import { GroupAvatar, groupAvatarPlate } from "@/registry/imessage/group-avatar"
  * header sits horizontally (it takes the rows' own leading edge) and the "No Results" line, because no
  * capture in `references/macos/captures` holds a search in progress. The kit's own strings are used
  * verbatim: `SEARCH_CONVERSATIONS_TITLE` "Conversations" and `SEARCH_RESULTS_INDEXING_TITLE`
- * "No Results".
+ * "No Results". ⌘F reaches the field from the window; that binding lives in `macos-messages-app.tsx`.
+ *
+ * **What the match looks like, settled out of ChatKit 26.5 rather than guessed.** A conversation
+ * result on the Mac is `+[CKConversationSearchResultCell conversationListCellClass]` =
+ * `CKConversationSearchResultEmbeddedCell`, a `CKConversationListStandardCell` subclass — this row.
+ * Disassembling `-[CKConversationSearchResultEmbeddedCell configureWithQueryResult:searchText:]`
+ * settles all three questions a highlight raises:
+ * - **Which label.** It lets the base cell fill the row (`updateContentsForConversation:fastPreview:`
+ *   between two `setFreezeSummaryText:` calls), then sends `-setAttributedText:` to **`summaryLabel`
+ *   only**. The name label is never annotated, so a query that matches only a name shows no emphasis
+ *   anywhere in the row. This component annotates the preview line and leaves the name alone.
+ * - **Not bolded.** One font is fetched — `searchMessageBodyTextFont` when
+ *   `CKIsRunningInMacCatalyst()` (which macOS Messages is), `conversationListSummaryFont` otherwise —
+ *   and handed to
+ *   `+annotatedResultStringWithSearchText:resultText:primaryTextColor:primaryFont:annotatedTextColor:annotatedFont:`
+ *   as **both** the primary and the annotated font: the two argument registers are literally the same
+ *   register (x5 and x7 are both x23). The match is recoloured and nothing else. That is the same
+ *   thing `-[CKMessageSearchResultCell _annotatedResultStringForResult:searchText:]` does on iOS, and
+ *   it is why `ios-search.tsx` recolours too.
+ * - **Which two colours.** `primaryTextColor` is `theme.conversationListSummaryColor` and
+ *   `annotatedTextColor` is `theme.conversationListSenderColor` — the row's own preview colour and
+ *   the row's own **name** colour, the two this component already has measured off the capture as
+ *   `--sb-secondary` and `--sb-name`. (`CKUIThemeMac` resolves them to black at 49.8% / 84.7% in
+ *   light and white at 54.9% / 84.7% in dark; the capture's own #6e6e6d and #000000 win, because a
+ *   capture beats a framework constant.) On a selected row the same pair becomes
+ *   `conversationListCellSelectedSummaryColor` white@80% and `conversationListCellSelectedTextColor`
+ *   white, so the match goes to the plain #ffffff the name takes there.
+ *
+ * `searchMessageBodyTextFont` is SF Regular **15** on `CKUIBehaviorMac`, against the 12 pt preview
+ * this row measures. It is **not** applied: `conversationListSenderFont` is Semibold 17 on the same
+ * class against a measured 13, so ChatKit's conversation-list font table is already known to
+ * disagree with macOS 26's own sidebar. Only the structure above — one font, two colours, summary
+ * label only — is taken from the framework; every size stays the capture's.
+ *
+ * **UNMEASURED: the clear button.** No capture holds a field with text in it, so the ✕ that a
+ * `NSSearchField` shows once it has any is judgement, not a reading: it mirrors the measured
+ * magnifier's own inset from the opposite edge and centres on the same line. It is drawn only when
+ * there is a query, so every capture-matched state — the empty field — is byte for byte unchanged.
  *
  * **Group rows** (`members`). A group conversation's row draws the same `CKAvatarView` the one-to-one
  * row does (`CKConversationListStandardCell._avatarView`), handed every participant instead of one, and
@@ -154,11 +191,11 @@ export const macSidebarSearchStrings = {
 } as const;
 
 /**
- * Whether a conversation belongs in the results for `query`. Case- and diacritic-insensitive over the
- * three strings the row already draws — the name, the group sender prefix and the preview — which is
- * what a row can honestly claim to match on. It is **not** ChatKit's search: that indexes every
- * message body through Spotlight and returns five more sections (Messages, Photos, Links, Documents,
- * Locations), none of which this component holds the data for.
+ * Whether a conversation belongs in the results for `query`. Case-insensitive over the three strings
+ * the row already draws — the name, the group sender prefix and the preview — which is what a row can
+ * honestly claim to match on. It is **not** ChatKit's search: that indexes every message body through
+ * Spotlight and returns five more sections (Messages, Photos, Links, Documents, Locations), none of
+ * which this component holds the data for.
  */
 export function conversationMatchesQuery(conversation: SidebarConversation, query: string): boolean {
   const needle = query.trim().toLocaleLowerCase();
@@ -167,11 +204,65 @@ export function conversationMatchesQuery(conversation: SidebarConversation, quer
     .some(field => field?.toLocaleLowerCase().includes(needle));
 }
 
+/**
+ * Every run of `text` that matches `query`, as `[start, end)` pairs into `text` itself, so the caller
+ * can recolour those characters without rebuilding the string. Non-overlapping and in order, on the
+ * same case-insensitive comparison `conversationMatchesQuery` filters with, so a row that is in the
+ * results always has at least one range in one of its three fields.
+ *
+ * Lower-casing can change a string's length (`ẞ` becomes `ss`), which would slide every index past
+ * it; when it does, this returns nothing rather than annotating the wrong characters.
+ */
+export function searchMatchRanges(text: string, query: string): [number, number][] {
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle || !text) return [];
+  const hay = text.toLocaleLowerCase();
+  if (hay.length !== text.length) return [];
+  const ranges: [number, number][] = [];
+  for (let at = hay.indexOf(needle); at !== -1; at = hay.indexOf(needle, at + needle.length)) {
+    ranges.push([at, at + needle.length]);
+  }
+  return ranges;
+}
+
+/**
+ * One run of preview text with its matching characters recoloured. Same font, same weight, same size
+ * throughout — see the file's note on
+ * `+[CKConversationSearchResultEmbeddedCell annotatedResultStringWithSearchText:…]`, which is handed
+ * one font for both the primary and the annotated slot and only swaps the colour.
+ */
+function Annotated({ text, query, color }: { text: string; query: string; color: string }) {
+  const ranges = searchMatchRanges(text, query);
+  if (ranges.length === 0) return <>{text}</>;
+  const parts: ReactNode[] = [];
+  let at = 0;
+  ranges.forEach(([start, end], index) => {
+    if (start > at) parts.push(text.slice(at, start));
+    parts.push(<span key={`${start}-${index}`} data-slot="row-match" style={{ color }}>{text.slice(start, end)}</span>);
+    at = end;
+  });
+  if (at < text.length) parts.push(text.slice(at));
+  return <>{parts}</>;
+}
+
 export const macSidebarMetrics = {
   /** The column the window reserves. The panel itself is inset inside it. */
   width: 330,
   panel: { left: 8, top: 8, bottom: 8, width: 320, radius: 18 },
-  search: { left: 18, top: 52, width: 300, height: 36 },
+  search: {
+    left: 18, top: 52, width: 300, height: 36,
+    /** Measured: the magnifier's ink box is 12.5 square at window (32.5, 63.5). */
+    glyphLeft: 32.5, glyphTop: 63.5, glyph: 12.5,
+    /** Measured: typed text starts on the placeholder's own origin, window x 53, top 61.75. */
+    textLeft: 53, textTop: 61.75,
+    /**
+     * **UNMEASURED.** The ✕ an `NSSearchField` shows once it holds text. No capture has text in the
+     * field, so this mirrors what *is* measured: the same 12.5 ink box the magnifier gets, the same
+     * 14.5 inset from its own edge of the field that the magnifier has from the left (32.5 − 18), and
+     * the same 69.75 centre line. `textRight` is what the typed run then keeps clear of it.
+     */
+    clear: 12.5, clearRight: 14.5, clearHit: 22, textRight: 33,
+  },
   pinned: {
     top: 96, avatar: 73, centerX: 168, avatarCenterY: 142.5, height: 119, labelTop: 184.75,
     // CKPinnedConversationView: the dot is the same Ø9, and `unreadIndicatorPreferredPadding` puts 3
@@ -262,6 +353,20 @@ function SearchIcon() {
   );
 }
 
+/**
+ * xmark.circle.fill, the cancel button of a Mac search field: a filled disc with the cross knocked
+ * out of it in the field's own fill, so it reads as a hole rather than as a second stroke.
+ * **UNMEASURED** — see `macSidebarMetrics.search.clear`.
+ */
+function ClearIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 12.5 12.5" width="12.5" height="12.5" fill="none">
+      <circle cx="6.25" cy="6.25" r="6.25" fill="currentColor" />
+      <path d="M4.15 4.15 8.35 8.35M8.35 4.15 4.15 8.35" stroke="var(--sb-field)" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 /** bell.slash.fill: a filled bell with the slash separated from it by a background-coloured stroke. */
 function MutedIcon({ size, color, halo }: { size: number; color: string; halo: string }) {
   return (
@@ -345,15 +450,30 @@ export function MacSidebar({ conversations, selectedId, onSelect, active = true,
 
       <label data-slot="sidebar-search" className="absolute flex items-center bg-[var(--sb-field)] text-[var(--sb-placeholder)]"
         style={{ left: m.search.left, top: m.search.top, width: m.search.width, height: m.search.height, borderRadius: m.search.height / 2 }}>
-        <span aria-hidden="true" className="absolute" style={{ left: 32.5 - m.search.left, top: 63.5 - m.search.top }}><SearchIcon /></span>
+        <span aria-hidden="true" className="absolute" style={{ left: m.search.glyphLeft - m.search.left, top: m.search.glyphTop - m.search.top }}><SearchIcon /></span>
         <span className="sr-only">Search conversations</span>
-        <input type="search" placeholder={macSidebarSearchStrings.placeholder} value={query}
+        {/* `data-slot="sidebar-search-input"` is how the window puts ⌘F on this field
+            (`macos-messages-app.tsx`); nothing else keys off it. */}
+        <input type="search" data-slot="sidebar-search-input" placeholder={macSidebarSearchStrings.placeholder} value={query}
           onChange={event => setQuery(event.target.value)}
           // Escape empties a Mac search field before it does anything else, which is why it stops here
           // rather than reaching the window's own Escape handling.
           onKeyDown={event => { if (event.key === "Escape" && query) { event.preventDefault(); event.stopPropagation(); setQuery(""); } }}
           className="absolute bg-transparent text-[13px] leading-[16px] text-[var(--sb-name)] outline-none placeholder:font-medium placeholder:text-[var(--sb-placeholder)] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
-          style={{ left: 53 - m.search.left, right: 8, top: 61.75 - m.search.top }} />
+          style={{ left: m.search.textLeft - m.search.left, right: searching ? m.search.textRight : 8, top: m.search.textTop - m.search.top }} />
+        {/* Only while there is something to clear, so the empty field every capture holds is
+            untouched. It clears the text and keeps the caret, which is what a Mac search field does. */}
+        {searching && (
+          <button type="button" data-slot="sidebar-search-clear" aria-label="Clear search"
+            onClick={event => {
+              setQuery("");
+              (event.currentTarget.parentElement?.querySelector<HTMLInputElement>('[data-slot="sidebar-search-input"]'))?.focus();
+            }}
+            className="absolute flex items-center justify-center rounded-full text-[var(--sb-placeholder)] outline-offset-1 focus-visible:outline-2 focus-visible:outline-[#3478f6]"
+            style={{ right: m.search.clearRight - (m.search.clearHit - m.search.clear) / 2, top: m.search.glyphTop + m.search.glyph / 2 - m.search.top - m.search.clearHit / 2, width: m.search.clearHit, height: m.search.clearHit }}>
+            <ClearIcon />
+          </button>
+        )}
       </label>
 
       {/* The results header. `searchHeaderHeight` and `searchHeaderFont` are the framework's; the
@@ -365,6 +485,11 @@ export function MacSidebar({ conversations, selectedId, onSelect, active = true,
             height: m.results.headerHeight, fontSize: m.results.headerFontSize, lineHeight: `${m.results.headerLineHeight}px` }}>
           {macSidebarSearchStrings.conversations}
         </h2>
+      )}
+      {/* Nothing moves on screen when the filter narrows, so the count is what tells a screen reader
+          the list changed. ChatKit builds no such string; the wording is ours. */}
+      {searching && rows.length > 0 && (
+        <p role="status" className="sr-only">{rows.length === 1 ? "1 conversation found" : `${rows.length} conversations found`}</p>
       )}
       {/* UNMEASURED: nothing in `references/macos/captures` holds an empty result set, so this line
           borrows the header's own type and centres it in the space the rows would have taken. */}
@@ -416,6 +541,9 @@ export function MacSidebar({ conversations, selectedId, onSelect, active = true,
           // Inactive windows keep the neutral text colors on the gray selection.
           const highlighted = selected && active;
           const secondary = highlighted ? "#d6e4fd" : "var(--sb-secondary)";
+          // The annotated run takes `conversationListSenderColor`, which is the colour the name label
+          // takes on this row; on a selected row both go to the white the name goes to.
+          const matched = highlighted ? "#ffffff" : "var(--sb-name)";
           return (
             <li key={c.id} data-slot="sidebar-row" data-selected={selected ? "true" : "false"} className="relative" style={{ height: m.row.height }}>
               <button type="button" aria-current={selected ? "true" : undefined} onClick={() => onSelect?.(c.id)}
@@ -441,9 +569,13 @@ export function MacSidebar({ conversations, selectedId, onSelect, active = true,
                 <span data-slot="row-preview" className="absolute line-clamp-2 text-[12px] leading-[15px]"
                   style={{ left: m.row.textLeft, right: m.row.textRight, top: m.row.previewTop, color: secondary }}>
                   {/* A group row names the sender first. Same type and same gray: it is one run of
-                      preview text, wrapping and clamping with the rest of it. */}
-                  {c.sender && c.members && c.members.length > 1 ? <span data-slot="row-sender">{c.sender}: </span> : null}
-                  {c.preview}
+                      preview text, wrapping and clamping with the rest of it. While searching, the
+                      characters that match are recoloured in place — the summary label is the only
+                      one ChatKit annotates, so the name above stays exactly as it is. */}
+                  {c.sender && c.members && c.members.length > 1
+                    ? <span data-slot="row-sender">{searching ? <Annotated text={c.sender} query={query} color={matched} /> : c.sender}: </span>
+                    : null}
+                  {searching ? <Annotated text={c.preview} query={query} color={matched} /> : c.preview}
                 </span>
                 {c.muted && (
                   <span className="absolute" style={{ right: m.row.separatorRight, top: m.row.mutedTop }}>

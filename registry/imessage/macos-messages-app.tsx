@@ -92,6 +92,33 @@ export const macAttachmentPopovers = {
 /** `-[CKUIBehaviorMac popoverPadding]` = 7: what a Mac popover keeps clear inside its own box. */
 const macPopoverPadding = 7;
 
+/**
+ * The window's own keyboard equivalents, read off the live macOS 26 Messages menu bar through the
+ * accessibility API (`AXMenuItemCmdChar` and `AXMenuItemCmdModifiers` on each item; modifiers 0 is a
+ * bare ⌘, 2 is ⌥⌘). Every one of them is a menu item this shell can actually carry out; the ones it
+ * cannot — Edit ▸ Find ▸ Find Next ⌘G, View ▸ Messages/Spam/Recently Deleted ⌘1/2/3 — are left alone
+ * rather than bound to something that only reports.
+ */
+export const macShortcuts = {
+  /** **Edit ▸ Find ▸ Find…**, "F" / 0. On the Mac that is the sidebar's search field, not an overlay. */
+  find: "f",
+  /** **Edit ▸ Select All**, "A" / 0. Selects every message in the transcript. */
+  selectAll: "a",
+  /** **Conversation ▸ Show Details**, "I" / 2. */
+  details: "i",
+} as const;
+
+/**
+ * Whether the keystroke belongs to a text field rather than to the window. ⌘A inside the composer or
+ * the search field selects that field's text — AppKit's first responder gets it first — so the
+ * transcript's ⌘A has to stand down for one.
+ */
+function isTextEntry(node: Element | null): boolean {
+  const element = node as HTMLElement | null;
+  if (!element) return false;
+  return element.isContentEditable || element.tagName === "INPUT" || element.tagName === "TEXTAREA";
+}
+
 /** The measured popover fill, rim and outline of `macos-plus-menu.tsx`, on both appearances. */
 const popoverChrome = cn(
   "bg-[var(--pm-fill)] shadow-[var(--pm-edge)] backdrop-blur-[20px]",
@@ -178,10 +205,15 @@ export type MacMessagesAppProps = {
   /** Called when a played (not seeked) send animation finishes. */
   onSendAnimationEnd?: () => void;
   /**
-   * Messages a click has selected, newest state owned by the caller. Passing this (even empty) turns
-   * on click-to-select in the pane: a click selects one message, cmd toggles, shift extends, a click
-   * on anything else in the pane clears, and so does Escape. iOS has no equivalent; its multi-select
-   * is the checkbox mode in `ios-select-mode.tsx`.
+   * Messages a click has selected. Click-to-select is **always on** in the macOS pane, because that
+   * is what a Mac list does and there is no mode to enter: a click selects one message, cmd toggles,
+   * shift extends, ⌘A takes all of them, a click on anything else in the pane clears, and so does
+   * Escape. Pass this (even empty) to own that state; leave it out and the shell holds it, the same
+   * `prop ?? shell-held` contract every surface here follows, so the click that selects natively
+   * selects here with nothing wired.
+   *
+   * iOS has no equivalent — its multi-select is the checkbox mode in `ios-select-mode.tsx`, entered
+   * from a menu — which is why this is a macOS-only prop.
    */
   selectedMessageIds?: readonly string[];
   /** The selection a click, a right click or an arrow key just produced. `id` is the message it acted on. */
@@ -200,6 +232,8 @@ export type MacMessagesAppProps = {
    * The search field in the sidebar. It filters the list in place with nothing wired — on the Mac
    * `-[CKUIBehaviorMac searchControllerObscuresConversationList]` is NO, so the results *are* the
    * list — and this only reports what was typed. Pass `searchQuery` to own the text instead.
+   * ⌘F (Edit ▸ Find ▸ Find…) puts the caret in that field and selects whatever is already in it;
+   * Escape empties it, and the ✕ inside it clears it with the pointer.
    */
   searchQuery?: string;
   onSearch?: (query: string) => void;
@@ -448,16 +482,30 @@ export function MacMessagesApp({
     return () => { try { animation.cancel(); } catch { /* already gone */ } };
   }, [openMenuId, pane, menuProgress]);
 
-  // Selection is off until the caller owns it, and it draws even without a handler so a screenshot of
-  // a fixed selection needs no interaction. The anchor is what a shift-click extends from.
-  const selecting = selectedMessageIds !== undefined;
+  // Selection is the pane's own state unless the caller takes it, and it draws even without a
+  // handler so a screenshot of a fixed selection needs no interaction. The anchor is what a
+  // shift-click extends from.
+  const [ownSelection, setOwnSelection] = useState<readonly string[]>([]);
+  const selection = selectedMessageIds ?? ownSelection;
   const anchorId = useRef<string | null>(null);
+  function commitSelection(next: string[], context: { id: string | null; shiftKey: boolean; metaKey: boolean }) {
+    setOwnSelection(next);
+    onSelectMessage?.(next, context);
+  }
   function select(id: string | null, modifiers: { shiftKey: boolean; metaKey: boolean }) {
-    if (!selecting || !onSelectMessage) return;
-    if (id === null) { anchorId.current = null; onSelectMessage!([], { id: null, ...modifiers }); return; }
-    const next = nextMessageSelection(messages.map(message => message.id), selectedMessageIds!, id, modifiers, anchorId.current);
+    if (id === null) { anchorId.current = null; commitSelection([], { id: null, ...modifiers }); return; }
+    const next = nextMessageSelection(messages.map(message => message.id), selection, id, modifiers, anchorId.current);
     if (!modifiers.shiftKey) anchorId.current = id;
-    onSelectMessage!(next, { id, ...modifiers });
+    commitSelection(next, { id, ...modifiers });
+  }
+  /**
+   * Edit ▸ Select All. Every message in display order, and the anchor is left where it was, so a
+   * shift-click straight after still extends from whatever was last clicked — which is what an
+   * AppKit list does. There is no message this acted on, so the context reports `id: null`, the same
+   * way clearing does.
+   */
+  function selectAllMessages() {
+    commitSelection(messages.map(message => message.id), { id: null, shiftKey: false, metaKey: true });
   }
   const mine = target?.reactions?.find(reaction => reaction.byMe);
   const selected: TapbackSelection | undefined = mine ? (mine.emoji ? { emoji: mine.emoji } : { type: mine.type as never }) : undefined;
@@ -661,16 +709,15 @@ export function MacMessagesApp({
               // The keyboard equivalent of the right click: the log's arrow keys focus a message and
               // these keys open its menu, anchored to the message rather than to a pointer.
               onKeyDown={event => {
-                if (selecting && onSelectMessage) {
-                  // Escape only clears once nothing else has claimed it, so an open menu still closes first.
-                  if (event.key === "Escape" && !event.defaultPrevented && selectedMessageIds!.length) { event.preventDefault(); select(null, { shiftKey: false, metaKey: false }); return; }
-                  // The log's own arrow keys have already moved focus by the time this bubbles up (and
-                  // have called preventDefault on the way), so following the focused row here is what
-                  // makes selection reachable without a pointer.
-                  if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
-                    const focused = (document.activeElement as HTMLElement | null)?.closest?.("[data-message-id]")?.getAttribute("data-message-id");
-                    if (focused) select(focused, { shiftKey: event.shiftKey, metaKey: false });
-                  }
+                // Escape only clears once nothing else has claimed it, so an open menu still closes
+                // first. The window carries the same clear for a press that lands outside the pane.
+                if (event.key === "Escape" && !event.defaultPrevented && selection.length) { event.preventDefault(); select(null, { shiftKey: false, metaKey: false }); return; }
+                // The log's own arrow keys have already moved focus by the time this bubbles up (and
+                // have called preventDefault on the way), so following the focused row here is what
+                // makes selection reachable without a pointer.
+                if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
+                  const focused = (document.activeElement as HTMLElement | null)?.closest?.("[data-message-id]")?.getAttribute("data-message-id");
+                  if (focused) select(focused, { shiftKey: event.shiftKey, metaKey: false });
                 }
                 const row = event.target as HTMLElement;
                 if (!row.matches?.('[data-slot="message-row"][data-message-id]')) return;
@@ -693,7 +740,7 @@ export function MacMessagesApp({
                 onContextMenu(id, at.left + at.width / 2 - rect.left, at.bottom - rect.top);
               }}>
               <div data-slot="pane-content" className="absolute inset-0">
-                <MessageList ref={list} frameRef={pane} messages={messages} typing={typing} group={isGroup} now={now} anchor="bottom" selectedIds={selectedMessageIds}
+                <MessageList ref={list} frameRef={pane} messages={messages} typing={typing} group={isGroup} now={now} anchor="bottom" selectedIds={selection}
                   insetTop={macScreen.listTop} insetBottom={macScreen.listBottom} renderReactions={renderReactions} messageActions={Boolean(onContextMenu)}
                   onOpenImage={(id, index) => quickLook(id, index)} className="absolute inset-0" />
               </div>
@@ -797,14 +844,46 @@ export function MacMessagesApp({
     <PlatformProvider platform="macos">
       <PaletteStyle platform="macos" />
       <div ref={shell} data-im-platform="macos" data-switching={outgoingPane?.rows ? "true" : undefined} className={cn("relative", className)} style={{ width, height, ...style }}
-        // ⌥⌘I is Conversation ▸ Show Details in macOS 26 Messages, read off the live app's menu bar
-        // (`AXMenuItemCmdChar` "I", `AXMenuItemCmdModifiers` 2). It is bound on the window rather than
-        // on the document so a second app on the same page keeps its own shortcut.
+        // The window's menu-bar equivalents (`macShortcuts`, read off the live macOS 26 Messages menu
+        // bar). All three are bound on the window rather than on the document, so a second app on the
+        // same page keeps its own.
         onKeyDown={event => {
-          if (!event.metaKey || !event.altKey || event.key.toLowerCase() !== "i") return;
-          event.preventDefault();
-          if (detailsOpen) closeDetails();
-          else { setOwnDetails(true); onDetails?.(); }
+          // Escape clears the transcript's selection from anywhere in the window, not only from
+          // inside the pane, and only once nothing nearer has claimed it: an open menu, an open
+          // popover and a search field with text in it all call `preventDefault` first.
+          if (event.key === "Escape") {
+            if (event.defaultPrevented || !selection.length) return;
+            event.preventDefault();
+            select(null, { shiftKey: false, metaKey: false });
+            return;
+          }
+          if (!event.metaKey || event.ctrlKey) return;
+          const key = event.key.toLowerCase();
+          // Conversation ▸ Show Details, ⌥⌘I.
+          if (event.altKey) {
+            if (key !== macShortcuts.details) return;
+            event.preventDefault();
+            if (detailsOpen) closeDetails();
+            else { setOwnDetails(true); onDetails?.(); }
+            return;
+          }
+          // Edit ▸ Find ▸ Find…, ⌘F. On the Mac the search field *is* the results
+          // (`searchControllerObscuresConversationList` NO), so this focuses the sidebar's field and
+          // takes its text, the way ⌘F into a filled search field does — it does not open a screen.
+          if (key === macShortcuts.find) {
+            const field = shell.current?.querySelector<HTMLInputElement>('[data-slot="sidebar-search-input"]');
+            if (!field) return;
+            event.preventDefault();
+            field.focus();
+            field.select();
+            return;
+          }
+          // Edit ▸ Select All, ⌘A. Not while a text field has it: there the platform's own ⌘A wins.
+          if (key === macShortcuts.selectAll) {
+            if (isTextEntry(document.activeElement) || !messages.length) return;
+            event.preventDefault();
+            selectAllMessages();
+          }
         }}>
         <style>{macAppStyles}</style>
         <MacWindow width={width} height={height} active={active} data-slot="macos-messages-app"

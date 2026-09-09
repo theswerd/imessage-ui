@@ -514,6 +514,7 @@
         "@imessage/ios-new-message-sheet",
         "@imessage/ios-plus-menu",
         "@imessage/ios-search",
+        "@imessage/ios-select-mode",
         "@imessage/ios-status-bar",
         "@imessage/link-preview",
         "@imessage/message-actions",

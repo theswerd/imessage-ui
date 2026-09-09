@@ -181,6 +181,10 @@ export function HarnessPreview({ platform, scenario, time, interactive = true, o
    */
   const participants = participantsOf(frame);
   const plusMenuState = frame.plusMenu ?? undefined;
+  // iOS select mode. `{ progress }` with no number is the settled mode; with one, the shell seeks
+  // `IosSelectMode`'s single `--ios-sel-t` timeline instead of playing it. Left `undefined` the shell
+  // owns the mode, which is what keeps the long-press menu's "Select" row working with nothing wired.
+  const selectMode = frame.selectMode ? { progress: frame.selectMode.progress } : undefined;
   const photoViewer = frame.photoViewer ?? undefined;
   const photoPicker = frame.photoPicker ? { selected: frame.photoPicker.selected, detent: frame.photoPicker.detent, progress: frame.photoPicker.progress } : undefined;
   const stickerPicker = frame.stickerPicker ? { tab: frame.stickerPicker.tab, progress: frame.stickerPicker.progress, drag: frame.stickerPicker.drag } : undefined;
@@ -333,6 +337,18 @@ export function HarnessPreview({ platform, scenario, time, interactive = true, o
           onSearchQueryChange={query => onEvent?.(`search.query ${query || "(empty)"}`)}
           onSearchSelect={(result, kind) => onEvent?.(`search.select ${kind} ${result.id}`)}
           onSearchSeeAll={kind => onEvent?.(`search.see-all ${kind}`)}
+          // Select mode. The selection is stated only when the scenario states the mode; the rest of
+          // the time the shell holds both, so choosing "Select" in the long-press menu enters the
+          // mode and ticking a row works without the workbench owning any of it.
+          selectMode={selectMode}
+          // A tick made by hand wins over the scenario's, the same way a live selection does on the
+          // Mac; both shells read the one piece of state, and only one of them is ever mounted.
+          selectedMessageIds={selectedMessages ?? frame.selectMode?.selected}
+          onOpenSelectMode={id => onEvent?.(`selection.mode ${id}`)}
+          onCloseSelectMode={() => { setSelectedMessages(null); onEvent?.("selection.mode.close"); }}
+          onSelectMessage={(ids, context) => { setSelectedMessages(ids); onEvent?.(`selection.select ${context.id ?? "none"} (${ids.length})`); }}
+          onDeleteMessages={ids => onEvent?.(`selection.delete ${ids.join(",") || "none"}`)}
+          onForwardMessages={ids => onEvent?.(`selection.forward ${ids.join(",") || "none"}`)}
           longPress={longPress} onLongPress={interactive ? id => { setPressedId(id); onEvent?.(`reactions.open ${id}`); } : undefined}
           onLongPressClose={() => { setPressedId(null); setDismissedPress(true); onEvent?.("reactions.close"); }}
           effectsPicker={picker && { ...picker, draft: composerValue }}
@@ -372,7 +388,11 @@ export function HarnessPreview({ platform, scenario, time, interactive = true, o
           // with — see the `switch-conversation` scenario's own comment.
           conversationTransition={frame.conversationSwitch ? { progress: frame.conversationSwitch.progress } : null}
           onCompose={() => onEvent?.("navigation.new-message")} onVideoCall={beginCall} onDetails={() => onEvent?.("navigation.details")}
-          selectedMessageIds={selectedMessages ?? frame.selectedMessageIds ?? []}
+          // `undefined`, not `[]`, when nothing states a selection: click-to-select is always on in
+          // the macOS pane now and the shell holds the set itself, so handing it an empty array
+          // would take that state away and freeze every row unselected. Same rule as every other
+          // surface here — state it only when the scenario states it.
+          selectedMessageIds={selectedMessages ?? frame.selectedMessageIds}
           onSelectMessage={interactive ? (ids, context) => { setSelectedMessages(ids); onEvent?.(`selection.select ${context.id ?? "none"}`); } : undefined}
           contextMenu={contextMenu ?? (frame.menu === "context" ? { id: "m6", x: 420, y: 470 } : null)}
           onContextMenu={interactive ? (id, x, y) => { setContextMenu({ id, x, y }); onEvent?.(`reactions.open ${id}`); } : undefined}

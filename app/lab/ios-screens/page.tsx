@@ -1,15 +1,18 @@
 import { IosScreensScene, type ScreenScene } from "./scene";
 
 /** Kept here, not in the client module: a server component only sees client references for its exports. */
-const scenes: ScreenScene[] = ["details", "plus-menu", "select-mode", "swipe-times", "notice", "attachment", "photo-picker"];
+const scenes: ScreenScene[] = ["details", "plus-menu", "select-mode", "select-mode-app", "swipe-times", "notice", "attachment", "photo-picker"];
 
 export const metadata = { title: "Lab: iOS screens" };
 
 /**
  * Pixel lab for the iOS 26 secondary screens and states. Each scene reconstructs one capture at its
  * native geometry so `scripts/measure/compare.ts` can diff it:
- * /lab/ios-screens?scene=details|plus-menu|select-mode|swipe-times|notice|attachment|photo-picker&theme=light|dark
- * `&progress=0..1` scrubs the entrance of the scenes that animate (details, plus-menu, swipe-times);
+ * /lab/ios-screens?scene=details|plus-menu|select-mode|select-mode-app|swipe-times|notice|attachment|photo-picker&theme=light|dark
+ * `select-mode` is the hand-placed reconstruction of `select-mode-dark.png`; `select-mode-app` is the
+ * same capture reached through `IosMessagesApp`'s own select mode, so the two can be diffed apart.
+ * `&progress=0..1` scrubs the entrance of the scenes that animate (details, plus-menu, swipe-times,
+ * select-mode-app);
  * `&progress=live` hands them their own spring and, for swipe-times, a real pointer/keyboard drag.
  */
 export default async function IosScreensLabPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {

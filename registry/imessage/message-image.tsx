@@ -13,6 +13,35 @@ import { bodyClipPath, tailBox, tailPath, tailSeamOverlap } from "@/registry/ime
  * NOT MEASURED against a native photo message: the corner radius and tail come from the measured text
  * bubble, and the multi-photo grid follows the documented layout. The tile gap is provisional.
  *
+ * ## What a photo message offers, and what is here (audit, 2026-09-09)
+ *
+ * | part                    | native evidence                                              | here |
+ * |-------------------------|--------------------------------------------------------------|------|
+ * | single photo's box      | `thumbnailFillSizeForWidth:imageSize:`, swept                 | yes, MEASURED, within 0.38 pt (ChatKit rounds to the device grid; see `photoBox`) |
+ * | balloon max width       | `balloonMaxWidthForTranscriptWidth:…`, `balloonMaxWidthPercent` 0.85 iPhone / 0.65 Mac | rule recorded in `balloonMaxWidth`; the group uses the measured constant and now cannot exceed its container |
+ * | loading                 | `DOWNLOADING` = "Downloading…"                                 | partial: tiles hold on the placeholder and the group is `aria-busy`, but there is NO progress indicator and no "Downloading…" copy. `photoSheetProgressIndicatorSize` {20, 20} is the picker sheet, not the balloon, so the balloon's spinner is UNMEASURED |
+ * | failed / not downloaded | `TAP_TO_DOWNLOAD`, `CLICK_TO_DOWNLOAD`, `downloadButtonFont` 17 | yes: copy and type size MEASURED; `pending` offers it without a failed fetch. A *send* failure is a different thing and belongs to the shell (`FailedSendBadge`, ChatKit's `_clearFailureBadge`), not to this component |
+ * | video duration badge    | none on a transcript balloon                                   | NO — and correctly so. `CKMovieBalloonView` is `CKImageBalloonView` plus an `AVPlayerLayer` and has no duration label at all (`playsInlineVideo` = 1). The only `_durationLabel` in ChatKit is on `CKPhotoSearchResultCell`, the search-results cell. Adding one to a bubble would be inventing a control native does not draw |
+ * | Live Photo badge        | `CKImageBalloonView._irisBadgeView`, `livePhotoBadgeImage`      | yes, added here: symbol identity and ring geometry MEASURED off the framework's own `UIImage` (see `livePhotoBadge`); its position in the tile is judgement |
+ * | spatial badge           | `CKImageBalloonView._monoskiBadgeView`                          | NO. Not built; no size read yet |
+ * | overflow count past 4   | see the stack note below                                       | drawn as a "+N" scrim on the fourth tile. UNMEASURED, and probably the wrong shape — native's counter is the stack's "additional items card" (`stackViewDidSelectAdditionalItemsCard:`, `_updateAdditionalItemsCount`), not a tile |
+ * | tap target → viewer     | —                                                              | yes: every tile is a `<button>` and `onOpenImage` hands the viewer the tile's own `DOMRect` |
+ *
+ * ## The grid is very likely the wrong layout, and this is not a small point
+ *
+ * There is no photo-*grid* balloon in ChatKit. Two or more attachments on one message are a **stack**:
+ * `CKPhotoStackBalloonView` / `CKStaticPhotoStackBalloonView` / `CKGenericPhotoStackBalloonView`,
+ * driven by `PXMessagesStackBalloonViewController` over a `CKStaticImageStackView` whose frames come
+ * from `PFMessagesStackLayoutFrameSolver`, with `stackView:didChangeCurrentAssetReference:…` for the
+ * swipe and `stackViewDidSelectAdditionalItemsCard:` for the counter. The `CKPhotoGrid*` names in the
+ * framework belong to the full-screen grid the stack opens into, not to the transcript. The
+ * accessibility format this file already quotes, `messages.attachment.stack.view.format`, is that
+ * stack view's.
+ *
+ * The 2x2 tiling here is therefore a pre-stack layout kept because it is the one thing that can be
+ * built without a capture: the stack's frames live in PhotoFoundation's solver, and no capture of a
+ * multi-photo message exists to fit them against. Recorded, not fixed.
+ *
  * The single photo's box, on the other hand, is now read out of ChatKit rather than guessed: see
  * `photoBox` below. So are the accessible names: ChatKit's own accessibility bundle
  * (`/System/iOSSupport/System/Library/AccessibilityBundles/ChatKitFramework.axbundle`,
@@ -28,7 +57,20 @@ import { bodyClipPath, tailBox, tailPath, tailSeamOverlap } from "@/registry/ime
  * (`-[CKBalloonView didTapTruncatedCaptionForRichCard:]`). The message list therefore renders the two,
  * passing `tail` to whichever comes last; this component stays a photo group.
  */
-export type MessageImage = { src: string; alt: string; width?: number; height?: number };
+export type MessageImage = {
+  src: string;
+  alt: string;
+  width?: number;
+  height?: number;
+  /**
+   * The transfer has not been fetched. The tile offers `TAP_TO_DOWNLOAD` / `CLICK_TO_DOWNLOAD`
+   * straight away instead of only after an <img> errors, which is what native does with an
+   * attachment it is holding but has not downloaded.
+   */
+  pending?: boolean;
+  /** A Live Photo. Draws ChatKit's `livePhotoBadgeImage` over the tile; see `livePhotoBadge`. */
+  livePhoto?: boolean;
+};
 
 export type MessageImagesProps = Omit<ComponentProps<"div">, "children"> & {
   images: MessageImage[];
@@ -60,22 +102,63 @@ const TILE_GAP = 2;
 
 /**
  * How big one photo's balloon is, read out of ChatKit instead of a screenshot.
- * `-[CKUIBehaviorPhone thumbnailFillSizeForWidth:imageSize:]`, swept over widths 100…600 against
+ * `-[CKUIBehaviorPhone thumbnailFillSizeForWidth:imageSize:]`, swept over widths 100…900 against
  * extreme image sizes, fills the balloon width and then clamps the shape: anything wider than 16:9
  * comes back at `width x 0.5625` and anything taller than 3:4 at `width x 1.3333`, in both cases
  * cropped, since the answer is a *fill* size (its sibling `unconstrainedAspectFillSizeForWidth:`
- * returns the unclamped fit). It never returns a height over 500; past that the width shrinks to hold
- * the ratio (w 400, a 1:4 photo → 375 x 500).
+ * returns the unclamped fit).
  *
  * `-[CKUIBehaviorMac thumbnailFillSizeForWidth:imageSize:]` overrides it and applies no shape clamp at
- * all: it returns the true aspect fit, capped at the same height of 500 (a 1:6 photo → 83.5 x 500).
+ * all: it returns the true aspect fit (w 382.5, a 4:1 photo → 382.5 x 96, where the phone stops at
+ * 215.5). Re-swept 2026-09-09; the Mac override only answers for real once it is asked in its own
+ * process, because `+sharedBehaviors` caches the first singleton it builds and a second call in the
+ * same process hands back the phone's.
+ *
+ * `maxHeight` is a PORTRAIT-ONLY ceiling on both, which the sweep is unambiguous about: 3:4, 9:16 and
+ * 1:4 all stop at 500 and shrink their width to hold the ratio (w 382.5, 9:16 → 281.5 x 500), while
+ * 1:1 at w 900 comes back 900 x 900 and 16:9 at w 900 comes back 900 x 506.5. Nothing in this kit
+ * ever hands a photo 900 pt, so the two rules agree everywhere it is used; `portraitOnly` records
+ * which one is native rather than leaving the wrong one to bind if a caller ever passes a wide box.
+ *
  * Native rounds each result to the device pixel grid (it answers 158.0 where 280.5 x 0.5625 is
- * 157.78); the fractions are kept here for the same reason `tileSize` keeps its own.
+ * 157.78); the fractions are kept here for the same reason `tileSize` keeps its own, which is why the
+ * lab's own probe reports our box within 0.38 pt of ChatKit's rather than equal to it.
  */
-export const photoBox: Record<Platform, { minRatio: number; maxRatio: number; maxHeight: number }> = {
-  ios: { minRatio: 0.5625, maxRatio: 4 / 3, maxHeight: 500 },
-  macos: { minRatio: 0, maxRatio: Number.POSITIVE_INFINITY, maxHeight: 500 },
+export const photoBox: Record<Platform, { minRatio: number; maxRatio: number; maxHeight: number; portraitOnly: true }> = {
+  ios: { minRatio: 0.5625, maxRatio: 4 / 3, maxHeight: 500, portraitOnly: true },
+  macos: { minRatio: 0, maxRatio: Number.POSITIVE_INFINITY, maxHeight: 500, portraitOnly: true },
 };
+
+/**
+ * The width a transcript of `transcriptWidth` gives any balloon, photo balloons included:
+ * `-[CKUIBehavior balloonMaxWidthForTranscriptWidth:marginInsets:shouldShowPluginButtons:
+ * shouldShowCharacterCount:shouldCoverSendButton:]`, which is exactly
+ * `(transcriptWidth - insets.left - insets.right) * balloonMaxWidthPercent`. Verified against the
+ * framework at ten widths on each idiom: 630 with 16 pt margins answers 508.3 on iPhone and 388.7 on
+ * Mac, which is (630 - 32) x 0.85 and (630 - 32) x 0.65 to the last digit.
+ *
+ * **`balloonMaxWidthPercent` is 0.65 on Mac against 0.85 on iPhone**, so the Mac balloon is
+ * proportionally the *narrower* of the two — the opposite of what this component used to imply by
+ * handing macOS a 382.5 pt box and iOS a 280.5 pt one with nothing tying either to its pane.
+ *
+ * Solving the formula for the two constants this kit already measured off captures:
+ *
+ * - iPhone, transcript 402: an inset of **36.0** gives (402 - 72) x 0.85 = **280.5000**, which is
+ *   `bubbleMetrics.ios.maxWidth` exactly. The framework and the capture agree to the last digit.
+ * - Mac, transcript 630: the inset that lands on 382.5 is 20.77, which is not a round number. The
+ *   obvious 20 (`bubbleMetrics.macos.edgeInset`) gives 383.5 — a whole point wider than the capture.
+ *
+ * That 1.0 pt is unresolved and is the reason the measured constant, not this formula, is still the
+ * default: swapping it in would move every macOS bubble by a point on the strength of a guessed
+ * inset. `shouldCoverSendButton` is the only flag that changes the answer, and it is the composer's
+ * concern, not the transcript's. A shell that resizes its transcript should pass `maxWidth` from
+ * here — the proportion is right even where the constant's offset is not.
+ */
+export const balloonMaxWidthPercent: Record<Platform, number> = { ios: 0.85, macos: 0.65 };
+
+export function balloonMaxWidth(transcriptWidth: number, platform: Platform, marginInsets = 16): number {
+  return (transcriptWidth - marginInsets * 2) * balloonMaxWidthPercent[platform];
+}
 
 /**
  * Where a tapback balloon sits against the group's top corner. Measured on text bubbles and carried
@@ -93,10 +176,64 @@ const reactionSlot: Record<Platform, { marginTop: number; top: number; side: num
 
 /**
  * What native offers on an attachment it has not fetched: ChatKit's `TAP_TO_DOWNLOAD` = "Tap to
- * Download" and `CLICK_TO_DOWNLOAD` = "Click to Download" (`ChatKit.framework/Resources/ChatKit.loctable`).
- * The tile keeps the same copy when the fetch fails, and activating it asks for the photo again.
+ * Download" and `CLICK_TO_DOWNLOAD` = "Click to Download", both read back out of the framework
+ * bundle. The tile keeps the same copy when the fetch fails, and activating it asks for the photo
+ * again.
+ *
+ * The type size is MEASURED: `-[CKUIBehavior downloadButtonFont]` is `.SFNS-Regular` at **17 pt on
+ * both idioms** — the Mac does not shrink it. This used to render 15 on iOS and 13 on macOS, which
+ * was a guess and was wrong on both.
  */
 const downloadLabel: Record<Platform, string> = { ios: "Tap to Download", macos: "Click to Download" };
+
+/** `-[CKUIBehavior downloadButtonFont]`, both idioms. */
+const downloadFontSize = 17;
+
+/**
+ * The Live Photo badge, which native draws over the photo itself: `CKImageBalloonView` keeps an
+ * `_irisBadgeView` ("iris" is ChatKit's word for a Live Photo — see `isIrisAsset`) alongside a
+ * `_monoskiBadgeView` for spatial media, and the image both are built from is
+ * `-[CKUIBehavior livePhotoBadgeImage]`, the system symbol `livephoto` in white.
+ *
+ * MEASURED, by rasterising that `UIImage` at 8x and reading its ink, the way `audio-recorder.tsx`
+ * measures the framework's own symbols:
+ *
+ * | idiom  | image box     | ink box       | centre disc | solid ring   | dashed ring   |
+ * |--------|---------------|---------------|-------------|--------------|---------------|
+ * | iPhone | 21.5 x 20.5   | 18.5 x 18.5   | r 3.375     | r 6.0-6.875  | r 8.5-9.25    |
+ * | Mac    | 28 x 28 (lg)  | 24 x 24       | r 4.375     | r 7.875-8.75 | r 11.0-12.0   |
+ *
+ * The dashed ring's duty cycle is the measured inked fraction of its circumference (0.33 on iPhone,
+ * 0.21 on Mac); the phase of the dashes, and where the badge sits inside the tile, are NOT MEASURED —
+ * no capture of a Live Photo message exists. The inset below is judgement.
+ */
+const livePhotoBadge: Record<Platform, { box: number; ink: number; disc: number; ring: [number, number]; dashed: [number, number]; duty: number; inset: number }> = {
+  ios: { box: 21.5, ink: 18.5, disc: 3.375, ring: [6, 6.875], dashed: [8.5, 9.25], duty: 0.33, inset: 8 },
+  macos: { box: 28, ink: 24, disc: 4.375, ring: [7.875, 8.75], dashed: [11, 12], duty: 0.21, inset: 8 },
+};
+
+/**
+ * `livephoto` drawn to the radii above: a filled centre disc, one solid ring and one dashed ring, in
+ * a viewBox the size of the symbol's own ink so the caller only has to place the box.
+ */
+function LivePhotoGlyph({ platform }: { platform: Platform }) {
+  const badge = livePhotoBadge[platform];
+  const c = badge.ink / 2;
+  const ringWidth = badge.ring[1] - badge.ring[0];
+  const dashedWidth = badge.dashed[1] - badge.dashed[0];
+  const dashedRadius = (badge.dashed[0] + badge.dashed[1]) / 2;
+  // 12 dashes around the ring, each covering `duty` of its share of the circumference.
+  const period = (2 * Math.PI * dashedRadius) / 12;
+  return (
+    <svg width={badge.ink} height={badge.ink} viewBox={`0 0 ${badge.ink} ${badge.ink}`} fill="none" aria-hidden="true"
+      style={{ filter: "drop-shadow(0 0 2px rgba(0,0,0,0.35))" }}>
+      <circle cx={c} cy={c} r={badge.disc} fill="#fff" />
+      <circle cx={c} cy={c} r={(badge.ring[0] + badge.ring[1]) / 2} stroke="#fff" strokeWidth={ringWidth} fill="none" />
+      <circle cx={c} cy={c} r={dashedRadius} stroke="#fff" strokeWidth={dashedWidth} fill="none"
+        strokeLinecap="round" strokeDasharray={`${(period * badge.duty).toFixed(3)} ${(period * (1 - badge.duty)).toFixed(3)}`} />
+    </svg>
+  );
+}
 
 /**
  * Aspect ratios already learned this session, so a photo that has been seen once never opens at the
@@ -177,12 +314,15 @@ export function MessageImages({
   const aspect = declaredAspect ?? learnedAspect ?? 4 / 3;
 
   // The clamp is the native one, so a very tall photo stops at 4:3 of its width and a very wide one at
-  // 16:9, both cropped by `object-cover`; the group never grows past `maxHeight`, and when the clamped
-  // shape would, the width comes in with it rather than the photo stretching.
+  // 16:9, both cropped by `object-cover`; a portrait photo never grows past `maxHeight`, and when the
+  // clamped shape would, the width comes in with it rather than the photo stretching. The ceiling is
+  // portrait-only because that is what the sweep says (see `photoBox`): a landscape or square photo at
+  // a width past 500 keeps its true fit.
   const box = photoBox[platform];
   const ceiling = maxHeight ?? box.maxHeight;
   const ratio = Math.min(Math.max(1 / aspect, box.minRatio), box.maxRatio);
-  const groupWidth = single ? Math.min(width, ceiling / ratio) : width;
+  const capped = box.portraitOnly ? ratio > 1 : true;
+  const groupWidth = single && capped ? Math.min(width, ceiling / ratio) : width;
   const height = single ? groupWidth * ratio : tiles.length === 2 ? tileSize : tileSize * 2 + TILE_GAP;
 
   const grid = useMemo<CSSProperties>(() => {
@@ -258,12 +398,24 @@ export function MessageImages({
       aria-label={images.length > 1 ? `${images.length} Photos` : undefined}
       aria-busy={busy || undefined}
       className={cn("relative", className)}
-      style={{ width: groupWidth, fontFamily: fontStack, marginTop: reactions ? slot.marginTop : undefined, ...style }} {...props}>
-      <div ref={gridRef} data-slot="image-grid" style={{ ...grid, width: groupWidth, height, borderRadius: m.radius, overflow: "hidden", clipPath: tail ? bodyClipPath(side, m.tailScale, tailSeamOverlap[platform]) : undefined, background: "var(--im-gray-top)" }}>
+      // `maxWidth: 100%` is the ceiling this group used to be missing entirely. `groupWidth` is a
+      // constant — `bubbleMetrics[platform].maxWidth`, 382.5 on Mac and 280.5 on iPhone — with nothing
+      // tying it to the transcript it is drawn in, so a pane narrower than that (a resized window, an
+      // open inspector, a two-pane layout) had the group hang out of its row: at a 140 pt container
+      // the macOS group measured 382.5 wide and spilled 242.5 px, which is the defect this line
+      // closes. Native's own rule is `balloonMaxWidth` above, and a shell that resizes its transcript
+      // should pass that as `maxWidth`; this is the floor under it either way.
+      style={{ width: groupWidth, maxWidth: "100%", boxSizing: "border-box", fontFamily: fontStack, marginTop: reactions ? slot.marginTop : undefined, ...style }} {...props}>
+      {/* `aspectRatio` rather than a pixel height, so the box keeps its shape when the clamp above
+          bites: at full width it resolves to exactly `height`, and under the clamp the grid shortens
+          with its width instead of holding a tall box over narrow tiles. */}
+      <div ref={gridRef} data-slot="image-grid" style={{ ...grid, width: "100%", aspectRatio: `${groupWidth} / ${height}`, borderRadius: m.radius, overflow: "hidden", clipPath: tail ? bodyClipPath(side, m.tailScale, tailSeamOverlap[platform]) : undefined, background: "var(--im-gray-top)" }}>
         {tiles.map((image, index) => {
           const spanFirst = tiles.length === 3 && index === 0;
           const state = phase[image.src];
-          const failed = state === "failed";
+          // Two ways into the same affordance: the transfer was never fetched (`pending`), or it was
+          // and it did not arrive. Native offers the download either way, so the tile does too.
+          const failed = image.pending === true || state === "failed";
           const last = index === MAX_TILES - 1 && overflow > 0;
           const name = image.alt?.trim() || "Photo";
           // "Photo, 2 of 5" follows ChatKit's own `messages.attachment.stack.view.format`
@@ -272,7 +424,10 @@ export function MessageImages({
           // ChatKit's `attachment.count` carries a real plural rule ("%d attachment" / "%d attachments"),
           // so the counted tile gets one too rather than reading "1 more photos".
           const more = `Show ${overflow} more photo${overflow === 1 ? "" : "s"}.`;
-          const label = failed ? `${position}. ${downloadLabel[platform]}.` : last ? `${position}. ${more}` : position;
+          // "Live Photo" is the noun VoiceOver reads for an iris asset, and it is the only thing the
+          // badge says, so the name has to carry it or the badge is invisible without sight.
+          const named = image.livePhoto ? `Live Photo. ${position}` : position;
+          const label = failed ? `${named}. ${downloadLabel[platform]}.` : last ? `${named}. ${more}` : named;
           // A tile that cannot be fetched offers the fetch again, the way native's undownloaded
           // attachment does. Otherwise it opens the viewer, handing over its own box so the viewer can
           // grow out of this tile.
@@ -295,10 +450,11 @@ export function MessageImages({
             <>
               {failed ? (
                 // The placeholder the grid already paints, plus native's own copy for a photo it does
-                // not have. Type size is not measured.
+                // not have. `downloadFontSize` is `-[CKUIBehavior downloadButtonFont]`, 17 on both;
+                // the weight and the line height are not measured.
                 <span data-slot="photo-failed" aria-hidden="true"
-                  className="absolute inset-0 flex items-center justify-center px-[8px] text-center font-medium"
-                  style={{ fontSize: platform === "ios" ? 15 : 13, lineHeight: 1.2, color: "var(--im-incoming-text)" }}>
+                  className="absolute inset-0 flex items-center justify-center px-[8px] text-center"
+                  style={{ fontSize: downloadFontSize, lineHeight: 1.2, color: "var(--im-incoming-text)" }}>
                   {downloadLabel[platform]}
                 </span>
               ) : (
@@ -306,6 +462,15 @@ export function MessageImages({
                 <img key={attempt[image.src] ?? 0} src={image.src} data-src={image.src} data-tile={index} alt="" loading="lazy" decoding="async"
                   onLoad={measure} onError={measure}
                   className="h-full w-full object-cover" style={{ opacity: loading ? 0 : 1 }} />
+              )}
+              {/* Native puts the badge on the photo, not on the balloon, so a Live Photo in a group
+                  gets one per tile. Hidden while the tile is still on the placeholder: a badge over a
+                  gray square announces a photo that is not there yet. */}
+              {image.livePhoto && !failed && !loading && state === "ready" && (
+                <span data-slot="live-photo-badge" aria-hidden="true" className="pointer-events-none absolute"
+                  style={{ top: livePhotoBadge[platform].inset, left: livePhotoBadge[platform].inset }}>
+                  <LivePhotoGlyph platform={platform} />
+                </span>
               )}
               {last && (
                 <span aria-hidden="true" className="absolute inset-0 flex items-center justify-center font-semibold text-white"

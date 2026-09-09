@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
-  conversation, detailsCollapseTravel, frameAt, frameworkMotion, nativeMotion, scenarioRuns, scenarios,
-  unverifiedMotion, viewerPhotos, type Platform, type ScenarioId,
+  conversation, conversationList, detailsCollapseTravel, frameAt, frameworkMotion, nativeMotion,
+  scenarioRuns, scenarios, unverifiedMotion, viewerPhotos, type Platform, type ScenarioId,
 } from "../../harness/scenarios";
 
 const scenarioFor = (id: ScenarioId) => scenarios.find(scenario => scenario.id === id)!;
@@ -94,14 +94,20 @@ describe("scenario timelines", () => {
    * failure a screenshot suite cannot report cheaply: a scenario whose state was never threaded
    * through `frameAt`, so every checkpoint renders the same picture under a moving clock.
    *
-   * `typing` is the one exemption, and it is a real one: the dots are the component's own infinite
-   * CSS loop rather than a state this file states, so the scene is identical at every checkpoint and
-   * the harness pins the animation to the checkpoint's own time instead. Its duration is one full
-   * `typingLoopMs`, so its first and last frames *should* match. Nothing else may join this list
-   * without the same kind of reason.
+   * There are two exemptions and both are the same real reason: the surface's only motion is an
+   * infinite CSS loop the component owns, not a state this file states, so the scene is identical at
+   * every checkpoint and the harness pins the animation to the checkpoint's own time instead. Each
+   * runs exactly one turn of its loop, so its first and last frames *should* match.
+   *
+   * - `typing`: the dots, one full `typingLoopMs`.
+   * - `effect-invisible-ink`: the cover's specks, one full `im-ink-drift` (5200 ms). The bubble
+   *   itself does not move at all — `bubbleEffectDuration` is 0 for this effect — so there is no
+   *   second thing here that ought to have been threaded through `frameAt` and was not.
+   *
+   * Nothing else may join this list without the same kind of reason.
    */
   test("a timed scenario's first and last checkpoints are different frames", () => {
-    const componentClock = new Set(["typing"]);
+    const componentClock = new Set(["typing", "effect-invisible-ink"]);
     for (const scenario of scenarios) {
       if (!scenario.duration || componentClock.has(scenario.id)) continue;
       const start = JSON.stringify(frameAt(scenario.id, 0));
@@ -318,5 +324,208 @@ describe("the presented surfaces", () => {
     expect(after.group?.name).toBe("Design Crit");
     expect(before.messages.map(message => message.id)).not.toEqual(after.messages.map(message => message.id));
     expect(scenarioRuns("switch-conversation", "ios")).toBe(false);
+  });
+
+  /**
+   * iOS select mode. One `--ios-sel-t` drives the whole surface — the circles, the row shift, the ✕
+   * and the toolbar-for-composer swap — so the only thing a frame has to state is that one number
+   * and which messages are ticked.
+   */
+  test("select mode enters on its own timeline and leaves through it backwards", () => {
+    // Settled: the mode is on with no number handed to it, which is what "not seeking" means here.
+    expect(frameAt("select-mode", 0).selectMode).toEqual({ selected: ["m6"] });
+    expect(scenarioFor("select-mode-enter").duration).toBe(unverifiedMotion.selectModeEnter);
+    expect(scenarioFor("select-mode-exit").duration).toBe(unverifiedMotion.selectModeExit);
+    expect(frameAt("select-mode-enter", 0).selectMode).toEqual({ selected: ["m6"], progress: 0 });
+    expect(frameAt("select-mode-enter", 130).selectMode!.progress).toBeCloseTo(0.5, 6);
+    expect(frameAt("select-mode-enter", 260).selectMode!.progress).toBe(1);
+    // The exit counts the same table DOWN, and the mode is still stated at the far end: dropping it
+    // is what unmounts the surface, and an unmounted surface has no exit left to watch.
+    expect(frameAt("select-mode-exit", 0).selectMode).toEqual({ selected: ["m6"], progress: 1 });
+    expect(frameAt("select-mode-exit", 100).selectMode!.progress).toBeCloseTo(0.5, 6);
+    expect(frameAt("select-mode-exit", 200).selectMode).toEqual({ selected: ["m6"], progress: 0 });
+    // Exactly one message ticked in every frame of all three, which is the state the capture holds.
+    for (const id of ["select-mode", "select-mode-enter", "select-mode-exit"] as const) {
+      expect(frameAt(id, 0).selectMode!.selected).toEqual(["m6"]);
+      // A mode is an iOS idea. The Mac selects with a click and has nothing to enter.
+      expect(scenarioRuns(id, "macos")).toBe(false);
+      expect(frameAt(id, 0).selectedMessageIds).toBeUndefined();
+    }
+  });
+  /**
+   * The Mac's own selection, which is a different mechanism and not a mode: always on, clicked into.
+   * `select-all` is ⌘A — every message in display order, which is the one frame that puts the wash on
+   * an incoming row, an outgoing one, a cluster's middle and its tail at once.
+   */
+  test("the Mac selects by click and by ⌘A, and never enters a mode", () => {
+    expect(frameAt("selected-message", 0).selectedMessageIds).toEqual(["m3", "m5"]);
+    const all = frameAt("select-all", 0);
+    expect(all.selectedMessageIds).toEqual(all.messages.map(message => message.id));
+    expect(all.selectedMessageIds!.length).toBe(conversation.length);
+    for (const id of ["selected-message", "select-all"] as const) {
+      expect(scenarioRuns(id, "ios")).toBe(false);
+      expect(frameAt(id, 0).selectMode).toBeUndefined();
+    }
+  });
+  /**
+   * The two per-tile states a photo balloon can be in. Both are flags on the image rather than on the
+   * message, because native draws both on the photo: a group of four can hold one of each.
+   */
+  test("a photo group states its Live Photo and its undownloaded tile per tile", () => {
+    const tiles = frameAt("photo-states", 0).messages.find(message => message.id === "ph-states")!.images!;
+    expect(tiles).toHaveLength(4);
+    expect(tiles.filter(tile => tile.livePhoto)).toHaveLength(1);
+    expect(tiles.filter(tile => tile.pending)).toHaveLength(1);
+    // Never the same tile: a badge over a placeholder would announce a photo that is not there.
+    expect(tiles.some(tile => tile.livePhoto && tile.pending)).toBe(false);
+    // Two plain tiles to read the other two against, and the group is incoming, which is the ground
+    // the download label's `--im-incoming-text` is drawn for.
+    expect(tiles.filter(tile => !tile.livePhoto && !tile.pending)).toHaveLength(2);
+    expect(frameAt("photo-states", 0).messages.find(message => message.id === "ph-states")!.direction).toBe("incoming");
+    // The copy and the badge both differ by idiom, so this one runs on both shells.
+    expect(scenarioRuns("photo-states", "ios") && scenarioRuns("photo-states", "macos")).toBe(true);
+  });
+  /**
+   * The macOS sidebar's search now recolours the characters that matched, and only in the preview
+   * line — ChatKit annotates `summaryLabel` and never the name. The two scenarios are the two halves
+   * of that: "sam" matches a NAME (so its row shows no emphasis at all) and a group row's sender
+   * prefix; "ou" falls inside three previews, one of them the selected row's.
+   */
+  test("the sidebar's two search scenarios cover a name match and an in-word preview match", () => {
+    expect(frameAt("sidebar-search", 0).sidebarSearch).toBe("sam");
+    expect(frameAt("sidebar-search-match", 0).sidebarSearch).toBe("ou");
+    for (const id of ["sidebar-search", "sidebar-search-match"] as const) {
+      expect(frameAt(id, 0).screen).toBe("list");
+      expect(scenarioRuns(id, "ios")).toBe(false);
+      // Non-empty in both, which is what draws the ✕ that no capture holds.
+      expect(frameAt(id, 0).sidebarSearch!.length).toBeGreaterThan(0);
+    }
+    // "ou" has to be mid-word in the fixture previews or the scenario proves nothing about ranges.
+    const previews = conversationList.map(item => item.preview);
+    const inWord = previews.filter(preview => /\w ou|ou\w|\wou/i.test(preview) && /ou/i.test(preview));
+    expect(inWord.length).toBeGreaterThanOrEqual(3);
+    // And one of the rows it leaves standing must be the selected one, which is where the annotation
+    // takes the white the name takes. `alex` is what the preview selects for a non-group frame.
+    expect(conversationList.find(item => item.id === "alex")!.preview.toLowerCase()).toContain("ou");
+  });
+  /** The macOS inspector's participant row, which only a group has anybody to draw. */
+  test("the inspector on a group names the same three people the transcript does", () => {
+    const frame = frameAt("details-group", 0);
+    expect(frame.screen).toBe("details");
+    expect(frame.detailsPane).toEqual({ open: true, progress: 1 });
+    expect(frame.group).toEqual({ name: "Design Crit", participants: ["Alex Morgan", "Jamie Chen", "Sam Rivera"] });
+    // The one-to-one inspector is `details`, and it has nobody to list.
+    expect(frameAt("details", 0).group).toBeUndefined();
+    expect(scenarioRuns("details-group", "ios")).toBe(false);
+  });
+});
+
+/**
+ * The effects, which are the one group where the scenarios had been running invented durations.
+ * Every number here is either a row of `references/ios/motion/effects.md` (the three bubble effects)
+ * or the component's own unmeasured choice, named as such (the eight screen effects).
+ */
+describe("the effects", () => {
+  /**
+   * `bubbleEffectDuration` in `message-effects.tsx` is 640 / 1230 / 3000 / 0, measured off 60 fps
+   * recordings. The scenarios used to run 700 / 900 / 800 / 1200 — four numbers with nothing behind
+   * them — and Gentle's 800 was the one that mattered: the component animates for three seconds, so
+   * everything from the overshoot's hold onwards had no checkpoint on it.
+   */
+  test("the three bubble timelines run their measured durations", () => {
+    expect(nativeMotion.bubbleEffect).toEqual({ slam: 640, loud: 1230, gentle: 3000, "invisible-ink": 0 });
+    for (const kind of ["slam", "loud", "gentle"] as const) {
+      const scenario = scenarioFor(`effect-${kind}`);
+      expect(`${kind}: ${scenario.duration}`).toBe(`${kind}: ${nativeMotion.bubbleEffect[kind]}`);
+      expect(frameAt(`effect-${kind}`, 0).effect).toEqual({ id: "m6", progress: 0, bubble: kind });
+      expect(frameAt(`effect-${kind}`, scenario.duration).effect!.progress).toBe(1);
+      // Nothing past the end: a checkpoint over the duration would seek a frame that does not exist.
+      expect(frameAt(`effect-${kind}`, scenario.duration + 500).effect!.progress).toBe(1);
+    }
+  });
+  /**
+   * Each of these times is a row of the recording table, and the whole point of the re-timing is that
+   * a checkpoint now lands on one. Slam's 233 is its first unclipped frame and 300 is the slam
+   * itself; Loud's 450 is the 2.35 peak; Gentle's 533, 1250, 1983 and 2583 are the overshoot, the far
+   * end of the hold and the two samples of the long relaxation — all four unreachable at 800 ms.
+   */
+  test("every bubble checkpoint is a measured frame of the recording", () => {
+    const measured: Record<"slam" | "loud" | "gentle", number[]> = {
+      slam: [233, 267, 300, 467, 633],
+      loud: [83, 283, 450, 783, 1033, 1233],
+      gentle: [200, 533, 1250, 1983, 2583],
+    };
+    for (const kind of ["slam", "loud", "gentle"] as const) {
+      const scenario = scenarioFor(`effect-${kind}`);
+      // The settle is the one checkpoint that is the duration rather than a frame time: two of the
+      // three recordings run a frame or two past their own duration (Slam settles at 633, Gentle at
+      // 3083), and the scenario has to end on the duration, not on the recording's last frame.
+      const inner = scenario.checkpoints.slice(1, -1);
+      expect(`${kind}: ${inner.join(",")}`).toBe(`${kind}: ${inner.filter(time => measured[kind].includes(time)).join(",")}`);
+      expect(inner.length).toBeGreaterThanOrEqual(3);
+    }
+    // Gentle is the specific regression: the four inner checkpoints past the old 800 ms ceiling.
+    expect(scenarioFor("effect-gentle").checkpoints.filter(time => time > 800).length).toBeGreaterThanOrEqual(4);
+  });
+  /**
+   * Invisible Ink has no timeline of its own, so it states no fraction to seek. Its duration is one
+   * turn of the cover's `im-ink-drift` loop and the harness pins that loop to each checkpoint.
+   */
+  test("Invisible Ink is a state with a component clock, not a seekable curve", () => {
+    expect(nativeMotion.bubbleEffect["invisible-ink"]).toBe(0);
+    const scenario = scenarioFor("effect-invisible-ink");
+    expect(scenario.duration).toBe(unverifiedMotion.inkDrift);
+    for (const time of scenario.checkpoints) {
+      const frame = frameAt("effect-invisible-ink", time);
+      // Constant: nothing about the bubble moves, so nothing about the frame does either.
+      expect(frame.effect).toEqual({ id: "m6", progress: 1, bubble: "invisible-ink" });
+      // The message carries the marker, which is what makes the list draw the cover at all.
+      expect(frame.messages.find(message => message.id === "m6")!.effect).toBe("invisible-ink");
+    }
+  });
+  /**
+   * Eight screen effects, and until now only three of them had a scenario. The order is the Screen
+   * tab's own (`references/ios/motion/effects.md`: eight page dots, and swiping past the eighth goes
+   * nowhere), and every duration is `screenEffectDuration`'s.
+   */
+  test("all eight screen effects have a scenario at their own duration", () => {
+    const kinds = Object.keys(unverifiedMotion.screenEffect) as Array<keyof typeof unverifiedMotion.screenEffect>;
+    expect(kinds).toEqual(["echo", "spotlight", "balloons", "confetti", "love", "lasers", "fireworks", "celebration"]);
+    for (const kind of kinds) {
+      const scenario = scenarioFor(`effect-${kind}`);
+      const duration = unverifiedMotion.screenEffect[kind];
+      expect(`${kind}: ${scenario.duration}`).toBe(`${kind}: ${duration}`);
+      expect(frameAt(`effect-${kind}`, 0).effect).toEqual({ id: "m6", progress: 0, screen: kind });
+      expect(frameAt(`effect-${kind}`, duration / 2).effect!.progress).toBeCloseTo(0.5, 6);
+      expect(frameAt(`effect-${kind}`, duration).effect!.progress).toBe(1);
+      // A screen effect is a screen effect on both shells; neither is `only`.
+      expect(scenarioRuns(`effect-${kind}`, "ios") && scenarioRuns(`effect-${kind}`, "macos")).toBe(true);
+    }
+    // The scenario table lists them in the Screen tab's order, so the workbench's sidebar reads the
+    // way the phone's rail does.
+    const listed = scenarios.filter(scenario => scenario.group === "Effects" && kinds.some(kind => scenario.id === `effect-${kind}`));
+    expect(listed.map(scenario => String(scenario.id))).toEqual(kinds.map(kind => `effect-${kind}`));
+  });
+  /**
+   * Each screen effect brackets its own fullest pose — the fraction `screen-effects.tsx` paints and
+   * holds under `prefers-reduced-motion`. Nothing about these animations is measured, so this is the
+   * only claim the checkpoints can honestly make: they sample the effect at its peak rather than at
+   * an arbitrary third of a clock.
+   */
+  test("each screen effect has a checkpoint at the pose it holds under reduced motion", () => {
+    const fullest: Record<string, number> = {
+      echo: 0.5, spotlight: 0.5, balloons: 0.62, confetti: 0.5,
+      love: 0.55, lasers: 0.5, fireworks: 0.45, celebration: 0.5,
+    };
+    // The three that predate this pass keep the checkpoints their baselines were taken at, so they
+    // are held to the looser claim: a checkpoint within a tenth of the peak, not on it.
+    const preexisting = new Set(["confetti", "love", "fireworks"]);
+    for (const [kind, peak] of Object.entries(fullest)) {
+      const scenario = scenarioFor(`effect-${kind}` as ScenarioId);
+      const target = peak * scenario.duration;
+      const nearest = scenario.checkpoints.reduce((best, time) => (Math.abs(time - target) < Math.abs(best - target) ? time : best));
+      const tolerance = preexisting.has(kind) ? 0.1 * scenario.duration : 5;
+      expect(`${kind}: ${Math.abs(nearest - target) <= tolerance ? "brackets" : `${nearest} vs ${target}`}`).toBe(`${kind}: brackets`);
+    }
   });
 });

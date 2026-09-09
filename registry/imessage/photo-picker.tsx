@@ -487,6 +487,42 @@ export function PhotoPicker({
     scroller.current?.querySelector<HTMLButtonElement>(`[data-index="${index}"]`)?.focus();
   });
 
+  /**
+   * The panel takes the focus when it opens, not a tile and not the scroller.
+   *
+   * The picker is opened from the plus menu's Photos row, and that row unmounts in the same commit:
+   * measured with a held touch, the focus fell to `body`, the arrows did nothing, and the first two
+   * Tabs walked into the *composer behind the sheet* before they reached the grid. So the focus has
+   * to move here. It moves to the panel rather than to a tile because a tile focused programmatically
+   * while the finger is still down matches `:focus-visible` in Chrome and WebKit alike - the gesture
+   * has not resolved, so the modality is still the keyboard default - and paints a blue ring around a
+   * photo on a sheet the person opened by touch. The panel carries `outline-none`, so it paints
+   * nothing, and `onPanelKeyDown` sends the first arrow into the grid, where a ring is right.
+   *
+   * No Tab trap, unlike `sticker-picker.tsx`: this sheet is not modal. Native keeps the composer live
+   * underneath - it keeps its `+`, its placeholder and its mic - so Tab is allowed to leave.
+   */
+  useEffect(() => {
+    // A scrubbed entrance must not move the caret: the harness seeks frames, it does not open sheets.
+    if (!open || progress !== undefined) return;
+    panel.current?.focus({ preventScroll: true });
+  }, [open, progress]);
+
+  /**
+   * From the panel itself the first arrow enters the grid, at the roving tab stop, which is the tile
+   * the eye is on. Every arrow after that is the grid's own, below.
+   */
+  const onPanelKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) return;
+    if (!["ArrowRight", "ArrowLeft", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+    const index = event.key === "Home" ? 0 : event.key === "End" ? Math.max(0, filtered.length - 1) : tabStop;
+    const tile = scroller.current?.querySelector<HTMLButtonElement>(`[data-index="${index}"]`);
+    if (!tile) return;
+    event.preventDefault();
+    setActive(index);
+    tile.focus();
+  };
+
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     // Arrows only steer the grid from inside it. Focused on the scroller itself they scroll it,
     // which is the only way a keyboard reaches a row that is not next to the roving tile.
@@ -596,6 +632,15 @@ export function PhotoPicker({
       <span aria-hidden="true" className="pointer-events-none absolute flex" style={{ left: 10, top: (m.header.fieldHeight - 18.6667 * 0.72) / 2 }}>
         <SearchGlyph />
       </span>
+      {/*
+        No focus ring on the field, deliberately: the caret is a text field's focus indicator, and
+        iOS draws nothing else around this one. A field is also the case where the modality heuristic
+        does not help - both engines match `:focus-visible` on a text input however it was focused,
+        so a `focus-visible:outline` here would paint on every tap, not only on a keyboard's. The
+        classes that used to sit here painted nothing anyway, because `outline-none` on the same
+        element leaves `outline-style: none` for `focus-visible:outline-2` to widen; they read as a
+        ring that was meant to show, which is worse than not having them.
+      */}
       <input
         type="search"
         data-slot="photo-picker-search"
@@ -605,7 +650,7 @@ export function PhotoPicker({
           if (searchValue === undefined) setQuery(event.target.value);
           onSearchChange?.(event.target.value);
         }}
-        className="size-full bg-transparent outline-none placeholder:[color:var(--ios-pp-muted)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#0088ff] [&::-webkit-search-cancel-button]:appearance-none"
+        className="size-full bg-transparent outline-none placeholder:[color:var(--ios-pp-muted)] [&::-webkit-search-cancel-button]:appearance-none"
         style={{ paddingLeft: 34, paddingRight: 12, borderRadius: m.header.fieldRadius, fontSize: m.header.fieldSize, fontWeight: 500, color: "var(--ios-pp-label)" }}
       />
     </div>
@@ -618,7 +663,11 @@ export function PhotoPicker({
       data-state={open ? "open" : "closed"}
       data-detent={detent}
       data-dragging={drag ? "true" : "false"}
-      className={cn("ios-photo-picker absolute", vars, className)}
+      // A focus holder, not a control: `-1` keeps it out of the tab order while it can still hold
+      // the focus, and `outline-none` keeps it from painting on the frame `:focus-visible` matches.
+      tabIndex={-1}
+      onKeyDown={onPanelKeyDown}
+      className={cn("ios-photo-picker absolute outline-none", vars, className)}
       style={{
         // Left plus width, never left plus right: two fractional insets resolve independently and the
         // panel ends up a device pixel wider than the capture's 1174.

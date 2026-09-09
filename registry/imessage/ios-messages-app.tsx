@@ -32,6 +32,7 @@ import { GroupDetails } from "@/registry/imessage/group-details";
 import { TapbackDetailsPlatter, tapbackDetailsPlatterMetrics, type TapbackReactor } from "@/registry/imessage/tapback-details";
 import { IosSearch, type IosSearchResult, type IosSearchSection, type IosSearchSectionKind } from "@/registry/imessage/ios-search";
 import { GroupAvatar, groupAvatarMetrics, type GroupParticipant } from "@/registry/imessage/group-avatar";
+import { IosSelectMode, IosSelectionCloseButton, IosSelectionToolbar, SelectionCircle, selectModeMotion, selectionMetrics, useSelectModeTransition } from "@/registry/imessage/ios-select-mode";
 import type { SystemMessageEvent } from "@/registry/imessage/system-message";
 
 /**
@@ -141,6 +142,39 @@ export type IosMessagesAppProps = {
   onLongPressClose?: () => void;
   onTapback?: (id: string, selection: TapbackSelection) => void;
   onMenuAction?: (id: string, action: string) => void;
+  /**
+   * Select mode: the checkbox multi-select the long-press menu's "Select" row opens, drawn by
+   * `ios-select-mode.tsx` and measured on `select-mode-dark.png` — a circle in the leading gutter of
+   * every row, the nav bar's back button replaced by a ✕, and the composer replaced by the trash and
+   * forward toolbar.
+   *
+   * It follows the same two-mode contract as the presented surfaces below: left out entirely, the
+   * shell owns it and choosing "Select" enters it with nothing wired; passed (a value or `null`) the
+   * caller owns it and `progress` (0..1) seeks the entrance instead of playing it. Either way the
+   * caller still hears about the action through `onMenuAction(id, "select")`.
+   */
+  selectMode?: { progress?: number } | null;
+  /** "Select" was chosen on that message; it is also the message the mode opens with ticked. */
+  onOpenSelectMode?: (id: string) => void;
+  /** The ✕, Escape, or a toolbar action that ends the mode. The selection clears with it. */
+  onCloseSelectMode?: () => void;
+  /**
+   * The messages select mode has ticked — the same surface macOS takes for its click-to-select, so a
+   * caller keeps one selection state for both platforms. Left out, the shell keeps the set itself.
+   *
+   * `context.id` is the message the tap acted on, or `null` when the whole selection was cleared.
+   * There is no `shiftKey`/`metaKey` here as there is on the Mac: a tap on a phone carries no
+   * modifier, so a tap toggles exactly one message and nothing extends a range.
+   */
+  selectedMessageIds?: readonly string[];
+  onSelectMessage?: (ids: string[], context: { id: string | null }) => void;
+  /**
+   * The toolbar's trash and forward, on the ticked messages. Neither one touches `messages`: this
+   * shell still only draws state. Deleting leaves select mode, the way it does natively; forwarding
+   * does not, because the sheet it would open is not in this registry to open.
+   */
+  onDeleteMessages?: (ids: string[]) => void;
+  onForwardMessages?: (ids: string[]) => void;
   /**
    * The "Send with effect" screen. iOS opens it on a press and hold of the send button, which is what
    * `onEffectsPickerOpen` reports; pass the state back here to show it.
@@ -335,6 +369,48 @@ const photoPickerComposerTop = 424;
 /** The value a surface with no state of its own takes while it is open. One object, so it is stable. */
 const openMarker: { progress?: number; scroll?: number } = {};
 
+/**
+ * How far an incoming row steps out of the selection circles' way. **DERIVED from ChatKit, not
+ * measured**: `select-mode-dark.png` is one side of an SMS thread, so the only rows it shows are
+ * outgoing ones, and those do not move at all in it — which is why nothing here shifts them, and why
+ * `MessageSelectionRow`'s own `shift` defaults to 0.
+ *
+ * `-[CKUIBehaviorPhone editingCheckmarkLeadingPadding]` is 11 and `editingCheckmarkTrailingPadding`
+ * is 20, around a `transcriptEditingUnselectedImage` (SF Symbol `circle`, tertiaryLabelColor) whose
+ * box is 26×26 with 2 pt of content inset on every edge. That puts the ink of the circle at x 13 at
+ * Ø22 — the capture's own 13.0 and Ø21.667, which is 65/3 at 3x, so the two describe one circle —
+ * and the content after it at 11 + 26 + 20 = 57. A balloon already begins at `edgeInset`, so an
+ * incoming row owes the difference.
+ *
+ * The log's own content box is deliberately left alone: widening its leading padding to 57 would
+ * narrow `maxWidthRatio`'s 280.33 to 251.7 and rewrap the capture's long outgoing bubble, which the
+ * capture disproves.
+ */
+const selectModeRowShift = 11 + 26 + 20 - bubbleMetrics.ios.edgeInset;
+
+/**
+ * The rules select mode adds to the conversation layer, all of them driven by `--ios-sel-t` so they
+ * ride `IosSelectMode`'s one timeline rather than a second one.
+ *
+ * The composer is dropped by a rule instead of being handed to `IosSelectionToolbar`'s `composer`
+ * slot: moving it into that slot would move it in the React tree, and remounting `IosComposer` loses
+ * an uncontrolled draft. The travel is the slot's own — a whole height down, the fade spent in the
+ * first 40% — so the two still cross the same way.
+ */
+function selectModeRules(timing: string) {
+  const move = timing ? `transform ${timing}, opacity ${timing}` : "none";
+  const fade = timing ? `opacity ${timing}` : "none";
+  const scope = '[data-slot="ios-select-mode"] ';
+  return [
+    `${scope}[data-slot="ios-composer"]{transform:translateY(calc(var(--ios-sel-t) * 100%));opacity:max(0, 1 - var(--ios-sel-t) * 2.5);transition:${move}}`,
+    // `select-mode-dark.png` carries no delivery label under its last bubble where every other
+    // capture of the same thread does. Fading rather than hiding it moves nothing either way: the
+    // label is the last thing in a top-anchored log.
+    `${scope}[data-slot="message-row"] [data-slot="status"]{opacity:calc(1 - var(--ios-sel-t));transition:${fade}}`,
+    `${scope}[data-slot="message-row"][data-direction="incoming"]{transform:translateX(calc(var(--ios-sel-t) * ${selectModeRowShift}px));transition:${move}}`,
+  ].join("");
+}
+
 /** `CSS.escape` is browser-only and this file renders on the server too. */
 function cssEscape(value: string): string {
   return typeof CSS !== "undefined" && CSS.escape ? CSS.escape(value) : value.replace(/["\\]/g, "\\$&");
@@ -456,7 +532,8 @@ function reactorsOf(message: Message | undefined, contactName: string): TapbackR
 /**
  * The whole iOS 26 Messages app in a 402×874 frame: status bar, the conversation list, the
  * conversation screen (nav bar, message log, composer), the New Message sheet, and every surface
- * those reach — the long-press overlay, the effects screen, a reply thread, the `+` menu and the
+ * those reach — the long-press overlay and the select mode its "Select" row opens, the effects
+ * screen, a reply thread, the `+` menu and the
  * Photos picker, sticker sheet and voice recorder it opens, the details screen (`GroupDetails` for
  * a group, `IosDetails` for one person), the Tapback Details platter, search over the list, and the
  * full-screen photo viewer.
@@ -473,6 +550,7 @@ export function IosMessagesApp({
   thread, onOpenThread, onCloseThread,
   sendAnimation, receiveAnimation, onSendAnimationEnd,
   longPress, onLongPress, onLongPressClose, onTapback, onMenuAction,
+  selectMode, onOpenSelectMode, onCloseSelectMode, selectedMessageIds, onSelectMessage, onDeleteMessages, onForwardMessages,
   effectsPicker, onEffectsPickerOpen, onEffectsTabChange, onEffectSelect, onSendWithEffect, onEffectsPickerClose,
   plusMenu, onPlusMenuSelect, onPlusMenuClose, plusMenuItems = defaultPlusMenuItems,
   photoViewer, onOpenPhoto, onPhotoIndexChange, onClosePhoto, onSharePhoto, onSavePhoto,
@@ -723,6 +801,40 @@ export function IosMessagesApp({
   // balloon is the thing the platter is about, so its own top is what anchors it.
   const platterTop = useFrameTop(frame, reactedId && `[data-message-id="${cssEscape(reactedId)}"] [data-slot="tapback"]`);
 
+  const [ownSelectMode, setOwnSelectMode] = useState(false);
+  const selectValue = selectMode === undefined ? (ownSelectMode ? openMarker : null) : selectMode;
+  const selecting = selectValue !== null;
+  const selectLatch = useExit(selecting ? "open" : null);
+  // Mounted while the mode is open or playing its exit, and never over another screen.
+  const selectShown = selectLatch.mounted !== null && showConversation;
+  // The same timeline as the `IosSelectMode` below, for the two things that are not select-mode
+  // components: the rules that drop the composer and step the incoming rows aside.
+  const selectTransition = useSelectModeTransition({ active: selecting, progress: selectValue?.progress });
+  const [ownSelected, setOwnSelected] = useState<readonly string[]>([]);
+  const selectedIds = selectedMessageIds ?? ownSelected;
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  /** Selection is the caller's if it owns it and the shell's otherwise; both are told either way. */
+  const changeSelection = (ids: string[], id: string | null) => {
+    setOwnSelected(ids);
+    onSelectMessage?.(ids, { id });
+  };
+  const toggleSelected = (id: string) => changeSelection(selectedSet.has(id) ? selectedIds.filter(entry => entry !== id) : [...selectedIds, id], id);
+  const closeSelectMode = () => {
+    setOwnSelectMode(false);
+    changeSelection([], null);
+    onCloseSelectMode?.();
+  };
+  /**
+   * "Select" on a message: the menu folds away and the mode opens with that message already ticked,
+   * which is the one state `select-mode-dark.png` shows — exactly one circle filled.
+   */
+  const openSelectMode = (id: string) => {
+    setOwnSelectMode(true);
+    changeSelection([id], id);
+    onLongPressClose?.();
+    onOpenSelectMode?.(id);
+  };
+
   const [ownSearch, setOwnSearch] = useState<NonNullable<IosMessagesAppProps["search"]> | null>(null);
   const searchValue = search === undefined ? ownSearch : search;
   const searchLatch = useExit(searchValue ? "open" : null);
@@ -840,9 +952,22 @@ export function IosMessagesApp({
         )}
         {showConversation && (
           <div ref={conversationLayer} data-slot="screen-conversation" className="absolute inset-0" style={{ pointerEvents: screen === "conversation" ? undefined : "none" }}>
+            {/* Select mode wraps the whole screen rather than being mounted beside it: it generates
+                no box (`display: contents`), it publishes the one `--ios-sel-t` every piece below
+                animates off, and it is what cross-fades the nav bar's back button out. It stays
+                wrapped whether or not the mode is on, because moving the log in or out of it would
+                remount `MessageList` and lose the scroll position. */}
+            <IosSelectMode active={selecting} progress={selectValue?.progress} onExited={selectLatch.exited}>
+            {selectShown && <style>{selectModeRules(selectTransition.timing)}</style>}
             <MessageList ref={list} frameRef={frame} messages={messages} typing={typing} group={isGroup} now={now} anchor="top"
               insetTop={iosScreen.listTop} insetBottom={listBottom} renderReactions={renderReactions} messageActions={Boolean(onLongPress)}
               onOpenThread={onOpenThread} onOpenImage={openPhoto} systemArrival={systemArrival} className="absolute inset-0" />
+            {/* Over the log and under the nav bar, so a circle scrolled up behind the bar is covered
+                by it the way the bubbles are. */}
+            {selectShown && (
+              <SelectionCircleLayer frame={frame} messages={messages} selected={selectedSet} onToggle={toggleSelected}
+                active={selecting} progress={selectValue?.progress} />
+            )}
             {/* Stickers that were let go over the transcript, at the pose `onPlace` settled on: root
                 coordinates, ChatKit's landed Ø48 and the angle the drop finished at, so the ghost
                 unmounting is invisible. They sit over the log rather than inside a bubble, because
@@ -885,6 +1010,9 @@ export function IosMessagesApp({
                 onSend={take => { onAudioSend?.(take); setOwnRecorder(null); onAudioRecorderClose?.(); }} />
             ) : (
               <IosComposer className={cn("absolute left-0", !pickerUp && "bottom-0")} style={pickerUp ? { top: photoPickerComposerTop } : undefined}
+                // Dropped by `selectModeRules`, not unmounted: it has to be on screen to be seen
+                // leaving. `inert` once it has, so the toolbar over it is the only thing reachable.
+                inert={(selecting && selectTransition.t > 0.5) || undefined}
                 value={composer?.value} placeholder={composer?.placeholder} disabled={composer?.disabled}
                 onChange={composer?.onChange} onSend={composer?.onSend}
                 attachExpanded={plusLatch.open}
@@ -920,7 +1048,9 @@ export function IosMessagesApp({
                 progress={photoPickerValue?.progress}
                 onExited={() => { photoPickerLatch.exited(); onPhotoPickerClose?.(); }} />
             )}
-            {onLongPress && <LongPressLayer frame={frame} onLongPress={onLongPress} />}
+            {/* No holding a message while selecting: in select mode every gesture on the log is the
+                tick, which is what `SelectionCircleLayer`'s own capture-phase click does. */}
+            {onLongPress && !selecting && <LongPressLayer frame={frame} onLongPress={onLongPress} />}
             {/* `-[CKUIBehavior canTapAssociatedAcknowledgment]` is 1: the balloon is a tap target, and
                 the tap opens the platter. Delegated on the log, in the bubble phase, so it lands
                 before React's own root listener and the same click cannot also open a thread. */}
@@ -934,6 +1064,17 @@ export function IosMessagesApp({
                 }}
               />
             )}
+            {/* Last in the layer, so the ✕ sits over the nav bar it replaces the back button in and
+                the toolbar over the composer it drops. Escape is the close button's own. */}
+            {selectShown && (
+              <>
+                <IosSelectionCloseButton onClose={closeSelectMode} />
+                <IosSelectionToolbar count={selectedIds.length}
+                  onDelete={() => { onDeleteMessages?.([...selectedIds]); closeSelectMode(); }}
+                  onForward={() => onForwardMessages?.([...selectedIds])} />
+              </>
+            )}
+            </IosSelectMode>
           </div>
         )}
         {/* The attachments sheet, over the composer it grows out of. It draws no composer of its own
@@ -1039,7 +1180,11 @@ export function IosMessagesApp({
             // give: an emoji-only message, a photo, a link card and a file card all take the plain glass.
             wash={liftsABubble(overlayMessage) ? undefined : null}
             selected={overlayMessage.reactions?.find(r => r.byMe) ? (overlayMessage.reactions.find(r => r.byMe)!.emoji ? { emoji: overlayMessage.reactions.find(r => r.byMe)!.emoji! } : { type: overlayMessage.reactions.find(r => r.byMe)!.type as TapbackType }) : undefined}
-            onSelect={selection => onTapback?.(overlayMessage.id, selection)} onAction={action => onMenuAction?.(overlayMessage.id, action)} onClose={onLongPressClose}>
+            onSelect={selection => onTapback?.(overlayMessage.id, selection)}
+            // "Select" is the one row the shell answers itself, so the mode is reachable with
+            // nothing wired; the caller still hears the action, as it does for every other row.
+            onAction={action => { if (action === "select") openSelectMode(overlayMessage.id); onMenuAction?.(overlayMessage.id, action); }}
+            onClose={onLongPressClose}>
             <LiftedMessage message={overlayMessage} tail={pressedBody.tail} screenBottom={pressedBody.rect.y + pressedBody.rect.height} />
           </MessageActions>
         )}
@@ -1243,6 +1388,121 @@ function TapbackTapLayer({ frame, onOpen }: { frame: RefObject<HTMLDivElement | 
     return () => log.removeEventListener("click", onClick);
   }, [frame]);
   return null;
+}
+
+/**
+ * The leading gutter of selection circles, over the log, plus the tap that ticks a row.
+ *
+ * `MessageSelectionRow` is one of these rows written the other way round, and every number here is
+ * its number: `MessageList` builds its own rows and takes no per-row wrapper, so the shell cannot
+ * wrap one, and a second log to wrap would be a second log. The geometry all comes from
+ * `selectionMetrics` and `selectModeMotion`, so the overlay and the row component stay one
+ * measurement rather than two.
+ *
+ * A circle is centred on the message **body**, not on the row — `MessageSelectionRow` explains why: a
+ * reaction balloon adds headroom above the body and a status line a row of type below it, and the
+ * capture moves the circle for neither. The reacted "Ok" bubble is where that shows: its body runs
+ * y 552.67–592.33 and the capture's circle is centred on 572.33, the body's centre, 13.83 below the
+ * row's.
+ *
+ * Positions are read in the log's own **content** coordinates (the body's box plus `scrollTop`), so
+ * scrolling only writes this layer's transform and never re-measures.
+ */
+function SelectionCircleLayer({ frame, messages, selected, onToggle, active, progress }: {
+  frame: RefObject<HTMLDivElement | null>;
+  messages: Message[];
+  selected: ReadonlySet<string>;
+  onToggle: (id: string) => void;
+  active: boolean;
+  progress?: number;
+}) {
+  // The same timeline `IosSelectMode` is running around this layer. Both are pure functions of
+  // `active` and `progress`, so the two calls cannot disagree; the context that would have carried
+  // it is private to `ios-select-mode.tsx`.
+  const transition = useSelectModeTransition({ active, progress });
+  const arrived = transition.t > 0.5;
+  const [spots, setSpots] = useState<{ id: string; y: number }[]>([]);
+  const track = useRef<HTMLDivElement>(null);
+  const latest = useRef(onToggle);
+  useEffect(() => { latest.current = onToggle; }, [onToggle]);
+
+  // A passive effect, not a layout one, for `LongPressLayer`'s reason: React attaches a child's ref
+  // before its ancestors', so `frame.current` is still null while this layer's own layout effect
+  // runs and the log would never be found. The circles start at opacity 0 either way.
+  useEffect(() => {
+    const log = frame.current?.querySelector<HTMLElement>('[data-slot="message-list"]');
+    if (!log) return;
+    let raf = 0;
+    const follow = () => { if (track.current) track.current.style.transform = `translateY(${-log.scrollTop}px)`; };
+    const measure = () => {
+      // The content's own origin: where row 0 would sit however far the log is scrolled.
+      const origin = log.getBoundingClientRect().top - log.scrollTop;
+      const next = Array.from(log.querySelectorAll<HTMLElement>('[data-slot="message-row"][data-message-id]')).map(row => {
+        // Every body this message drew, minus anything inside its quoted stub — a file message can
+        // carry several cards, and the circle belongs on the middle of all of them.
+        const boxes = Array.from(row.querySelectorAll<HTMLElement>(messageBodySelector))
+          .filter(element => !insideQuotedStub(element)).map(element => element.getBoundingClientRect());
+        const top = boxes.length ? Math.min(...boxes.map(box => box.top)) : row.getBoundingClientRect().top;
+        const bottom = boxes.length ? Math.max(...boxes.map(box => box.bottom)) : row.getBoundingClientRect().bottom;
+        return { id: row.getAttribute("data-message-id")!, y: (top + bottom) / 2 - origin };
+      });
+      setSpots(current => (current.length === next.length && current.every((spot, index) => spot.id === next[index].id && Math.abs(spot.y - next[index].y) < 0.5) ? current : next));
+      follow();
+    };
+    const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measure); };
+    measure();
+    const observer = new ResizeObserver(schedule);
+    observer.observe(log);
+    const content = log.querySelector('[data-slot="message-list-content"]');
+    if (content) observer.observe(content);
+    log.addEventListener("scroll", follow, { passive: true });
+    document.fonts?.ready.then(schedule).catch(() => {});
+    return () => { observer.disconnect(); cancelAnimationFrame(raf); log.removeEventListener("scroll", follow); };
+  }, [frame, messages]);
+
+  // A tap anywhere on a row ticks it, which is what select mode does to every other gesture on the
+  // log. Bound in the capture phase so it lands before the tapback balloon's own delegated click and
+  // before the row's tap-to-open-a-thread, and stopped there so neither of them also runs.
+  useEffect(() => {
+    if (!active) return;
+    const log = frame.current?.querySelector<HTMLElement>('[data-slot="message-list"]');
+    if (!log) return;
+    const onClick = (event: MouseEvent) => {
+      const id = (event.target as HTMLElement | null)?.closest?.("[data-message-id]")?.getAttribute("data-message-id");
+      if (!id) return;
+      event.preventDefault();
+      event.stopPropagation();
+      latest.current(id);
+    };
+    log.addEventListener("click", onClick, true);
+    return () => log.removeEventListener("click", onClick, true);
+  }, [frame, active]);
+
+  const size = selectionMetrics.circleSize;
+  const labels = useMemo(() => new Map(messages.map(message => [message.id, message.text])), [messages]);
+  return (
+    // Clipped to the log's own box so a circle scrolled past the top edge is not painted over the
+    // date header's inset; the nav bar comes later in the document and covers the rest.
+    <div data-slot="ios-selection-circles" className="pointer-events-none absolute inset-0 overflow-hidden">
+      <div ref={track} className="absolute left-0 top-0 w-full" inert={!arrived}>
+        {spots.map(spot => (
+          // `flex` keeps the wrapper exactly as tall as the circle, the same reason
+          // `MessageSelectionRow` gives: an inline box would add leading and pull the centre up.
+          <span key={spot.id} className="absolute flex"
+            style={{
+              left: selectionMetrics.circleCenterX - size / 2,
+              top: spot.y - size / 2,
+              transform: `translateX(calc((var(--ios-sel-t) - 1) * ${selectModeMotion.circleSlide}px))`,
+              opacity: "var(--ios-sel-t)",
+              transition: transition.timing ? `transform ${transition.timing}, opacity ${transition.timing}` : undefined,
+              pointerEvents: arrived ? "auto" : "none",
+            }}>
+            <SelectionCircle selected={selected.has(spot.id)} onChange={() => latest.current(spot.id)} label={labels.get(spot.id)} />
+          </span>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 /** Turns a long press (or right-click / double-click) on any bubble in the frame into `onLongPress(id)`. */

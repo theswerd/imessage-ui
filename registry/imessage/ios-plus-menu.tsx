@@ -428,14 +428,46 @@ export function IosPlusMenu({ items = defaultPlusMenuItems, progress, open = tru
     return () => document.removeEventListener("keydown", onKey);
   }, [open, onDismiss]);
 
+  /**
+   * The sheet takes the focus when it opens, not its first row.
+   *
+   * Two things are wrong with leaving it where it was. The row that opened this menu is the
+   * composer's `+`, and the keyboard sits on it behind an open menu: measured with a held touch,
+   * the focus was on `body` and every arrow key did nothing, so the menu was unreachable without
+   * Tab. And a row focused programmatically while the finger that opened the menu is still down
+   * matches `:focus-visible` in Chrome and WebKit alike - the gesture has not resolved, so the
+   * modality is still the keyboard default - and paints a ring on a menu opened by touch. The
+   * container takes no ring because it carries `outline-none`, `onKeyDown` below is on this element
+   * so every key still arrives, and the first arrow moves to a row, where a ring is right because
+   * by then the person really is on the keyboard. See `tapback-bar.tsx` and `macos-plus-menu.tsx`.
+   *
+   * Latched, and gated on `t`: the sheet is `visibility: hidden` until the spring leaves 0, and
+   * focusing a hidden element is a no-op. A scrubbed entrance never focuses at all - the harness
+   * seeks frames, it does not open menus.
+   */
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!open) { focused.current = false; return; }
+    if (progress !== undefined || focused.current || t <= 0) return;
+    focused.current = true;
+    sheet.current?.focus({ preventScroll: true });
+  }, [open, progress, t]);
+
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
     const rows = Array.from(sheet.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []);
     if (!rows.length) return;
     event.preventDefault();
+    // -1 while the focus is still on the sheet itself, which is where it starts: Down has to reach
+    // the first row and Up the last. Wrapping arithmetic on `focusIndex` reaches neither - it would
+    // step off row 0 to row 1 and skip the row the eye starts on.
     const from = rows.indexOf(document.activeElement as HTMLButtonElement);
-    const current = from < 0 ? focusIndex : from;
-    const next = event.key === "Home" ? 0 : event.key === "End" ? rows.length - 1 : event.key === "ArrowDown" ? (current + 1) % rows.length : (current - 1 + rows.length) % rows.length;
+    const last = rows.length - 1;
+    const next = event.key === "Home" ? 0
+      : event.key === "End" ? last
+      : from < 0 ? (event.key === "ArrowDown" ? 0 : last)
+      : event.key === "ArrowDown" ? (from + 1) % rows.length
+      : (from - 1 + rows.length) % rows.length;
     setFocusIndex(next);
     rows[next]?.focus();
   }
@@ -483,7 +515,10 @@ export function IosPlusMenu({ items = defaultPlusMenuItems, progress, open = tru
           className="pointer-events-auto absolute cursor-default bg-transparent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff]"
           style={{ left: fromLeft, top: fromTop, width: from.size, height: from.size, borderRadius: from.size / 2 }} />
       )}
-      <div ref={sheet} data-slot="sheet" role="menu" aria-label="Attachments" onKeyDown={onKeyDown} className="absolute overflow-hidden"
+      {/* `tabIndex={-1}` so the sheet can hold the focus without joining the tab order, and
+          `outline-none` because it is a focus holder rather than a control: it must paint nothing
+          even on the frame where `:focus-visible` matches it. */}
+      <div ref={sheet} data-slot="sheet" role="menu" aria-label="Attachments" tabIndex={-1} onKeyDown={onKeyDown} className="absolute overflow-hidden outline-none"
         style={{
           left: box.left, top: box.top, width: box.width, height: box.height, borderRadius: box.radius, ...continuous,
           background: `rgb(var(--ios-pm-glass) / calc(${(1 - glass).toFixed(4)} * ${mo.buttonAlpha} + ${glass.toFixed(4)} * var(--ios-pm-alpha)))`,

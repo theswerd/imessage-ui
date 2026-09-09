@@ -334,6 +334,12 @@ test("the conversation list shows every fixture conversation and its controls", 
 });
 
 test("scenes render without an uncaught page error", async ({ page }, info) => {
+  // Seven navigations where every other test in this file makes one, so give it the room. Measured
+  // 2026-09-09: served from a build every navigation here settles in under a second and the whole
+  // file runs in 23 s, but against the dev server two engines navigating at once can leave a single
+  // /harness document request in flight for 15-20 s, and this test - the only one that pays that
+  // cost seven times over - is the one that runs out of budget. Prefer `serve:test` for a full run.
+  test.slow();
   for (const scene of ["conversation", "list", "new-message", "typing", "reactions", "long-press"]) {
     await openScene(page, info, scene, 0);
     await expect(page.getByTestId("device")).toBeVisible();

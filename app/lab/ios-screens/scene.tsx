@@ -6,7 +6,9 @@ import { IosComposer } from "@/registry/imessage/ios-composer";
 import { IosDetails } from "@/registry/imessage/ios-details";
 import { IosNavBar } from "@/registry/imessage/ios-nav-bar";
 import { IosPlusMenu, PhotoPickerGrid } from "@/registry/imessage/ios-plus-menu";
+import { IosMessagesApp } from "@/registry/imessage/ios-messages-app";
 import { IosSelectionCloseButton, IosSelectionToolbar, MessageSelectionRow } from "@/registry/imessage/ios-select-mode";
+import type { Message } from "@/registry/imessage/message-list";
 import { IosStatusBar } from "@/registry/imessage/ios-status-bar";
 import { SwipeTimes, useSwipeToRevealTimes } from "@/registry/imessage/ios-swipe-times";
 import { FailedSendBadge, NotDelivered, UnknownSenderNotice } from "@/registry/imessage/ios-notices";
@@ -16,7 +18,7 @@ import { PlatformProvider } from "@/registry/imessage/platform";
 import { Tapback } from "@/registry/imessage/tapback";
 import { palettes, paletteVars } from "@/registry/imessage/tokens";
 
-export type ScreenScene = "details" | "plus-menu" | "select-mode" | "swipe-times" | "notice" | "attachment" | "photo-picker";
+export type ScreenScene = "details" | "plus-menu" | "select-mode" | "select-mode-app" | "swipe-times" | "notice" | "attachment" | "photo-picker";
 
 /** Fixture strings taken verbatim from the captures so the pixel diff compares like with like. */
 const LONG = "It’s all in the little details. ✨ A longer message should wrap naturally without stretching the conversation.";
@@ -37,6 +39,41 @@ const thread: Row[] = [
 
 const GAP_IN = 4.3333;
 const GAP_BETWEEN = 10.3333;
+
+/**
+ * The same eight messages as `thread`, as `IosMessagesApp` wants them, for the `select-mode-app`
+ * scene: the shell's own select mode over the shell's own log, against the capture the hand-built
+ * `select-mode` scene reconstructs.
+ *
+ * Every gap and every tail is forced rather than derived. `buildRows` would put 10.2 between
+ * clusters where the capture reads 10.3333, and its cluster rule keys on the minute a message was
+ * sent, which is a second fixture to get right for no gain; `gapBefore` and `tail` exist for exactly
+ * this — reproducing a capture.
+ *
+ * One difference is not reproducible from here and is left standing: an all-SMS thread makes
+ * `MessageList` label the first date header "Text Message" where the capture says "iMessage", and
+ * the shell exposes no `serviceLabel`. It is one centred word inside the header band, and the band
+ * is measured on its own so the number it costs is visible rather than folded into the total.
+ */
+const DAY_START = new Date("2026-09-08T00:00:00").getTime();
+/** "1:25 AM" (with the capture's narrow no-break space) to a clock on `DAY_START`. Every one is AM. */
+function sentAtOf(time: string) {
+  const [hours, minutes] = time.replace(NNBSP, " ").replace(" AM", "").split(":").map(Number);
+  return DAY_START + ((hours % 12) * 60 + minutes) * 60_000;
+}
+/** The clock the app scene reads "Today" against: three hours into the same day, as the capture's 3:16 is. */
+const APP_NOW = DAY_START + 3 * 60 * 60_000 + 16 * 60_000;
+const appThread: Message[] = thread.map((row, index) => ({
+  id: row.id,
+  text: row.text,
+  direction: "outgoing",
+  service: "sms",
+  sentAt: sentAtOf(row.time),
+  tail: row.tail ?? false,
+  gapBefore: gapFor(row, index),
+  status: row.status === "Delivered" ? "delivered" : undefined,
+  reactions: row.tapback ? [{ type: "love", byMe: true }] : undefined,
+}));
 /** The tapback balloon pushes its bubble down by 28 (SPEC.md); MessageBubble adds that itself. */
 
 function gapFor(row: Row, index: number) {
@@ -88,6 +125,11 @@ function Header({ service = "iMessage", firstTop = 205 }: { service?: string; fi
 
 export function IosScreensScene({ scene, theme, progress, live = false }: { scene: ScreenScene; theme: "light" | "dark"; progress?: number; live?: boolean }) {
   const [selected, setSelected] = useState<Record<string, boolean>>({ hi: true });
+  // The app scene's select mode is stated rather than shell-owned, so its first painted frame is the
+  // capture's — one message ticked — and the ✕ and the circles still work when it is opened by hand.
+  const [appSelecting, setAppSelecting] = useState(true);
+  const [appSelected, setAppSelected] = useState<string[]>(["hi"]);
+  const [appLongPress, setAppLongPress] = useState<{ id: string } | null>(null);
   const [hideAlerts, setHideAlerts] = useState(false);
   // `?progress=live` drops the controlled value so the drag, spring and keyboard path run for real.
   const swipe = useSwipeToRevealTimes({ progress: live ? undefined : (progress ?? 1) });
@@ -171,6 +213,31 @@ export function IosScreensScene({ scene, theme, progress, live = false }: { scen
           <IosSelectionToolbar count={Object.values(selected).filter(Boolean).length} />
         </div>
       </PlatformProvider>
+    );
+  }
+
+  // The same capture, reached the way an application reaches it: `IosMessagesApp`'s own select mode
+  // over `IosMessagesApp`'s own log, rather than the hand-placed reconstruction above. The scene
+  // above is the fit; this one is the proof that the shell lands on the same place.
+  if (scene === "select-mode-app") {
+    return (
+      <div data-testid="lab" className={theme}>
+        <IosMessagesApp
+          time="3:16"
+          contact={{ name: "+1 (888) 555-1212", initials: "JA" }}
+          messages={appThread}
+          now={APP_NOW}
+          // `?progress=live` leaves `selectMode` out entirely, which hands it to the shell and makes
+          // the mode reachable the way an application reaches it: hold a bubble, choose Select.
+          // Otherwise it is stated and settled, so the frame is a pure function of the URL.
+          longPress={live ? appLongPress : undefined}
+          onLongPress={live ? (id => setAppLongPress({ id })) : undefined}
+          onLongPressClose={live ? (() => setAppLongPress(null)) : undefined}
+          selectMode={live ? undefined : (appSelecting ? { progress: progress ?? 1 } : null)}
+          onCloseSelectMode={() => setAppSelecting(false)}
+          selectedMessageIds={appSelected}
+          onSelectMessage={ids => setAppSelected(ids)} />
+      </div>
     );
   }
 

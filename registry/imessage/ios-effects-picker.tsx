@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentProps, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { fontStack } from "@/registry/imessage/tokens";
 import { InvisibleInk, bubbleEffects, screenEffects, type BubbleEffectKind, type ScreenEffectKind } from "@/registry/imessage/message-effects";
@@ -207,11 +207,53 @@ export function IosEffectsPicker({
    * The screen is modal, so it takes focus when it opens (a scrubbed entrance does not: the harness
    * seeks frames and must not move the caret) and gives Escape back wherever focus happens to be.
    * The root carries `outline-none`: it is a focus holder, not a control, and must paint nothing.
+   *
+   * The root, and not the rail's first effect, because iOS opens this screen on a press and hold of
+   * the send button - the finger is still down at the moment the focus moves. A control focused
+   * programmatically then matches `:focus-visible` in Chrome and WebKit alike, since the gesture has
+   * not resolved and the modality is still the keyboard default, and a blue ring lands on a rail dot
+   * in a screen the captures show ringless. `onRootKeyDown` below is what pays for holding it here:
+   * the first arrow moves into the rail, where a ring is right. See `tapback-bar.tsx`.
    */
   useEffect(() => {
     if (!open || progress !== undefined) return;
     root.current?.focus({ preventScroll: true });
   }, [open, progress]);
+
+  /**
+   * Two jobs the root has to do because the root is where the focus starts.
+   *
+   * Tab: `aria-modal` promises the rest of the page is inert, so Tab has to stay inside. Measured
+   * without this, the second Tab was already out of the screen and into the page behind it.
+   *
+   * The arrows: from the root itself the first one enters the rail at whatever is chosen (or its
+   * first effect), and every arrow after that is the rail's own radio-group behaviour. On the Screen
+   * tab there is no rail, so the arrows belong to the tab strip and this hands them to it.
+   */
+  function onRootKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const node = root.current;
+    if (!node) return;
+    if (event.key === "Tab") {
+      const stops = Array.from(node.querySelectorAll<HTMLElement>('button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'))
+        .filter(element => element.offsetParent !== null);
+      if (!stops.length) return;
+      const first = stops[0];
+      const last = stops[stops.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || active === node)) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && active === last) { event.preventDefault(); first.focus(); }
+      return;
+    }
+    if (event.target !== node) return;
+    if (!["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const radios = Array.from(node.querySelectorAll<HTMLButtonElement>('[role="radio"]'));
+    const target = radios.length
+      ? radios[event.key === "End" ? radios.length - 1 : event.key === "Home" ? 0 : Math.max(0, chosenIndex)]
+      : node.querySelector<HTMLButtonElement>(`[data-tab="${tab}"]`);
+    if (!target) return;
+    event.preventDefault();
+    target.focus();
+  }
   useEffect(() => {
     if (!open || !onClose) return;
     const onKey = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); onClose(); } };
@@ -286,6 +328,7 @@ export function IosEffectsPicker({
       aria-modal="true"
       aria-label="Send with effect"
       tabIndex={-1}
+      onKeyDown={onRootKeyDown}
       className={cn("absolute inset-0 select-none outline-none", vars, className)}
       style={{
         fontFamily: fontStack,

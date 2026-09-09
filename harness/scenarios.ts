@@ -37,6 +37,20 @@ export const nativeMotion = {
    */
   searchOpen: 267,
   searchClose: 292,
+  /**
+   * The bubble effects, read off 60 fps recordings of the iOS 26 simulator and written up frame by
+   * frame in `references/ios/motion/effects.md`. These are `bubbleEffectDuration` in
+   * `message-effects.tsx` verbatim, copied rather than imported like every other value here.
+   *
+   * **The scenarios used to run 700 / 900 / 800 / 1200 and every one of those was invented.** Gentle
+   * was the bad one: the component animates for a full three seconds and the timeline stopped at
+   * 800, so the hold at 1.25 (533–1250) and the two-and-a-half-second relaxation after it — the part
+   * of the curve the recording actually measures — had no checkpoint on them at all.
+   *
+   * Invisible Ink is 0 because it has no timeline: the bubble arrives at its final size and stays
+   * there. What moves is its cover, and that is a component clock — see `inkDrift`.
+   */
+  bubbleEffect: { slam: 640, loud: 1230, gentle: 3000, "invisible-ink": 0 },
 } as const;
 
 /**
@@ -141,6 +155,34 @@ export const unverifiedMotion = {
    * sidebar's selected row travels. `macTransitions.conversation.duration`.
    */
   conversationSwitch: 140,
+  /**
+   * The eight screen effects, `screenEffectDuration` in `screen-effects.tsx`. **UNVERIFIED and named
+   * as such by the reference itself**: `references/ios/motion/effects.md` establishes that iOS 26
+   * offers exactly these eight and in this order (the Screen tab's page dots settle the count), and
+   * then says in as many words that "none of the eight animations themselves is measured yet". The
+   * durations are the component's own choices; the scenarios exist to hold them still, not to claim
+   * they are Apple's.
+   */
+  screenEffect: {
+    echo: 2400, spotlight: 2600, balloons: 4200, confetti: 4200,
+    love: 2600, lasers: 3000, fireworks: 3600, celebration: 3600,
+  },
+  /**
+   * One turn of `im-ink-drift`, the infinite mask drift that is the whole of Invisible Ink's motion
+   * (`message-effects.tsx`: `animation: "im-ink-drift 5200ms linear infinite"`). Not a duration the
+   * scene states — it is a component clock, like `typingLoopMs`, and the harness pins it to the
+   * checkpoint's own time. The scenario runs one full turn so its first and last frames are the same
+   * phase of the loop, which is exactly what `typing` does and for exactly the same reason.
+   */
+  inkDrift: 5200,
+  /**
+   * iOS select mode arriving and leaving: `selectModeMotion.enter` / `.exit` in `ios-select-mode.tsx`.
+   * Borrowed, and the component says so — 260 / 200 with `cubic-bezier(0.32, 0.72, 0, 1)` in and
+   * `cubic-bezier(0.4, 0, 1, 1)` out are the *measured* "Send with effect" screen's pair, reused here
+   * because nothing in `references/` records select mode in motion. `select-mode-dark.png` is a still.
+   */
+  selectModeEnter: 260,
+  selectModeExit: 200,
 } as const;
 
 export type Reaction = {
@@ -172,7 +214,14 @@ export type FixtureMessage = {
   reactions?: Reaction[];
   link?: { url: string; host: string; title?: string };
   attachment?: { name: string; size: string; href: string };
-  images?: Array<{ src: string; alt: string }>;
+  /**
+   * `pending` and `livePhoto` are `MessageImage`'s own two flags. A pending tile is an attachment the
+   * transfer is holding but has not fetched, so it offers `TAP_TO_DOWNLOAD` / `CLICK_TO_DOWNLOAD`
+   * straight away rather than only after an `<img>` errors; a `livePhoto` tile carries ChatKit's
+   * `livePhotoBadgeImage`. Both are drawn per tile, never per balloon, which is why they live on the
+   * image and not on the message.
+   */
+  images?: Array<{ src: string; alt: string; pending?: boolean; livePhoto?: boolean }>;
   audio?: { duration: number };
   replyTo?: { id: string; text: string; direction: Direction; sender?: string };
   replyCount?: number;
@@ -266,6 +315,13 @@ export const scenarios = [
   { id: "link-preview", title: "Link preview", group: "Previews", duration: 0, checkpoints: [0] },
   { id: "attachment", title: "File preview", group: "Previews", duration: 0, checkpoints: [0] },
   { id: "photos", title: "Photos", group: "Previews", duration: 0, checkpoints: [0] },
+  // The two per-tile states a photo balloon can be in that the plain `photos` scenario cannot show:
+  // an attachment that has not been fetched, which offers native's own download copy at
+  // `downloadButtonFont`'s measured 17 pt, and a Live Photo, which wears ChatKit's
+  // `livePhotoBadgeImage`. Both are drawn per tile, so one group carries one of each and two plain
+  // tiles beside them; and both differ by platform — the copy is "Tap to Download" against "Click to
+  // Download", and the badge is measured at two sizes — so this runs on both shells.
+  { id: "photo-states", title: "Live Photo and download", group: "Previews", duration: 0, checkpoints: [0] },
   // The photo viewer. 300 is `PUTilingViewSettings -springAnimationDuration`, which the open zoom,
   // the exit and every page settle all run for; the checkpoints are packed early because the easing
   // is cubic-bezier(0.32, 0.72, 0, 1), which spends most of its travel in the first third. macOS has
@@ -299,8 +355,27 @@ export const scenarios = [
   { id: "sticker-drag", title: "Drag a sticker onto a bubble", group: "Interactions", duration: 2548, checkpoints: [0, 500, 1100, 1638, 2100, 2548], only: "ios" },
   { id: "group-event-arrival", title: "A status line arrives", group: "Interactions", duration: 260, checkpoints: [0, 60, 130, 200, 260] },
   { id: "swipe-times", title: "Swipe for times", group: "Interactions", duration: 400, checkpoints: [0, 200, 400] },
-  { id: "select-mode", title: "Select messages", group: "Interactions", duration: 0, checkpoints: [0] },
+  // iOS select mode, the checkbox multi-select the long-press menu's "Select" row opens. It is
+  // `only: "ios"` now that it is wired: the Mac has no mode to enter, because click-to-select is
+  // always on in its pane (`selected-message` and `select-all` below). The settled frame is the one
+  // `select-mode-dark.png` holds — exactly one circle filled.
+  { id: "select-mode", title: "Select messages", group: "Interactions", duration: 0, checkpoints: [0], only: "ios" },
+  // The entrance and the exit, `selectModeMotion`'s own 260 and 200. The entrance rides
+  // cubic-bezier(0.32, 0.72, 0, 1), which spends most of its travel in the first third, so its
+  // checkpoints are packed there — the same set `thread-open` uses, because it is the same curve at
+  // the same duration. The exit seeks that entrance table from 1 back down to 0 rather than the
+  // component's own stiffer exit curve, exactly as `plus-menu-close` and `thread-close` do and for
+  // the same reason: `IosSelectMode` takes one normalised progress, and a scrubbed frame that
+  // unmounts the mode has nothing left on screen to animate. So the milliseconds are the exit's real
+  // ones and the pose is the entrance's, run backwards — which puts the visible travel at the END of
+  // this timeline, and that is why these checkpoints are packed late where the entrance's are early.
+  { id: "select-mode-enter", title: "Enter select mode", group: "Interactions", duration: 260, checkpoints: [0, 30, 70, 140, 260], only: "ios" },
+  { id: "select-mode-exit", title: "Leave select mode", group: "Interactions", duration: 200, checkpoints: [0, 100, 150, 180, 200], only: "ios" },
   { id: "selected-message", title: "Click to select", group: "Interactions", duration: 0, checkpoints: [0], only: "macos" },
+  // Edit ▸ Select All, ⌘A, which the macOS window now carries (`macShortcuts.selectAll`). Every
+  // message in the transcript at once is the state no other scenario reaches: it puts the selection
+  // wash on an incoming row, an outgoing one, a cluster's middle and its tail in the same frame.
+  { id: "select-all", title: "Select all messages", group: "Interactions", duration: 0, checkpoints: [0], only: "macos" },
   // One turn of `typingLoopMs`. The dots are the component's own CSS loop rather than a state this
   // file states, so the scene is identical at every checkpoint and the harness pins the animation to
   // the checkpoint's own time instead; 0 and 1200 are the same frame of the loop, which is the point.
@@ -325,12 +400,29 @@ export const scenarios = [
   // On the Mac, `searchControllerObscuresConversationList` is NO: the results *are* the list, so
   // there is no overlay to seek — only a filtered sidebar.
   { id: "sidebar-search", title: "Filter the sidebar", group: "Screens", duration: 0, checkpoints: [0], only: "macos" },
+  // The same field, with the match annotation and the clear button on it. "sam" above is the case
+  // where a row matches on its NAME, which ChatKit never annotates
+  // (`configureWithQueryResult:searchText:` sends `setAttributedText:` to `summaryLabel` alone), plus
+  // the group row whose sender prefix matches. This one is the other three cases in one frame:
+  //   - "ou" falls INSIDE words — "S(ou)nds good", "Y(ou) loved", "see y(ou) at demo day" — so it
+  //     proves the ranges index into the string rather than matching whole words;
+  //   - one of those rows, Alex Morgan, is the SELECTED row, where the annotation goes to the plain
+  //     white the name takes (`conversationListCellSelectedTextColor`) instead of `--sb-name`;
+  //   - the field holds text, so the ✕ is drawn. It is the one part of the field that is UNMEASURED
+  //     — no capture holds a search field with anything in it — and this is where it can be seen.
+  { id: "sidebar-search-match", title: "Sidebar search matches", group: "Screens", duration: 0, checkpoints: [0], only: "macos" },
   { id: "details", title: "Conversation details", group: "Screens", duration: 0, checkpoints: [0] },
   // The macOS inspector. Packed early for the same reason the push rows are: its easing is the same
   // cubic-bezier(0.32, 0.72, 0, 1). At progress 1 the component cancels its own timeline, so the
   // settled checkpoint screenshots plain styles.
   { id: "details-open", title: "Open the inspector", group: "Screens", duration: 300, checkpoints: [0, 45, 100, 180, 300], only: "macos" },
   { id: "details-photos", title: "Inspector: Photos", group: "Screens", duration: 0, checkpoints: [0], only: "macos" },
+  // The inspector on a GROUP, which is the only way to reach the part of the pane the new capture
+  // fit settles: the row of Ø 70 participant faces under the cards, with its Add button, plus the
+  // disclosed member list. A one-to-one has nobody to list, so `details` above never draws it.
+  // The header the same capture fixes — the Ø 60 centred circle, the 23 pt name under it, the Ø 36
+  // discs 16 apart, the close button and the "Edit" capsule — is in every one of these four frames.
+  { id: "details-group", title: "Inspector: a group", group: "Screens", duration: 0, checkpoints: [0], only: "macos" },
   // The iOS details screen for a group. The one-to-one screen is `details` above; the two take the
   // same progress/scroll/open contract, and `group-details.tsx` imports `iosDetailsMotion` rather
   // than restating it, so 360 covers both. `scroll` is points, not milliseconds.
@@ -360,13 +452,46 @@ export const scenarios = [
   // true; press play (or click a sidebar row) to see the crossfade itself.
   { id: "switch-conversation", title: "Switch conversation", group: "Screens", duration: 140, checkpoints: [0, 140], only: "macos" },
   { id: "context-menu", title: "Context menu", group: "Screens", duration: 0, checkpoints: [0], only: "macos" },
-  { id: "effect-slam", title: "Slam", group: "Effects", duration: 700, checkpoints: [0, 120, 260, 460, 700] },
-  { id: "effect-loud", title: "Loud", group: "Effects", duration: 900, checkpoints: [0, 130, 300, 560, 900] },
-  { id: "effect-gentle", title: "Gentle", group: "Effects", duration: 800, checkpoints: [0, 160, 400, 800] },
-  { id: "effect-invisible-ink", title: "Invisible Ink", group: "Effects", duration: 1200, checkpoints: [0, 600, 1200] },
+  // The three bubble effects run their MEASURED durations (`nativeMotion.bubbleEffect`), and every
+  // checkpoint below is a row of `references/ios/motion/effects.md` — a frame of the recording, with
+  // the scale it was measured at. The 700 / 900 / 800 these used to run were invented, and Gentle's
+  // 800 cut the recording off before any of the part that was measured.
+  //
+  // Slam: 233 is the first UNCLIPPED frame (5.10 — everything before it is a lower bound, the bubble
+  // being off the bottom of the screen), 267 is 4.67, 300 is the slam itself landing squashed at
+  // 0.92, 467 is the rebound's peak at 1.07, 640 is settled.
+  { id: "effect-slam", title: "Slam", group: "Effects", duration: 640, checkpoints: [0, 233, 267, 300, 467, 640] },
+  // Loud: 83 crossing 1.0 on the way up, 283 at 2.12, 450 at the 2.35 peak, 783 at 2.20 on the way
+  // back, 1033 at 1.25, 1230 settled. Timed from the first frame the bubble is visible, which is
+  // 117 ms after the effects screen leaves, so t = 0 here is already full opacity.
+  { id: "effect-loud", title: "Loud", group: "Effects", duration: 1230, checkpoints: [0, 83, 283, 450, 783, 1033, 1230] },
+  // Gentle: 200 is the first frame the bubble is on screen at all (0.38), 533 is the 1.25 overshoot,
+  // 1250 is the far end of the hold at 1.25, then 1983 (1.10) and 2583 (1.05) sample the long
+  // relaxation and 3000 settles. The four inner ones are the four the old 800 ms timeline could not
+  // reach; the recording's own settle is at 3083, 83 ms past this duration, and lands on 3000.
+  { id: "effect-gentle", title: "Gentle", group: "Effects", duration: 3000, checkpoints: [0, 200, 533, 1250, 1983, 2583, 3000] },
+  // Invisible Ink has no timeline: `nativeMotion.bubbleEffect["invisible-ink"]` is 0 because the
+  // bubble arrives at its final size and stays there. The only thing that moves is the cover, and
+  // that is the component's own infinite `im-ink-drift`, so this runs one full turn of that loop
+  // (`unverifiedMotion.inkDrift`) and the harness pins the loop to each checkpoint's time. The scene
+  // is identical at every one of them, which is why this scenario joins `typing` in the timeline
+  // test's `componentClock` exemption — and why 0 and 5200 are deliberately the same frame.
+  { id: "effect-invisible-ink", title: "Invisible Ink", group: "Effects", duration: 5200, checkpoints: [0, 1300, 2600, 3900, 5200] },
+  // All EIGHT screen effects, in the order the Screen tab lists them. Five of them had no scenario at
+  // all until now. Every duration is `screenEffectDuration`'s and none of them is measured (see
+  // `unverifiedMotion.screenEffect`), so the checkpoints cannot be read off a curve the way the
+  // bubble effects' are; each set instead brackets the effect's own fullest pose — the fraction
+  // `screen-effects.tsx` paints and holds under `prefers-reduced-motion`, which is 0.5 for echo,
+  // spotlight, confetti, lasers and celebration, 0.55 for love, 0.62 for balloons and 0.45 for
+  // fireworks. Confetti, Love and Fireworks keep the checkpoints their baselines were taken at.
+  { id: "effect-echo", title: "Echo", group: "Effects", duration: 2400, checkpoints: [0, 500, 1200, 1800, 2400] },
+  { id: "effect-spotlight", title: "Spotlight", group: "Effects", duration: 2600, checkpoints: [0, 600, 1300, 2000, 2600] },
+  { id: "effect-balloons", title: "Balloons", group: "Effects", duration: 4200, checkpoints: [0, 900, 1900, 2604, 3400, 4200] },
   { id: "effect-confetti", title: "Confetti", group: "Effects", duration: 4200, checkpoints: [0, 900, 1900, 3000, 4200] },
   { id: "effect-love", title: "Love", group: "Effects", duration: 2600, checkpoints: [0, 600, 1200, 2000, 2600] },
+  { id: "effect-lasers", title: "Lasers", group: "Effects", duration: 3000, checkpoints: [0, 700, 1500, 2300, 3000] },
   { id: "effect-fireworks", title: "Fireworks", group: "Effects", duration: 3600, checkpoints: [0, 800, 1600, 2600, 3600] },
+  { id: "effect-celebration", title: "Celebration", group: "Effects", duration: 3600, checkpoints: [0, 800, 1800, 2700, 3600] },
   { id: "effects-picker", title: "Send with effect", group: "Effects", duration: 2400, checkpoints: [0, 400, 760, 1400, 2400], only: "ios" },
   { id: "effects-picker-screen", title: "Send with effect: Screen", group: "Effects", duration: 1600, checkpoints: [0, 600, 1600], only: "ios" },
   { id: "facetime", title: "FaceTime invitation", group: "FaceTime", duration: 3200, checkpoints: [0, 600, 1800, 3200] },
@@ -395,7 +520,12 @@ export type SceneFrame = {
   tapbackApply?: { id: string; reaction: Reaction; progress: number };
   /** Swipe-to-reveal-times progress (0–1). */
   swipe: number;
-  selectMode?: { selected: string[] };
+  /**
+   * iOS select mode: which messages are ticked, and how far its one `--ios-sel-t` timeline has run.
+   * `progress` omitted means settled — the shell is handed no number and the mode simply is open.
+   * iOS only; the Mac's multi-select is `selectedMessageIds` below, which needs no mode.
+   */
+  selectMode?: { selected: string[]; progress?: number };
   /** macOS click-to-select: the messages a click has left selected. iOS has no such state. */
   selectedMessageIds?: string[];
   screen: "conversation" | "list" | "new-message" | "details";
@@ -571,6 +701,19 @@ export function frameAt(id: ScenarioId, milliseconds: number): SceneFrame {
       frame.messages.push({ id: "ph", direction: "outgoing", minutesAgo: 1, text: "Photos",
         images: [{ src: "/fixtures/shore.jpg", alt: "Shore" }, { src: "/fixtures/ridge.jpg", alt: "Ridge" }, { src: "/fixtures/bloom.jpg", alt: "Bloom" }] });
       break;
+    // Four tiles, one of each state: a Live Photo, a transfer that has not been fetched, and two
+    // plain ones for the badge and the download copy to be read against. Incoming, because an
+    // undownloaded attachment is one somebody else sent — and because the download label is drawn in
+    // `--im-incoming-text`, so on an outgoing bubble it would be measured against the wrong ground.
+    case "photo-states":
+      frame.messages.push({ id: "ph-states", direction: "incoming", minutesAgo: 1, text: "Photos",
+        images: [
+          { src: "/fixtures/shore.jpg", alt: "Shore", livePhoto: true },
+          { src: "/fixtures/ridge.jpg", alt: "Ridge", pending: true },
+          { src: "/fixtures/bloom.jpg", alt: "Bloom" },
+          { src: "/fixtures/dusk.jpg", alt: "Dusk" },
+        ] });
+      break;
     // The viewer opens out of the third tile, which is the case worth checking: `rectForIndex` is
     // what stops photo 3 flying back into photo 1's thumbnail on the way out.
     case "photo-viewer":
@@ -669,13 +812,30 @@ export function frameAt(id: ScenarioId, milliseconds: number): SceneFrame {
     case "swipe-times":
       frame.swipe = clamp01(t / 400);
       break;
+    // Settled, with exactly one message ticked, which is the state `select-mode-dark.png` holds.
     case "select-mode":
       frame.selectMode = { selected: ["m6"] };
+      break;
+    // The entrance, seeked. `IosSelectMode` takes this 0..1 and runs its whole surface off it: the
+    // circles slide in from the leading edge as the incoming rows step aside, the ✕ grows into the
+    // nav bar, and the toolbar rises as the composer drops.
+    case "select-mode-enter":
+      frame.selectMode = { selected: ["m6"], progress: clamp01(t / unverifiedMotion.selectModeEnter) };
+      break;
+    // The way out is the way in, run backwards — `plus-menu-close` and `thread-close` do the same,
+    // and the scenario entry above says why. The mode stays STATED throughout, including at the far
+    // end: taking it away is what unmounts the surface, and an unmounted surface has no exit to see.
+    case "select-mode-exit":
+      frame.selectMode = { selected: ["m6"], progress: 1 - clamp01(t / unverifiedMotion.selectModeExit) };
       break;
     // One outgoing and one incoming, so both measured overlays are in the same frame: a plain click
     // gives the first, cmd-clicking the second adds it.
     case "selected-message":
       frame.selectedMessageIds = ["m3", "m5"];
+      break;
+    // ⌘A. Every message in display order, which is what `selectAllMessages` commits.
+    case "select-all":
+      frame.selectedMessageIds = frame.messages.map(message => message.id);
       break;
     case "typing":
       frame.typing = true;
@@ -729,6 +889,12 @@ export function frameAt(id: ScenarioId, milliseconds: number): SceneFrame {
       frame.screen = "list";
       frame.sidebarSearch = "sam";
       break;
+    // "ou" rather than a word: it lands inside "Sounds", "You" and "you", so the annotated runs are
+    // mid-word, and one of the three rows it leaves standing is the selected one. See the scenario.
+    case "sidebar-search-match":
+      frame.screen = "list";
+      frame.sidebarSearch = "ou";
+      break;
     // iOS pushes its details screen; macOS opens the inspector beside the transcript. Both settled.
     case "details":
       frame.screen = "details";
@@ -742,6 +908,13 @@ export function frameAt(id: ScenarioId, milliseconds: number): SceneFrame {
     case "details-photos":
       frame.screen = "details";
       frame.detailsPane = { open: true, progress: 1, tab: "photos" };
+      break;
+    // The same inspector on the group fixture: three people, so the participant row and the member
+    // list the capture shows under the cards both have something to draw.
+    case "details-group":
+      makeGroup(frame);
+      frame.screen = "details";
+      frame.detailsPane = { open: true, progress: 1 };
       break;
     case "group-details":
       makeGroup(frame);
@@ -800,26 +973,39 @@ export function frameAt(id: ScenarioId, milliseconds: number): SceneFrame {
     case "context-menu":
       frame.menu = "context";
       break;
+    // The three that have a timeline, seeked over their MEASURED duration. The duration comes from
+    // `nativeMotion.bubbleEffect` rather than from this scenario's own row, so a checkpoint set and
+    // the curve it samples cannot drift apart: if the recording is ever re-measured, the fraction
+    // handed to `playBubbleEffect` moves with it and the scenario's `duration` has to follow.
     case "effect-slam":
     case "effect-loud":
-    case "effect-gentle":
-    case "effect-invisible-ink": {
+    case "effect-gentle": {
       const kind = id.replace("effect-", "") as BubbleEffectKind;
-      const duration = scenarios.find(scenario => scenario.id === id)!.duration;
-      frame.effect = { id: "m6", progress: clamp01(t / duration), bubble: kind };
-      // Invisible Ink is a state, not a timeline: mark the message so the list draws the cover too.
-      if (kind === "invisible-ink") {
-        const message = frame.messages.find(item => item.id === "m6");
-        if (message) message.effect = "invisible-ink";
-      }
+      frame.effect = { id: "m6", progress: clamp01(t / nativeMotion.bubbleEffect[kind]), bubble: kind };
       break;
     }
+    // Invisible Ink is a STATE, not a timeline. `playBubbleEffect` returns a no-op handle for it and
+    // the bubble never moves, so there is no fraction to seek and stating one would be inventing a
+    // curve; the message is marked instead, which is what makes the list draw the cover, and the
+    // cover's own `im-ink-drift` loop is what the checkpoints sample once the harness pins it.
+    case "effect-invisible-ink": {
+      frame.effect = { id: "m6", progress: 1, bubble: "invisible-ink" };
+      const message = frame.messages.find(item => item.id === "m6");
+      if (message) message.effect = "invisible-ink";
+      break;
+    }
+    // All eight screen effects. Same shape as the bubble ones: the duration is read from the motion
+    // table, not from the scenario row, so the two are held together by the type checker.
+    case "effect-echo":
+    case "effect-spotlight":
+    case "effect-balloons":
     case "effect-confetti":
     case "effect-love":
-    case "effect-fireworks": {
+    case "effect-lasers":
+    case "effect-fireworks":
+    case "effect-celebration": {
       const kind = id.replace("effect-", "") as ScreenEffectKind;
-      const duration = scenarios.find(scenario => scenario.id === id)!.duration;
-      frame.effect = { id: "m6", progress: clamp01(t / duration), screen: kind };
+      frame.effect = { id: "m6", progress: clamp01(t / unverifiedMotion.screenEffect[kind]), screen: kind };
       break;
     }
     case "effects-picker":
