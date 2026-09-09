@@ -22,7 +22,8 @@
     "test:all": "playwright test",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
-    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
+    "test:all:prod": "bun run build && (npx next start --port 3102 & sleep 12) && PLAYWRIGHT_BASE_URL=http://localhost:3102 playwright test; kill %1 2>/dev/null || true"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",

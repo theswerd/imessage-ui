@@ -710,6 +710,34 @@ export function ImageViewer({
   const [motion, setMotionState] = useState<Motion>("none");
   const [aspects, setAspects] = useState<Record<string, number>>({});
 
+  /**
+   * A photo's shape learned on mount as well as on load, which is the same trap `message-image` already
+   * documents: an image the browser already has is `complete` before React attaches `onLoad`, and
+   * then `onLoad` never fires at all. The aspect stayed unknown, the page kept the fallback box, and
+   * the viewer opened with the photograph drawn at a size nothing asked for — for a photo you had
+   * already looked at once. It read as a flaky checkpoint here (a different `photo-viewer` frame
+   * failing every run) but it is a real thing to see: open a photo, close it, open it again.
+   */
+  useLayoutEffect(() => {
+    const node = root.current;
+    if (!node) return;
+    const seed = () => setAspects(known => {
+      let next = known;
+      for (const image of Array.from(node.querySelectorAll("img"))) {
+        const src = image.getAttribute("src");
+        if (!src || known[src] || !image.complete || !image.naturalWidth || !image.naturalHeight) continue;
+        if (next === known) next = { ...known };
+        next[src] = image.naturalWidth / image.naturalHeight;
+      }
+      return next;
+    });
+    seed();
+    // A photo two pages away mounts `loading="lazy"`; it becomes complete later, and paging to it
+    // must not be the first time anything measures it.
+    const timer = window.setTimeout(seed, 0);
+    return () => window.clearTimeout(timer);
+  });
+
   // `motion` used to be a boolean that only `onPointerDown` ever cleared, so any keyboard action left
   // the settle transition armed for good. It now clears itself after the animation it describes.
   const beginMotion = useCallback((kind: Exclude<Motion, "none">) => {
@@ -802,7 +830,16 @@ export function ImageViewer({
     };
   }, []);
 
-  useEffect(() => {
+  /**
+   * A layout effect, not a plain one, and that is what makes a scrubbed checkpoint reproducible. The
+   * entrance is a Web Animation created here and then paused and seeked; run after paint, there is
+   * one frame in which the layer sits at its own base pose with no animation on it yet, and a
+   * screenshot that lands in that frame catches the viewer part-open. It is invisible to a person and
+   * it made `photo-viewer` fail differently on every run — 0.42 of the frame different, a different
+   * checkpoint each time. Before paint there is no such frame. The playing case loses nothing by
+   * starting a frame earlier either.
+   */
+  useLayoutEffect(() => {
     const stage = zoomLayer.current;
     const ground = backdrop.current;
     const chromeNode = chromeLayer.current;

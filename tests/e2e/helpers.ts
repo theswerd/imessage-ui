@@ -33,7 +33,41 @@ async function evaluateSettled(page: Page, run: () => Promise<unknown>): Promise
 async function imagesDecoded(page: Page) {
   await evaluateSettled(page, () => page.evaluate(async () => {
     const images = Array.from(document.images).filter(image => image.src && !image.src.startsWith("data:"));
-    await Promise.all(images.map(image => image.decode().catch(() => undefined)));
+    // Raced against a deadline, because `decode()` on an image the engine has parked never settles
+    // at all — not rejected, just pending — and one of those in a scene full of effect artwork hangs
+    // the whole checkpoint rather than failing it. A photograph that has not decoded in 400 ms was
+    // never going to be the thing the frame is waiting on.
+    const deadline = new Promise(resolve => setTimeout(resolve, 400));
+    await Promise.all(images.map(image => Promise.race([image.decode().catch(() => undefined), deadline])));
+  }));
+}
+
+/**
+ * Waits until the device frame stops moving. Fonts and images are waited on above, but a scene can
+ * still take one more frame to settle after them — the photo viewer sizes its page from the image it
+ * is showing, so until that has been measured the photo is drawn at a size no checkpoint means. A
+ * screenshot landing in that window produced a `photo-viewer` failure on a different checkpoint every
+ * run, 0.42 of the frame different, with nothing wrong on screen a person would ever see.
+ *
+ * Two consecutive identical samples of every slot's box is the condition; `toHaveScreenshot` applies
+ * the same idea to pixels, and this applies it to layout, which is what actually settles late.
+ */
+async function layoutSettled(page: Page) {
+  await evaluateSettled(page, () => page.evaluate(async () => {
+    const sample = () => Array.from(document.querySelectorAll("[data-slot]")).map(node => {
+      const box = node.getBoundingClientRect();
+      return `${box.x.toFixed(2)},${box.y.toFixed(2)},${box.width.toFixed(2)},${box.height.toFixed(2)}`;
+    }).join("|");
+    const frame = () => new Promise(resolve => requestAnimationFrame(() => resolve(undefined)));
+    let previous = sample();
+    // Bounded, because a scene with a looping animation on a positioned element never settles at all
+    // and must not hang the checkpoint — it is the seek that pins those, not this.
+    for (let attempt = 0; attempt < 12; attempt++) {
+      await frame();
+      const next = sample();
+      if (next === previous) return;
+      previous = next;
+    }
   }));
 }
 
@@ -43,6 +77,7 @@ export async function openScene(page: Page, info: TestInfo, scene = "conversatio
   await expect(page.getByTestId("harness-ready")).toBeVisible();
   await evaluateSettled(page, () => page.evaluate(async () => { await document.fonts.ready; }));
   await imagesDecoded(page);
+  await layoutSettled(page);
   return page.getByTestId("device");
 }
 
