@@ -94,6 +94,25 @@
       ]
     },
     {
+      "name": "tapback-details",
+      "type": "registry:ui",
+      "title": "Tapback details",
+      "description": "The surface \"Tapback Details…\" opens: who reacted and with what, as a sheet on iOS and an anchored popover on macOS, with your own reaction removable.",
+      "registryDependencies": [
+        "@imessage/avatar",
+        "@imessage/platform",
+        "@imessage/tapback",
+        "@imessage/tokens"
+      ],
+      "files": [
+        {
+          "path": "registry/imessage/tapback-details.tsx",
+          "type": "registry:ui",
+          "target": "components/imessage/tapback-details.tsx"
+        }
+      ]
+    },
+    {
       "name": "typing-indicator",
       "type": "registry:ui",
       "title": "Typing indicator",
@@ -547,6 +566,22 @@
       ]
     },
     {
+      "name": "macos-details",
+      "type": "registry:ui",
+      "title": "macOS conversation details",
+      "description": "The inspector pane that slides in from the right of the window: contact, call actions, shared photos, links and documents, and the conversation options.",
+      "registryDependencies": [
+        "@imessage/avatar"
+      ],
+      "files": [
+        {
+          "path": "registry/imessage/macos-details.tsx",
+          "type": "registry:ui",
+          "target": "components/imessage/macos-details.tsx"
+        }
+      ]
+    },
+    {
       "name": "message-effects",
       "type": "registry:ui",
       "title": "Message effects",
@@ -698,6 +733,22 @@
       ]
     },
     {
+      "name": "group-details",
+      "type": "registry:ui",
+      "title": "iOS group details",
+      "description": "A group conversation's details screen: the stacked group photo, an editable name, the members, and the shared photos and links.",
+      "registryDependencies": [
+        "@imessage/ios-details"
+      ],
+      "files": [
+        {
+          "path": "registry/imessage/group-details.tsx",
+          "type": "registry:ui",
+          "target": "components/imessage/group-details.tsx"
+        }
+      ]
+    },
+    {
       "name": "ios-plus-menu",
       "type": "registry:ui",
       "title": "iOS plus menu",
@@ -727,6 +778,22 @@
       ]
     },
     {
+      "name": "sticker-picker",
+      "type": "registry:ui",
+      "title": "iOS sticker picker",
+      "description": "The sheet the plus menu's Stickers row opens: category tabs, a search field, the sticker grid, and drag to place a sticker on a message.",
+      "registryDependencies": [
+        "@imessage/tokens"
+      ],
+      "files": [
+        {
+          "path": "registry/imessage/sticker-picker.tsx",
+          "type": "registry:ui",
+          "target": "components/imessage/sticker-picker.tsx"
+        }
+      ]
+    },
+    {
       "name": "ios-select-mode",
       "type": "registry:ui",
       "title": "iOS selection mode",
@@ -736,6 +803,23 @@
           "path": "registry/imessage/ios-select-mode.tsx",
           "type": "registry:ui",
           "target": "components/imessage/ios-select-mode.tsx"
+        }
+      ]
+    },
+    {
+      "name": "ios-search",
+      "type": "registry:ui",
+      "title": "iOS search",
+      "description": "The search state of the conversation list: the field rising under the nav, a Cancel button, and results grouped into Conversations, Messages, Photos and Links.",
+      "registryDependencies": [
+        "@imessage/avatar",
+        "@imessage/ios-composer"
+      ],
+      "files": [
+        {
+          "path": "registry/imessage/ios-search.tsx",
+          "type": "registry:ui",
+          "target": "components/imessage/ios-search.tsx"
         }
       ]
     },
@@ -795,14 +879,17 @@
       "registryDependencies": [
         "@imessage/conversation",
         "@imessage/facetime-card",
+        "@imessage/group-details",
         "@imessage/image-viewer",
         "@imessage/ios-details",
         "@imessage/ios-messages-app",
         "@imessage/ios-notices",
         "@imessage/ios-plus-menu",
+        "@imessage/ios-search",
         "@imessage/ios-select-mode",
         "@imessage/ios-swipe-times",
         "@imessage/link-preview",
+        "@imessage/macos-details",
         "@imessage/macos-messages-app",
         "@imessage/message-attachment",
         "@imessage/message-audio",
@@ -813,7 +900,9 @@
         "@imessage/message-reply",
         "@imessage/photo-picker",
         "@imessage/screen-effects",
+        "@imessage/sticker-picker",
         "@imessage/system-message",
+        "@imessage/tapback-details",
         "@imessage/use-long-press"
       ]
     }

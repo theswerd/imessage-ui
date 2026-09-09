@@ -4,7 +4,7 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState, type Component
 import { cn } from "@/lib/utils";
 import { usePlatform, type Platform } from "@/registry/imessage/platform";
 import { bubbleMetrics, fontStack, type Direction } from "@/registry/imessage/tokens";
-import { bodyClipPath, tailBox, tailPath } from "@/registry/imessage/bubble-shape";
+import { bodyClipPath, tailBox, tailPath, tailSeamOverlap } from "@/registry/imessage/bubble-shape";
 
 /**
  * Photos and videos sent in a conversation. A photo takes the bubble's shape, tail included, so the
@@ -259,7 +259,7 @@ export function MessageImages({
       aria-busy={busy || undefined}
       className={cn("relative", className)}
       style={{ width: groupWidth, fontFamily: fontStack, marginTop: reactions ? slot.marginTop : undefined, ...style }} {...props}>
-      <div ref={gridRef} data-slot="image-grid" style={{ ...grid, width: groupWidth, height, borderRadius: m.radius, overflow: "hidden", clipPath: tail ? bodyClipPath(side, m.tailScale) : undefined, background: "var(--im-gray-top)" }}>
+      <div ref={gridRef} data-slot="image-grid" style={{ ...grid, width: groupWidth, height, borderRadius: m.radius, overflow: "hidden", clipPath: tail ? bodyClipPath(side, m.tailScale, tailSeamOverlap[platform]) : undefined, background: "var(--im-gray-top)" }}>
         {tiles.map((image, index) => {
           const spanFirst = tiles.length === 3 && index === 0;
           const state = phase[image.src];

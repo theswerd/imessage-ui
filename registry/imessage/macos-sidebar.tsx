@@ -41,12 +41,36 @@ import { Avatar } from "@/registry/imessage/avatar";
  * - **No count.** `_TtC7ChatKit32CKConversationListIndicatorsView`, the row's accessory strip, holds
  *   only image views, and `-[CKConversationListCell unreadMessageCount]` is read by nothing that
  *   draws. A number passed here is announced and never painted.
- * - **A pinned conversation shows nothing.** `CKPinnedConversationView` has its own Ø9 dot before the
- *   title label (`unreadIndicatorSize` {9, 9}, `unreadIndicatorPreferredPadding` trailing 3, the same
- *   `unreadIndicatorColor`), but `-[CKPinnedConversationView _unreadIndicatorColor]` also branches on
- *   `isFilteredByFocus` and `isSelectedWithDarkAppearance` into a `readSelectedIndicatorColor` this
- *   component has no equivalent for, so `unread` on a pinned conversation is deliberately inert
- *   rather than a guess.
+ * - **A pinned conversation** draws the same dot before its title label. `CKPinnedConversationView`
+ *   vends `unreadIndicatorSize` {9, 9} and `unreadIndicatorPreferredPadding` trailing **3**, and laying
+ *   a 96 × 119 one out (the tile size this component uses) puts the label at x 15.5 w 65.5 y 90 h 19
+ *   and the dot at x 3.5 y 95, i.e. the label stays centred in the tile and the dot hangs off its
+ *   leading edge 3 away, vertically centred on the label's line. `_unreadIndicatorColor` picks between
+ *   three colours and both of its branches are now settled:
+ *   `isFilteredByFocus ? conversationListPinnedConversationFilteredByFocusIndicatorColor
+ *    : isSelectedWithDarkAppearance ? readSelectedIndicatorColor : unreadIndicatorColor`.
+ *   `isFilteredByFocus` is set from `-[CKConversationList updateFilteredByFocusStateForConversations:]`,
+ *   the "a Focus is filtering this conversation out" dimming; this kit has no Focus, so it is always NO
+ *   and the #000000@25.9% / #ffffff@24.7% colour it would pick is unreachable. `isSelectedWithDarkAppearance`
+ *   is written in exactly one place, `-[CKPinnedConversationCollectionViewCell updateConfigurationUsingState:]`,
+ *   as `useSelectedAppearanceForConversationCellState:traitCollection: && showsBackgroundViewWhenSelected`,
+ *   and `-[CKUIBehaviorMac useSelectedAppearanceForConversationCellState:traitCollection:]` is
+ *   `(state.isSelected || state.cellDropState == 2) && traitCollection.activeAppearance.isMainWindowForegroundActive`.
+ *   So the name means "selected on the key window, while the tile paints its selected background", and
+ *   `readSelectedIndicatorColor` is opaque **#ffffff** in both appearances, the same white the row dot
+ *   takes. This component's pinned selection is a ring around the avatar, not the filled radius-8
+ *   background view native draws (`conversationListPinnedCellSelectedBackgroundCornerRadius` 8), and
+ *   its label does not go white either, so the second term is NO here and the dot always takes
+ *   `unreadIndicatorColor`. Give the tile that background and the white branch turns on with it.
+ *
+ * **Group rows** (`members`). A group conversation's row draws the same `CKAvatarView` the one-to-one
+ * row does (`CKConversationListStandardCell._avatarView`), handed every participant instead of one, and
+ * `CNAvatarView` lays those out through `ContactsUICore.SnowglobeUIView` as a stack of circles inside
+ * the same Ø40 box. See `groupPhotoRecipes` for the measured stack. The preview line is prefixed with
+ * `sender`, in the same 12 pt type and the same gray as the rest of the preview: ChatKit does not
+ * compose that prefix (`-[CKConversation previewText]` is the message's text alone, and the cell has
+ * only a from-label and a summary label), so the wording is the caller's and only the metrics it has to
+ * fit are measured.
  */
 export type SidebarConversation = {
   id: string;
@@ -62,6 +86,24 @@ export type SidebarConversation = {
    */
   unread?: boolean | number;
   /** Photo variant of the avatar. */
+  photo?: string;
+  /**
+   * Group conversation: its participants, drawn as the stacked group photo in place of one avatar.
+   * Two or more entries make it a group; the stack shows the first seven.
+   */
+  members?: GroupMember[];
+  /**
+   * Who sent the last message. A group row prefixes its preview with it ("Sam Rivera: Tuesday…").
+   * Ignored on a one-to-one row, which never carries a sender.
+   */
+  sender?: string;
+};
+
+export type GroupMember = {
+  /** One or two letters. Ignored when `photo` is set. */
+  initials: string;
+  /** Accessible name, and the name the group photo announces. */
+  name?: string;
   photo?: string;
 };
 
@@ -82,7 +124,12 @@ export const macSidebarMetrics = {
   width: 330,
   panel: { left: 8, top: 8, bottom: 8, width: 320, radius: 18 },
   search: { left: 18, top: 52, width: 300, height: 36 },
-  pinned: { top: 96, avatar: 73, centerX: 168, avatarCenterY: 142.5, height: 119, labelTop: 184.75 },
+  pinned: {
+    top: 96, avatar: 73, centerX: 168, avatarCenterY: 142.5, height: 119, labelTop: 184.75,
+    // CKPinnedConversationView: the dot is the same Ø9, and `unreadIndicatorPreferredPadding` puts 3
+    // between it and the title label, which does not move to make room for it.
+    unread: 9, unreadGap: 3,
+  },
   row: {
     left: 18, width: 300, height: 80.5, radius: 8, avatar: 40, avatarLeft: 18,
     textLeft: 64, textRight: 10.5, separatorRight: 12, nameTop: 15.75, previewTop: 33, previewLine: 15,
@@ -92,7 +139,73 @@ export const macSidebarMetrics = {
   },
   footer: { height: 49, textTop: 17.75 },
   options: { centerX: 306, centerY: 25.85 },
+  /**
+   * How long a separator takes to cross when the selection moves. **Unverified**: no capture holds a
+   * switch. It is the same 140 ms `macos-messages-app.tsx` gives the travelling highlight
+   * (`macTransitions.selection.duration`), copied rather than imported because that file imports this
+   * one. The two have to agree: the separators the selection uncovers and covers are the ones it is
+   * moving between, so a different number would make them lead or trail the fill.
+   */
+  selectionFade: 140,
 };
+
+/**
+ * ChatKit's group photo, measured. A group row's avatar is the same `CKAvatarView` a one-to-one row
+ * uses (`CKConversationListStandardCell._avatarView`), handed the conversation's participants through
+ * `-[CNAvatarView setContacts:]` instead of one contact. `CNAvatarView` then builds a
+ * `ContactsUICore.SnowglobeUIView` holding one `ContactsUICore.AvatarUIView` per person, and the
+ * constraint layout it runs is what these numbers are: a probe that swizzles `-[UIDevice
+ * userInterfaceIdiom]` to Mac, dlopens ChatKit, builds `CKAvatarView` over N fixture `CNMutableContact`s
+ * and calls `layoutIfNeeded` reports each circle's frame.
+ *
+ * Each row is `[x, y, diameter]` on a **44-unit** box, back to front, and the layout is a pure ratio:
+ * asking for 88 doubles every number exactly and asking for 40 divides them by 1.1 exactly, so a
+ * circle's frame is its entry times `size / 44`. Every value lands on a quarter unit at 44, which is
+ * what says 44 is the grid the recipes were authored on. **The same layout on both platforms**: the
+ * probe run with the idiom left as Phone returns the same frames to the last digit, so this is also the
+ * iOS group avatar. One contact is the plain full-box circle; two and three have their own recipes;
+ * four, five and six add a slot to the three-person stack; seven re-lays the whole stack out, and an
+ * eighth participant changes nothing, so seven is the cap.
+ *
+ * Not reproduced: `SnowglobeUIView` also puts a `UIVisualEffectView` (`UIBlurEffect material=20`) behind
+ * the circles, filling the box. Nothing in `references/` shows a group row, so whether that plate is
+ * visible against a sidebar row, and what it does over the blue selection, is unmeasured; this draws the
+ * circles alone.
+ */
+export const groupPhotoRecipes: readonly (readonly (readonly [number, number, number])[])[] = [
+  [[0, 0, 44]],
+  [[4.75, 4.75, 24], [23.75, 23.75, 14]],
+  [[5.25, 5.25, 21], [24.75, 17.75, 16], [12.5, 27.25, 13]],
+  [[5.25, 5.25, 21], [24.75, 17.75, 16], [12.5, 27.25, 13], [27, 6.75, 10]],
+  [[5.25, 5.25, 21], [24.75, 17.75, 16], [12.5, 27.25, 13], [27, 6.75, 10], [4.75, 25.5, 7]],
+  [[5.25, 5.25, 21], [24.75, 17.75, 16], [12.5, 27.25, 13], [27, 6.75, 10], [4.75, 25.5, 7], [23.25, 3.25, 5]],
+  [[5.25, 5.25, 21], [24.25, 20.25, 15], [27.25, 8.25, 11], [6.5, 26.75, 10], [19.25, 33.25, 7.5], [17.75, 26.75, 5.5], [24, 3.75, 5]],
+];
+
+/** The stack, at any diameter. `macos-header.tsx` carries its own copy, the way the iOS chrome does. */
+export function GroupPhoto({ size, members, name, className, style, ...props }: Omit<ComponentProps<"span">, "children"> & { size: number; members: GroupMember[]; name?: string }) {
+  const people = members.slice(0, groupPhotoRecipes.length);
+  const recipe = groupPhotoRecipes[people.length - 1] ?? groupPhotoRecipes[0];
+  const unit = size / 44;
+  return (
+    <span
+      data-slot="group-photo"
+      role="img"
+      aria-label={name ?? people.map(person => person.name ?? person.initials).join(", ")}
+      className={cn("relative block shrink-0", className)}
+      style={{ width: size, height: size, ...style }}
+      {...props}
+    >
+      {people.map((person, index) => {
+        const [x, y, diameter] = recipe[index];
+        return (
+          <Avatar key={index} aria-hidden="true" size={diameter * unit} initials={person.initials} src={person.photo} name={person.name}
+            className="absolute" style={{ left: x * unit, top: y * unit }} />
+        );
+      })}
+    </span>
+  );
+}
 
 /** Sidebar list options: three centred bars, 16.5 / 12.5 / 9.5 wide, 1.25 thick, 4.1 apart. */
 function OptionsIcon() {
@@ -166,6 +279,8 @@ export function MacSidebar({ conversations, selectedId, onSelect, active = true,
           .mac-sidebar-panel { border-radius: 22px; corner-shape: superellipse(1.4); }
           .mac-sidebar-row { border-radius: 10px; corner-shape: superellipse(1.4); }
         }
+        .mac-sidebar-separator { transition: opacity ${m.selectionFade}ms linear; }
+        @media (prefers-reduced-motion: reduce) { .mac-sidebar-separator { transition: none; } }
       `}</style>
       <div
         aria-hidden="true"
@@ -201,10 +316,21 @@ export function MacSidebar({ conversations, selectedId, onSelect, active = true,
                 <button type="button" aria-current={selected ? "true" : undefined} onClick={() => onSelect?.(c.id)}
                   className="flex flex-col items-center rounded-[14px] outline-offset-2 focus-visible:outline-2 focus-visible:outline-[#3478f6]"
                   style={{ paddingTop: m.pinned.avatarCenterY - m.pinned.top - m.pinned.avatar / 2 }}>
-                  <Avatar size={m.pinned.avatar} initials={c.initials} src={c.photo} name={c.name}
-                    style={selected ? { boxShadow: `0 0 0 2px ${active ? "#3478f6" : "#9a9a9a"}` } : undefined} />
-                  <span data-slot="pinned-name" className="max-w-[96px] truncate text-[11px] leading-[13px] text-[var(--sb-secondary)]"
-                    style={{ marginTop: m.pinned.labelTop - (m.pinned.avatarCenterY + m.pinned.avatar / 2) }}>{c.name}</span>
+                  {c.unread ? <span className="sr-only">{unreadLabel(c.unread)}. </span> : null}
+                  {c.members && c.members.length > 1
+                    ? <GroupPhoto size={m.pinned.avatar} members={c.members} name={c.name}
+                        style={selected ? { boxShadow: `0 0 0 2px ${active ? "#3478f6" : "#9a9a9a"}`, borderRadius: "50%" } : undefined} />
+                    : <Avatar size={m.pinned.avatar} initials={c.initials} src={c.photo} name={c.name}
+                        style={selected ? { boxShadow: `0 0 0 2px ${active ? "#3478f6" : "#9a9a9a"}` } : undefined} />}
+                  {/* The tile's label stays centred whether or not there is a dot; the dot hangs off its
+                      leading edge, which is what CKPinnedConversationView's own layout does. */}
+                  <span className="relative flex max-w-[96px]" style={{ marginTop: m.pinned.labelTop - (m.pinned.avatarCenterY + m.pinned.avatar / 2) }}>
+                    {c.unread ? (
+                      <span aria-hidden="true" data-slot="pinned-unread" className="absolute rounded-full"
+                        style={{ right: "100%", marginRight: m.pinned.unreadGap, top: (13 - m.pinned.unread) / 2, width: m.pinned.unread, height: m.pinned.unread, background: "var(--sb-unread)" }} />
+                    ) : null}
+                    <span data-slot="pinned-name" className="truncate text-[11px] leading-[13px] text-[var(--sb-secondary)]">{c.name}</span>
+                  </span>
                 </button>
               </li>
             );
@@ -233,21 +359,36 @@ export function MacSidebar({ conversations, selectedId, onSelect, active = true,
                       style={{ left: m.row.unreadLeft, top: (m.row.height - m.row.unread) / 2, width: m.row.unread, height: m.row.unread, background: highlighted ? "#ffffff" : "var(--sb-unread)" }} />
                   </>
                 ) : null}
-                <Avatar size={m.row.avatar} initials={c.initials} src={c.photo} name={c.name} className="absolute" style={{ left: m.row.avatarLeft, top: (m.row.height - m.row.avatar) / 2 }} />
+                {c.members && c.members.length > 1
+                  ? <GroupPhoto size={m.row.avatar} members={c.members} name={c.name} className="absolute" style={{ left: m.row.avatarLeft, top: (m.row.height - m.row.avatar) / 2 }} />
+                  : <Avatar size={m.row.avatar} initials={c.initials} src={c.photo} name={c.name} className="absolute" style={{ left: m.row.avatarLeft, top: (m.row.height - m.row.avatar) / 2 }} />}
                 <span className="absolute flex items-baseline justify-between gap-2" style={{ left: m.row.textLeft, right: m.row.textRight, top: m.row.nameTop }}>
                   <span data-slot="row-name" className="truncate text-[13px] font-semibold leading-[16px]" style={{ color: highlighted ? "#ffffff" : "var(--sb-name)" }}>{c.name}</span>
                   <span data-slot="row-time" className="shrink-0 text-[12px] leading-[15px]" style={{ color: secondary }}>{c.time}</span>
                 </span>
                 <span data-slot="row-preview" className="absolute line-clamp-2 text-[12px] leading-[15px]"
-                  style={{ left: m.row.textLeft, right: m.row.textRight, top: m.row.previewTop, color: secondary }}>{c.preview}</span>
+                  style={{ left: m.row.textLeft, right: m.row.textRight, top: m.row.previewTop, color: secondary }}>
+                  {/* A group row names the sender first. Same type and same gray: it is one run of
+                      preview text, wrapping and clamping with the rest of it. */}
+                  {c.sender && c.members && c.members.length > 1 ? <span data-slot="row-sender">{c.sender}: </span> : null}
+                  {c.preview}
+                </span>
                 {c.muted && (
                   <span className="absolute" style={{ right: m.row.separatorRight, top: m.row.mutedTop }}>
                     <MutedIcon size={m.row.muted} color={highlighted ? "#d6e4fd" : "var(--sb-muted)"} halo={selected ? (active ? "#3478f6" : "var(--sb-inactive)") : "var(--sb-fill)"} />
                   </span>
                 )}
               </button>
-              {!selected && !nextSelected && index < rows.length - 1 && (
-                <span aria-hidden="true" className="absolute bottom-0 h-px bg-[var(--sb-separator)]" style={{ left: m.row.textLeft, right: m.row.separatorRight }} />
+              {/* Native draws no separator above or below the selected row. Mounting it always and
+                  crossing its opacity is what makes a switch read as one move: the pair the selection
+                  is leaving fades up while the pair it is arriving at fades down, over the same span
+                  the highlight travels. Mounting it conditionally instead pops one in at the departing
+                  row and one out at the arriving row on the click, while the highlight is still in
+                  flight. A transition, not a keyframe animation, so a seeked frame carries none of it
+                  and `document.getAnimations()` still reaches the live one. */}
+              {index < rows.length - 1 && (
+                <span aria-hidden="true" data-slot="row-separator" className="mac-sidebar-separator absolute bottom-0 h-px bg-[var(--sb-separator)]"
+                  style={{ left: m.row.textLeft, right: m.row.separatorRight, opacity: selected || nextSelected ? 0 : 1 }} />
               )}
             </li>
           );

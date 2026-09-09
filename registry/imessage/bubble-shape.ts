@@ -48,23 +48,30 @@ export function tailPath(side: Exclude<TailSide, "none">, scale = 1): string {
 }
 
 /**
+ * How far the body's clip has to reach into the tail box so the two do not leave a hairline where
+ * they meet. Both platforms need it, and the reason is Chrome, not the geometry: a `clip-path`
+ * reference box is snapped to whole CSS px before it rasterises, and the body's box and the tail's
+ * box snap independently. Their shared edge then lands on two different device rows and the
+ * background shows through the row between them - a white line running out of the tail across the
+ * bubble, which is exactly what it looks like.
+ *
+ * 0.75 was measured, not guessed: `scripts/measure/hairline.ts` over `/lab?scene=ios-conv3` at
+ * twelve sub-pixel offsets of the message column still finds the seam at 0.25 and never finds it
+ * from 0.5 up, so 0.75 keeps a quarter point of margin. The ceiling is the tail's own straight top
+ * segment, `(tailBox.height - 19.203) * scale` = 1.997 on iOS and 1.398 on macOS; past that the
+ * body would paint outside the tail's outline.
+ */
+export const tailSeamOverlap: Record<"ios" | "macos", number> = { ios: 0.75, macos: 0.75 };
+
+/**
  * clip-path polygon that removes the tail box from a plain rounded-rectangle body so the tail SVG
  * can draw that region exactly. Use with `border-radius` for the three untouched corners.
  *
  * `overlap` shrinks the removed box along its two interior edges, so the body keeps painting that
- * far *into* the tail box. Chrome rounds a `clip-path` reference box to whole CSS px before it
- * rasterizes, so a tail box that starts on a fraction (macOS: 22 × 0.7 = 15.4 wide, whose left edge
- * lands at 594.609 in the 630pt pane) is painted up to half a point away from the body's clip edge
- * and a white hairline shows through the bubble. The two edges are interior, so the body can only
- * be seen there if it reaches past the tail's own outline: keep `overlap` under the tail's straight
- * top segment, `(tailBox.height - 19.203) * scale`, and it never can.
+ * far *into* the tail box and covers the seam described on `tailSeamOverlap`. Both edges are
+ * interior to the tail's own outline, so the body can only become visible there if it reaches past
+ * the tail's straight top segment.
  */
-/**
- * How far the body's clip has to reach into the tail box so the two do not leave a hairline where
- * they meet. macOS needs 0.75; iOS's larger tail closes on its own.
- */
-export const tailSeamOverlap: Record<"ios" | "macos", number> = { ios: 0, macos: 0.75 };
-
 export function bodyClipPath(side: Exclude<TailSide, "none">, scale = 1, overlap = 0): string {
   const w = tailBox.width * scale - overlap;
   const h = tailBox.height * scale - overlap;

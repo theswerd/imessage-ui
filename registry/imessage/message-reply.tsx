@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ComponentProps, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { usePlatform, type Platform } from "@/registry/imessage/platform";
-import { bodyClipPath, tailBox, tailPath } from "@/registry/imessage/bubble-shape";
+import { bodyClipPath, tailBox, tailPath, tailSeamOverlap } from "@/registry/imessage/bubble-shape";
 import { bubbleMetrics, fontStack, type Direction, type Service } from "@/registry/imessage/tokens";
 import { MessageBubble } from "@/registry/imessage/message-bubble";
 
@@ -182,7 +182,7 @@ export function ReplyStub({ quote, tail = false, maxLines, platform: platformPro
         }}>
           {/* The fill sits behind the text, so clipping the tail corner never clips glyphs. */}
           <div data-slot="fill" className="pointer-events-none absolute inset-0" style={{
-            borderRadius: s.radius, clipPath: tail ? bodyClipPath(side, s.tailScale) : undefined,
+            borderRadius: s.radius, clipPath: tail ? bodyClipPath(side, s.tailScale, tailSeamOverlap[platform]) : `inset(0 round ${s.radius}px)`,
             ...fill, backgroundPosition: `0 calc(100% + (var(--im-screen-h) - ${bottomVar}))`,
           }} />
           {tail && <div data-slot="tail" className="pointer-events-none absolute" style={{

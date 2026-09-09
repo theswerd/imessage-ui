@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ComponentProps, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ComponentProps, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type UIEvent as ReactUIEvent } from "react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -19,6 +19,12 @@ import { cn } from "@/lib/utils";
  * - Cell and button fills are translucent: 6% black in light, 12% white in dark (over pure white
  *   that measures #efeff0, over black #1c1c1f — both read off the captures).
  * - Switch: 63×28 track (radius 14) with a 37×24 knob (radius 12) inset 2, trailing edge at x 372.
+ *   Re-measured 2026-09-08 on the Hide Alerts row of both captures: track x 309.00–372.00,
+ *   y 496.333–524.333; knob x 311.00–348.00, y 498.333–522.333. Both captures show it **off**; no
+ *   capture in this repo holds an on switch, so the on colour comes from the framework instead
+ *   (`+[UIColor systemGreenColor]` resolved under each `UIUserInterfaceStyle` in a Mac Catalyst
+ *   process with the idiom swizzled to phone: #34c759 light, #30d158 dark). `-[UISwitch
+ *   intrinsicContentSize]` there is 61×28, which corroborates the measured 28 track height.
  *   The off track darkens the cell fill by 21% in light and lightens it by 28% in dark (sampled
  *   beside the knob against the bare cell on the same row).
  * - RECENT tag: 41×11.33 pill, radius 3.5, #c7c7cc in both themes, 8.5pt bold label (cap 6).
@@ -28,6 +34,38 @@ import { cn } from "@/lib/utils";
  *
  * The presentation is a separate matter, and its timings are UNMEASURED: no capture in this repo
  * records this screen in motion, so nothing below is a reading off a frame. See `iosDetailsMotion`.
+ *
+ * ## What the capture does not show
+ *
+ * `details-light.png` is one scroll position of a conversation with no shared content: the cell
+ * stack ends at Block Contact and nothing follows it. Three groups are therefore built from the
+ * measured *style* rather than from a frame, and are **UNMEASURED**: the shared photos grid, the
+ * shared links list and the shared attachments list (`photos`, `sharedLinks`, `attachments`). They
+ * sit between Hide Alerts and Block Contact, which is where they push the destructive row down, and
+ * with all three absent the stack reproduces the capture point for point. What they reuse:
+ *
+ * - The cell geometry, the 20 between groups, the 52 row, the 70.67 two-line cell, the 16 row inset
+ *   and the 1pt separator inset to x 32–370 are all measured on this screen.
+ * - A two-line item row keeps the measured phone cell's three gaps (16.875 above, 1.5 between,
+ *   14.29 below) with its 17pt and 13pt lines swapped, so it is 70.67 tall like the measured one.
+ * - The grid is 3 across with a 4 gap, from `+[CKUIBehavior sharedBehaviors]` under the phone
+ *   idiom: `attachmentBrowserGridInterItemSpacing` and `attachmentBrowserGridMinimumLineSpacing`
+ *   are both 4. Inside the 370 cell at the measured 16 inset that makes a 110 tile. The tile radius
+ *   12 is the measured Photos-picker tile radius (SPEC, `photo-picker-light.png`).
+ * - The chevron on a row that navigates is the nav bar's measured chevron: 4.67 × 12.67 ink, 2.6
+ *   round stroke, #bdbdbd / #5d5d5d (`ios-nav-bar.tsx`).
+ *
+ * ChatKit 26 actually files shared content under tabs, not under more cells on the info list
+ * (`DetailsPhotosTab`, `DetailsLinksTab`, `DetailsAttachmentsTab`, `CKDetailsSegmentedControlCell`).
+ * Nothing in `references/` shows that surface, so this file stays with the grouped cells.
+ *
+ * ## Scrolling
+ *
+ * Also UNMEASURED, and it cannot be measured from a still. The cells scroll; the header collapses
+ * into the conversation's nav bar, which is the exact inverse of the pose the presentation grows
+ * out of, so the two ends of the collapse are measured even though the travel between them is not.
+ * See `iosDetailsCollapse`. It is seekable: `scroll` (in points) drives paused Web Animations, so
+ * `document.getAnimations()` reaches every layer and a checkpoint renders the same twice.
  */
 
 const font = "-apple-system, BlinkMacSystemFont, sans-serif";
@@ -37,14 +75,43 @@ const vars =
   "[--ios-dt-label:#000000] [--ios-dt-secondary:#848488] [--ios-dt-blue:#0088ff] [--ios-dt-red:#ff383c] " +
   "[--ios-dt-fill:rgba(0,0,0,0.06)] [--ios-dt-separator:#dadadb] [--ios-dt-glyph:#000000] [--ios-dt-glyph-off:rgba(0,0,0,0.26)] [--ios-dt-glyph-blend:normal] [--ios-dt-av-top:#a9c2e1] [--ios-dt-av-bottom:#747fb9] " +
   "[--ios-dt-tag:#c7c7cc] [--ios-dt-tag-label:#ffffff] [--ios-dt-track:rgba(0,0,0,0.21)] [--ios-dt-knob:#ffffff] " +
+  "[--ios-dt-chevron:#bdbdbd] [--ios-dt-av-shadow:rgba(0,0,0,0.12)] [--ios-dt-glass:rgba(255,255,255,0.9)] [--ios-dt-glass-rim:inset_0_0_0_0_rgba(0,0,0,0)] [--ios-dt-glass-shadow:0_6px_36px_4px_rgba(0,0,0,0.065)] " +
   "[--ios-dt-scrim:rgba(255,255,255,0.573)] [--ios-dt-saturate:1] [--ios-dt-page:#ffffff] " +
   "dark:[--ios-dt-label:#ffffff] dark:[--ios-dt-secondary:#98989f] dark:[--ios-dt-blue:#0091ff] dark:[--ios-dt-red:#ff4245] " +
   "dark:[--ios-dt-fill:rgba(235,235,245,0.12)] dark:[--ios-dt-separator:#3a3a3c] dark:[--ios-dt-glyph:#ffffff] dark:[--ios-dt-glyph-off:rgba(255,255,255,0.26)] dark:[--ios-dt-glyph-blend:plus-lighter] dark:[--ios-dt-av-top:#575368] dark:[--ios-dt-av-bottom:#302649] " +
-  "dark:[--ios-dt-track:rgba(255,255,255,0.28)] " +
+  "dark:[--ios-dt-track:rgba(255,255,255,0.28)] dark:[--ios-dt-chevron:#5d5d5d] dark:[--ios-dt-av-shadow:rgba(0,0,0,0.3)] " +
+  "dark:[--ios-dt-glass:rgba(28,28,28,0.9)] dark:[--ios-dt-glass-rim:inset_0_0_0_0.3333px_rgba(255,255,255,0.0385),inset_0_0_0_0.6667px_rgba(255,255,255,0.032),inset_0_0_0_1px_rgba(255,255,255,0.061)] dark:[--ios-dt-glass-shadow:0_0_0_0_rgba(0,0,0,0)] " +
   "dark:[--ios-dt-scrim:rgba(0,0,0,0.587)] dark:[--ios-dt-saturate:1.05] dark:[--ios-dt-page:#000000]";
 
 /** Apple's continuous corner. Browsers without `corner-shape` fall back to a plain round corner. */
 const continuous = { cornerShape: "superellipse(1.14)" } as CSSProperties;
+
+/**
+ * The grouped-cell geometry, all of it measured off the captures (see the header). `top` is the
+ * first cell's top; every later group starts `gap` below the one before it, which reproduces the
+ * measured 269.67 / 360.33 / 484.33 / 556.33 stack exactly and lets an unmeasured group in without
+ * moving anything above it.
+ */
+const cell = {
+  left: 16,
+  width: 370,
+  radius: 26,
+  gap: 20,
+  top: 269.6667,
+  /** Row text starts at x 32, i.e. 16 inside the cell. */
+  inset: 16,
+  /** One-line row (Hide Alerts, Block Contact, the blue link rows). */
+  row: 52,
+  /** Two-line cell (the phone row). */
+  twoLine: 70.6667,
+} as const;
+
+/** The measured two-line cell's three gaps, with its 17pt and 13pt lines swapped. UNMEASURED. */
+const twoLineRow = { title: 16.875, detail: 40.375 } as const;
+
+/** 3 across, 4 apart (CKUIBehavior, phone idiom), inside the measured 16 inset: a 110 tile. */
+const grid = { columns: 3, gap: 4, radius: 12 } as const;
+const tile = (cell.width - cell.inset * 2 - grid.gap * (grid.columns - 1)) / grid.columns;
 
 export type IosDetailsAction = {
   id: string;
@@ -54,6 +121,13 @@ export type IosDetailsAction = {
   disabled?: boolean;
   onPress?: () => void;
 };
+
+/** One tile of the shared photos grid. Pass `node` for a next/image, `src` for a plain one. */
+export type IosDetailsPhoto = { id: string; src?: string; alt?: string; node?: ReactNode; onPress?: () => void };
+/** One row of the shared links or shared attachments list. */
+export type IosDetailsItem = { id: string; title: string; detail?: string; onPress?: () => void };
+/** A shared-content group: a header row that navigates, then its items. */
+export type IosDetailsSection<T> = { title?: string; count?: number | string; items: T[]; onOpen?: () => void };
 
 export type IosDetailsProps = Omit<ComponentProps<"div">, "children" | "onChange"> & {
   name: string;
@@ -70,6 +144,10 @@ export type IosDetailsProps = Omit<ComponentProps<"div">, "children" | "onChange
   hideAlerts?: boolean;
   onHideAlertsChange?: (next: boolean) => void;
   hideAlertsLabel?: string;
+  /** Shared content, below the capture's fold and UNMEASURED. Each one is a grouped cell. */
+  photos?: IosDetailsSection<IosDetailsPhoto>;
+  sharedLinks?: IosDetailsSection<IosDetailsItem>;
+  attachments?: IosDetailsSection<IosDetailsItem>;
   blockLabel?: string;
   onBlock?: () => void;
   onBack?: () => void;
@@ -81,6 +159,11 @@ export type IosDetailsProps = Omit<ComponentProps<"div">, "children" | "onChange
    * Leave it unset for the real thing.
    */
   progress?: number;
+  /**
+   * Seek the scroll position, in points, instead of letting the surface scroll: the header collapse
+   * follows it exactly the way it follows a finger. Leave it unset for the real thing.
+   */
+  scroll?: number;
   /** False plays the dismissal; `onExited` fires when it is over, and the consumer unmounts then. */
   open?: boolean;
   onExited?: () => void;
@@ -134,6 +217,8 @@ export const iosDetailsMotion = {
   /** The three glass buttons, then the grouped cells, settle after the header in a short stagger. */
   actionStart: 60, actionStagger: 22, actionRise: 14, actionDuration: 200,
   cellStart: 80, cellStagger: 24, cellRise: 22, cellDuration: 200,
+  /** The stagger stops at the measured stack's four cells, so a longer stack still lands by `enter`. */
+  cellStaggerMax: 3,
   /** A drag past this far, or released faster than this (px/ms), dismisses. */
   dragCommit: 120, dragVelocity: 0.6,
 } as const;
@@ -144,6 +229,29 @@ export const iosDetailsMorph = {
   name: { dy: -29.15, scale: 17 / 28 },
 } as const;
 
+/**
+ * The header collapse. UNMEASURED — no capture holds this screen scrolled — but both ends of it are:
+ * it runs the presentation's morph backwards, so a fully collapsed header is the conversation's own
+ * measured nav bar (avatar Ø60 centred (201, 92) under its measured shadow, the name 17pt centred on
+ * y 133.5 inside the measured glass pill, the back button Ø44 at (16, 62), which never moves).
+ *
+ * `travel` is derived rather than chosen: 120.3333 is the scroll that carries the first cell's
+ * measured top (269.6667) onto the nav bar pill's measured bottom edge (149.3333), so the collapse
+ * finishes exactly as the content reaches the bar it is passing under, and never overlaps it.
+ * `actionFade` is derived the same way: the three glass circles are gone by the scroll (74) that
+ * brings the first cell's top onto their measured top (195.6667).
+ *
+ * The pill's own box is the nav bar's measured padding (12.9531 leading, 10.7188 trailing) around
+ * the name at the collapsed scale, so a longer or shorter name gets the pill that name would have.
+ */
+export const iosDetailsCollapse = {
+  travel: 120.3333,
+  actionFade: 74,
+  pill: { top: 117, height: 32.3333, radius: 16.1667, padLeft: 12.9531, padRight: 10.7188, centre: 201 },
+  /** Rendering the collapsed pill's 24 blur (measured on the nav bar) through the collapsed scale. */
+  blur: 24,
+} as const;
+
 type Pose = Record<string, string>;
 type Layer = { el: HTMLElement; from: Pose; to: Pose; duration: number; delay: number; easing: string };
 
@@ -152,6 +260,9 @@ function prefersReducedMotion() {
 }
 function clamp01(value: number) { return Math.max(0, Math.min(1, value)); }
 function stop(animation: Animation) { try { animation.cancel(); } catch { /* already gone */ } }
+function seekTo(list: Animation[], time: number) {
+  list.forEach(animation => { animation.pause(); try { animation.currentTime = time; } catch { /* no timeline yet */ } });
+}
 
 /**
  * Where in the rise the sheet stands `covered` of the way up: the entrance curve read backwards.
@@ -182,7 +293,8 @@ function poseNow(el: HTMLElement, shape: Pose): Pose {
  * animation would promote each layer and cut the glass circles off from the backdrop they blur).
  *
  * `translate` and `scale` are used rather than `transform`, so a layer whose measured position is
- * already carried by a fractional `transform` (the action circles, via `subpixel`) keeps it.
+ * already carried by a fractional `transform` (the action circles, via `subpixel`) keeps it — and so
+ * that the collapse, which owns `transform`, composes with this instead of replacing it.
  */
 function detailsLayers(content: HTMLElement, blur: HTMLElement | null, scrim: HTMLElement | null, height: number, saturate: string): Layer[] {
   const m = iosDetailsMotion;
@@ -192,6 +304,7 @@ function detailsLayers(content: HTMLElement, blur: HTMLElement | null, scrim: HT
   };
   const own = (slot: string) => content.querySelector<HTMLElement>(`:scope > [data-slot="${slot}"]`);
   const each = (slot: string) => Array.from(content.querySelectorAll<HTMLElement>(`:scope > [data-slot="${slot}"]`));
+  const cells = () => Array.from(content.querySelectorAll<HTMLElement>(`:scope > [data-slot="details-scroll"] [data-slot="cell"]`));
   // The chrome that both screens share is already on screen, in the same place: it cancels the
   // sheet's rise exactly (same duration, same easing) and morphs out of the nav bar instead.
   const stay = (dy: number) => `0px ${(dy - height).toFixed(3)}px`;
@@ -207,7 +320,7 @@ function detailsLayers(content: HTMLElement, blur: HTMLElement | null, scrim: HT
   add(own("avatar"), { translate: stay(iosDetailsMorph.avatar.dy), scale: String(iosDetailsMorph.avatar.scale) }, { translate: "0px 0px", scale: "1" }, m.sheet);
   add(own("name"), { translate: stay(iosDetailsMorph.name.dy), scale: String(iosDetailsMorph.name.scale) }, { translate: "0px 0px", scale: "1" }, m.sheet);
   each("action").forEach((el, index) => add(el, { translate: `0px ${m.actionRise}px` }, { translate: "0px 0px" }, m.actionDuration, m.actionStart + index * m.actionStagger));
-  each("cell").forEach((el, index) => add(el, { translate: `0px ${m.cellRise}px` }, { translate: "0px 0px" }, m.cellDuration, m.cellStart + index * m.cellStagger));
+  cells().forEach((el, index) => add(el, { translate: `0px ${m.cellRise}px` }, { translate: "0px 0px" }, m.cellDuration, m.cellStart + Math.min(index, m.cellStaggerMax) * m.cellStagger));
   return layers;
 }
 
@@ -219,6 +332,39 @@ function runLayers(layers: Layer[], phase: "enter" | "exit"): Animation[] {
     // One flat span on the way out, so the shared chrome's counter-translate still cancels the
     // sheet's exactly, and it starts from wherever the layer is now (settled, or mid-drag).
     : el.animate([poseNow(el, from), from], { duration: m.exit, easing: m.exitEase, fill: "both" }));
+}
+
+/**
+ * The collapse, as paused animations whose clock is the scroll offset in points: one millisecond of
+ * timeline per point scrolled, so seeking is `currentTime = scrollTop`. They own `transform` and
+ * `opacity`, which composes with the presentation's `translate` / `scale` rather than replacing it,
+ * and they exist only while the surface is scrolled — at the top the timeline is cancelled and the
+ * measured screen carries no transform at all, exactly as it does with no collapse in the file.
+ */
+function collapseLayers(content: HTMLElement, pillWidth: number): Layer[] {
+  const c = iosDetailsCollapse;
+  const layers: Layer[] = [];
+  const add = (el: HTMLElement | null, from: Pose, to: Pose, duration: number = c.travel) => {
+    if (el) layers.push({ el, from, to, duration, delay: 0, easing: "linear" });
+  };
+  const own = (slot: string) => content.querySelector<HTMLElement>(`:scope > [data-slot="${slot}"]`);
+  const avatar = own("avatar");
+  const shadow = avatar ? getComputedStyle(avatar).getPropertyValue("--ios-dt-av-shadow").trim() || "rgba(0,0,0,0.12)" : "";
+  add(avatar,
+    { transform: "translateY(0px) scale(1)", boxShadow: "0 2px 4px rgba(0,0,0,0)" },
+    { transform: `translateY(${iosDetailsMorph.avatar.dy}px) scale(${iosDetailsMorph.avatar.scale})`, boxShadow: `0 2px 4px ${shadow}` });
+  add(own("name"),
+    { transform: "translateY(0px) scale(1)" },
+    { transform: `translateY(${iosDetailsMorph.name.dy}px) scale(${iosDetailsMorph.name.scale})` });
+  const pill = own("collapsed-pill");
+  if (pill) {
+    pill.style.width = `${pillWidth.toFixed(4)}px`;
+    pill.style.left = `${(c.pill.centre - pillWidth / 2).toFixed(4)}px`;
+    add(pill, { opacity: "0" }, { opacity: "1" });
+  }
+  Array.from(content.querySelectorAll<HTMLElement>(`:scope > [data-slot="action"]`))
+    .forEach(el => add(el, { opacity: "1" }, { opacity: "0" }, c.actionFade));
+  return layers;
 }
 
 /** Swallows the click a drag would otherwise leave behind on whatever control it started on. */
@@ -289,18 +435,48 @@ function ActionGlyph({ icon }: { icon: IosDetailsAction["icon"] }) {
   );
 }
 
+/**
+ * The disclosure chevron on a row that navigates. The nav bar's measured one: 4.67 × 12.67 of ink
+ * on a 2.6 round stroke, in the measured chevron gray (`ios-nav-bar.tsx`). Its box is centred on the
+ * row and its ink sits `cell.inset` in from the cell's trailing edge.
+ */
+function Chevron() {
+  return (
+    <svg aria-hidden="true" className="absolute" width="8.6667" height="16.6667" viewBox="-2 -2 8.6667 16.6667" fill="none"
+      stroke="var(--ios-dt-chevron)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"
+      style={{ right: cell.inset - 2, top: "50%", transform: "translateY(-50%)" }}>
+      <path d="M1.3 1.3 3.37 6.3333 1.3 11.37" />
+    </svg>
+  );
+}
+
 export type IosSwitchProps = Omit<ComponentProps<"button">, "onChange"> & {
   checked?: boolean;
   onChange?: (next: boolean) => void;
   label?: string;
 };
 
-/** iOS 26 switch: 63×28 track, 37×24 knob inset 2 (measured on the Hide Alerts row). */
+/**
+ * iOS 26 switch: 63×28 track, 37×24 knob inset 2, so the knob travels 22 (measured on the Hide
+ * Alerts row of both captures, which show it off).
+ *
+ * The on colour is not in any capture and is not a guess either: `+[UIColor systemGreenColor]`,
+ * resolved for each `UIUserInterfaceStyle` in a Mac Catalyst process with `-[UIDevice
+ * userInterfaceIdiom]` swizzled to phone, is #34c759 light and #30d158 dark.
+ *
+ * Off, the track is the measured composite over this screen's cell fill (`--ios-dt-track`). Away
+ * from that cell there is nothing measured to composite against, so it falls back to the framework's
+ * `+[UIColor secondarySystemFillColor]` (#787880 at 16% light, 32% dark).
+ */
 export function IosSwitch({ checked = false, onChange, label, className, style, ...rest }: IosSwitchProps) {
   return (
     <button type="button" data-slot="ios-switch" role="switch" aria-checked={checked} aria-label={label} onClick={() => onChange?.(!checked)}
-      className={cn("relative shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff] motion-reduce:!transition-none", className)}
-      style={{ width: 63, height: 28, borderRadius: 14, overflow: "hidden", background: checked ? "#34c759" : "var(--ios-dt-track)", transition: "background 200ms ease", ...style }}
+      className={cn(
+        "relative shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff] motion-reduce:!transition-none",
+        "[--ios-sw-on:#34c759] [--ios-sw-off:rgba(120,120,128,0.16)] dark:[--ios-sw-on:#30d158] dark:[--ios-sw-off:rgba(120,120,128,0.32)]",
+        className,
+      )}
+      style={{ width: 63, height: 28, borderRadius: 14, overflow: "hidden", background: checked ? "var(--ios-sw-on)" : "var(--ios-dt-track, var(--ios-sw-off))", transition: "background 200ms ease", ...style }}
       {...rest}>
       {/*
         The capture shows no shadow outside the switch at all: one pixel past the track the pixels
@@ -308,7 +484,7 @@ export function IosSwitch({ checked = false, onChange, label, className, style, 
         The track therefore clips the knob's shadow, and that shadow is barely there.
       */}
       <span aria-hidden="true" className="absolute block motion-reduce:!transition-none" style={{
-        left: 2, top: 2, width: 37, height: 24, borderRadius: 12, background: "var(--ios-dt-knob)",
+        left: 2, top: 2, width: 37, height: 24, borderRadius: 12, background: "var(--ios-dt-knob, #ffffff)",
         boxShadow: "0 1px 3px rgba(0,0,0,0.10)",
         transform: `translateX(${checked ? 22 : 0}px)`, transition: "transform 220ms cubic-bezier(0.32,0.72,0,1)",
       }} />
@@ -331,9 +507,9 @@ function Cell({ top, height, children }: { top: number; height: number; children
   const whole = Math.floor(top);
   const boxHeight = Math.max(1, Math.round(height));
   return (
-    <div data-slot="cell" className="absolute" style={{ left: 16, top, width: 370, height }}>
+    <div data-slot="cell" className="absolute" style={{ left: cell.left, top, width: cell.width, height }}>
       <span aria-hidden="true" data-slot="cell-fill" className="absolute" style={{
-        left: 0, top: whole - top, width: 370, height: boxHeight, borderRadius: 26,
+        left: 0, top: whole - top, width: cell.width, height: boxHeight, borderRadius: cell.radius,
         background: "var(--ios-dt-fill)", transformOrigin: "0 0",
         transform: `translateY(${(top - whole).toFixed(4)}px) scaleY(${(height / boxHeight).toFixed(5)})`,
         ...continuous,
@@ -343,18 +519,155 @@ function Cell({ top, height, children }: { top: number; height: number; children
   );
 }
 
+/** The measured hairline: 1pt at a row boundary, inset to x 32–370. */
+function Separator({ top }: { top: number }) {
+  return (
+    <span aria-hidden="true" data-slot="separator" className="absolute"
+      style={{ left: cell.inset, right: cell.inset, top: top - 1.3333, transform: "translateY(0.3333px)", height: 1, background: "var(--ios-dt-separator)" }} />
+  );
+}
+
+const rowFocus = "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#0088ff]";
+/** Row text is 17pt (measured); a second line is 13pt (measured, the phone cell's small label). */
+const titleType: CSSProperties = { fontSize: 17, lineHeight: "22px", color: "var(--ios-dt-label)" };
+const detailType: CSSProperties = { fontSize: 13, lineHeight: "16px", color: "var(--ios-dt-secondary)" };
+const clip: CSSProperties = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+
+/**
+ * A shared group's header row: the section's name, how many it holds, and a chevron. The whole 52pt
+ * row is the hit target when it navigates, and it is a plain heading when it does not. UNMEASURED.
+ */
+function SectionHeader({ title, count, onOpen }: { title: string; count?: number | string; onOpen?: () => void }) {
+  const body = (
+    <>
+      <span style={{ ...titleType, ...clip }}>{title}</span>
+      {count !== undefined && (
+        <span data-slot="section-count" style={{ ...titleType, color: "var(--ios-dt-secondary)", marginLeft: "auto", marginRight: onOpen ? 8 : 0 }}>{count}</span>
+      )}
+      {onOpen && <Chevron />}
+    </>
+  );
+  const style: CSSProperties = { paddingLeft: cell.inset, paddingRight: cell.inset + (onOpen ? 14 : 0), transform: "translateY(0.6667px)" };
+  return (
+    <div className="absolute" style={{ left: 0, right: 0, top: 0, height: cell.row }}>
+      {onOpen
+        ? <button type="button" data-slot="section-header" onClick={onOpen} className={cn("absolute inset-0 flex items-center text-left", rowFocus)} style={style}>{body}</button>
+        : <h2 data-slot="section-header" className="absolute inset-0 m-0 flex items-center font-normal" style={style}>{body}</h2>}
+    </div>
+  );
+}
+
+/**
+ * One row of a shared links or shared attachments list. Two lines keep the measured phone cell's
+ * three gaps with its 17pt and 13pt lines swapped, so the row is the measured 70.67 tall; a row with
+ * no second line is the measured 52. UNMEASURED.
+ */
+function ItemRow({ item, top, height }: { item: IosDetailsItem; top: number; height: number }) {
+  const twoLine = item.detail !== undefined;
+  const pad = cell.inset + (item.onPress ? 14 : 0);
+  const body = twoLine ? (
+    <>
+      <span className="absolute" style={{ left: cell.inset, right: pad, top: twoLineRow.title, ...titleType, ...clip }}>{item.title}</span>
+      <span className="absolute" style={{ left: cell.inset, right: pad, top: twoLineRow.detail, ...detailType, ...clip }}>{item.detail}</span>
+      {item.onPress && <Chevron />}
+    </>
+  ) : (
+    <>
+      <span style={{ ...titleType, ...clip }}>{item.title}</span>
+      {item.onPress && <Chevron />}
+    </>
+  );
+  const style: CSSProperties = twoLine
+    ? { transform: "translateY(0.6667px)" }
+    : { paddingLeft: cell.inset, paddingRight: pad, transform: "translateY(0.6667px)" };
+  return (
+    <div className="absolute" style={{ left: 0, right: 0, top, height }}>
+      {/* Every item row sits under a row: the header above the first one, an item above the rest. */}
+      <Separator top={0} />
+      {item.onPress
+        ? <button type="button" data-slot="detail-row" onClick={item.onPress} className={cn("absolute inset-0 text-left", !twoLine && "flex items-center", rowFocus)} style={style}>{body}</button>
+        : <div data-slot="detail-row" className={cn("absolute inset-0", !twoLine && "flex items-center")} style={style}>{body}</div>}
+    </div>
+  );
+}
+
+/** How tall a shared group's cell is, given what it holds. UNMEASURED; see the header. */
+function photosHeight(section: IosDetailsSection<IosDetailsPhoto>) {
+  const rows = Math.max(1, Math.ceil(section.items.length / grid.columns));
+  return cell.row + cell.inset + rows * tile + (rows - 1) * grid.gap + cell.inset;
+}
+function listHeight(section: IosDetailsSection<IosDetailsItem>) {
+  return cell.row + section.items.reduce((total, item) => total + (item.detail === undefined ? cell.row : cell.twoLine), 0);
+}
+
+function PhotosCell({ section, top }: { section: IosDetailsSection<IosDetailsPhoto>; top: number }) {
+  return (
+    <Cell top={top} height={photosHeight(section)}>
+      <SectionHeader title={section.title ?? "Photos"} count={section.count ?? section.items.length} onOpen={section.onOpen} />
+      <Separator top={cell.row} />
+      {section.items.map((photo, index) => {
+        const column = index % grid.columns;
+        const row = Math.floor(index / grid.columns);
+        const box: CSSProperties = {
+          left: cell.inset + column * (tile + grid.gap),
+          top: cell.row + cell.inset + row * (tile + grid.gap),
+          width: tile, height: tile, borderRadius: grid.radius, background: "var(--ios-dt-fill)",
+        };
+        const label = photo.alt ?? `Photo ${index + 1}`;
+        const media = photo.node ?? (photo.src
+          // eslint-disable-next-line @next/next/no-img-element -- registry components stay framework-neutral
+          ? <img src={photo.src} alt="" className="size-full object-cover" draggable={false} />
+          : null);
+        return photo.onPress
+          ? (
+            <button key={photo.id} type="button" data-slot="photo" aria-label={label} onClick={photo.onPress}
+              className={cn("absolute overflow-hidden", "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff]")} style={box}>
+              {media}
+            </button>
+          )
+          : (
+            <span key={photo.id} data-slot="photo" role="img" aria-label={label} className="absolute block overflow-hidden" style={box}>
+              {media}
+            </span>
+          );
+      })}
+    </Cell>
+  );
+}
+
+function ListCell({ section, title, top }: { section: IosDetailsSection<IosDetailsItem>; title: string; top: number }) {
+  // The rows stack under the header, each one as tall as it needs: 52 with one line, 70.67 with two.
+  const rows: Array<{ item: IosDetailsItem; top: number; height: number }> = [];
+  section.items.reduce<number>((cursor, item) => {
+    const height = item.detail === undefined ? cell.row : cell.twoLine;
+    rows.push({ item, top: cursor, height });
+    return cursor + height;
+  }, cell.row);
+  return (
+    <Cell top={top} height={listHeight(section)}>
+      <SectionHeader title={section.title ?? title} count={section.count ?? section.items.length} onOpen={section.onOpen} />
+      {rows.map(row => <ItemRow key={row.item.id} item={row.item} top={row.top} height={row.height} />)}
+    </Cell>
+  );
+}
+
 export function IosDetails({
   name, initials, avatar, phoneLabel = "phone", phone, tag, actions = [], links = [],
   hideAlerts = false, onHideAlertsChange, hideAlertsLabel = "Hide Alerts", blockLabel = "Block Contact", onBlock,
-  onBack, backdrop, progress, open = true, onExited, className, style, ...props
+  photos, sharedLinks, attachments,
+  onBack, backdrop, progress, scroll, open = true, onExited, className, style, ...props
 }: IosDetailsProps) {
   const letters = initials ?? name.trim().split(/\s+/).slice(0, 2).map(p => p[0] ?? "").join("").toUpperCase();
   const titleId = useId();
   const root = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  const nameInk = useRef<HTMLSpanElement>(null);
   const blur = useRef<HTMLDivElement>(null);
   const scrim = useRef<HTMLDivElement>(null);
   const timeline = useRef<Animation[] | null>(null);
+  const collapse = useRef<Animation[] | null>(null);
+  const scrolled = useRef(0);
   const landed = useRef(false);
   const exited = useRef(onExited);
   useEffect(() => { exited.current = onExited; }, [onExited]);
@@ -365,6 +678,12 @@ export function IosDetails({
   const [seenOpen, setSeenOpen] = useState(open);
   const [closing, setClosing] = useState(false);
   if (seenOpen !== open) { setSeenOpen(open); setClosing(!open); }
+
+  // Whether the surface is off the top, derived during render for a seeked scroll and kept in state
+  // for a live one. The collapsed pill only exists while it is true, so the screen at rest is the
+  // measured one with nothing extra painted over it.
+  const [liveCollapsing, setLiveCollapsing] = useState(false);
+  const collapsing = scroll !== undefined ? scroll > 0 : liveCollapsing;
 
   const build = (phase: "enter" | "exit"): Animation[] | null => {
     const node = content.current;
@@ -382,9 +701,41 @@ export function IosDetails({
     landed.current = true;
   };
 
+  /**
+   * The collapse follows the scroll offset with no animation of its own: build the layers if the
+   * surface has left the top, then seek them to the offset. Back at the top the timeline is dropped,
+   * which is what keeps the measured screen free of a composited transform.
+   */
+  const seekCollapse = (top: number) => {
+    scrolled.current = top;
+    const node = content.current;
+    if (!node) return;
+    if (top <= 0) { collapse.current?.forEach(stop); collapse.current = null; return; }
+    let list = collapse.current;
+    if (!list) {
+      const back = node.querySelector<HTMLElement>(`:scope > [data-slot="back"]`);
+      const title = node.querySelector<HTMLElement>(`:scope > [data-slot="name"]`);
+      const ink = nameInk.current;
+      // The back button is Ø44 on both screens and the collapse never scales it, so its box is the
+      // ruler that turns whatever scale an embedding applies back into points. The name's own scale
+      // comes off its computed style, because a half-played entrance is still holding one.
+      const unit = back ? back.getBoundingClientRect().width / 44 : 1;
+      const nameScale = (title && parseFloat(getComputedStyle(title).scale)) || 1;
+      const inkWidth = ink && unit ? ink.getBoundingClientRect().width / unit / nameScale : 0;
+      const c = iosDetailsCollapse;
+      list = collapseLayers(node, inkWidth * iosDetailsMorph.name.scale + c.pill.padLeft + c.pill.padRight)
+        .map(({ el, from, to, duration, easing }) => el.animate([from, to], { duration, easing, fill: "both" }));
+      collapse.current = list;
+    }
+    seekTo(list, Math.min(top, iosDetailsCollapse.travel));
+  };
+
   // Only unmount cancels the timeline. The two phases hand over to each other without one, so a
   // dismissal can read the pose the entrance, or a drag, is still holding.
-  useEffect(() => () => { timeline.current?.forEach(stop); timeline.current = null; }, []);
+  useEffect(() => () => {
+    timeline.current?.forEach(stop); timeline.current = null;
+    collapse.current?.forEach(stop); collapse.current = null;
+  }, []);
 
   useLayoutEffect(() => {
     if (prefersReducedMotion()) { landed.current = true; return; }
@@ -404,16 +755,15 @@ export function IosDetails({
     if (!list) return;
     timeline.current = list;
     const total = open ? iosDetailsMotion.enter : iosDetailsMotion.exit;
-    const seek = (time: number) => list.forEach(animation => { animation.pause(); try { animation.currentTime = time; } catch { /* no timeline yet */ } });
     if (progress !== undefined) {
       const time = clamp01(progress) * total;
-      seek(time);
+      seekTo(list, time);
       // A settled checkpoint is screenshotted, so drop the timeline there and let the glass breathe.
       if (open && time >= total) land(list);
       return;
     }
     // Mounted closed rather than closing: hold the dismissed pose instead of playing a dismissal.
-    if (!open && !closing) { seek(total); return; }
+    if (!open && !closing) { seekTo(list, total); return; }
     let dropped = false;
     list.forEach(animation => animation.play());
     Promise.allSettled(list.map(animation => animation.finished)).then(() => {
@@ -423,6 +773,23 @@ export function IosDetails({
     });
     return () => { dropped = true; };
   }, [open, progress, closing]);
+
+  // The collapse is rebuilt whenever the pill comes or goes, and re-seeked whenever the offset is
+  // handed in rather than scrolled. Both paths end in the same paused, seeked timeline.
+  useLayoutEffect(() => {
+    collapse.current?.forEach(stop);
+    collapse.current = null;
+    if (scroll !== undefined && scroller.current) scroller.current.scrollTop = scroll;
+    seekCollapse(scroll ?? scrolled.current);
+    // `seekCollapse` only reads refs; the offset and the pill's presence are the whole input.
+  }, [collapsing, scroll]);
+
+  const onScroll = (event: ReactUIEvent<HTMLDivElement>) => {
+    if (scroll !== undefined) return;
+    const top = event.currentTarget.scrollTop;
+    seekCollapse(top);
+    if (top > 0 !== liveCollapsing) setLiveCollapsing(top > 0);
+  };
 
   // The screen covers the conversation, so Escape backs out of it the way the back button does.
   useEffect(() => {
@@ -436,7 +803,8 @@ export function IosDetails({
    * Drag down to dismiss. It seeks the entrance backwards rather than writing its own styles, so a
    * half-dragged screen is the same pose as a half-played entrance: the blur, the scrim, the sheet
    * and the header morph all follow the finger together. Released short of the threshold, it plays
-   * the rest of the entrance forward from where it is.
+   * the rest of the entrance forward from where it is. It only starts at the top of the list, so a
+   * drag anywhere below that scrolls instead, the way it does natively.
    */
   const drag = useRef<{ id: number; from: number; last: number; at: number; velocity: number; live: boolean } | null>(null);
   const playIn = () => {
@@ -448,6 +816,7 @@ export function IosDetails({
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!open || closing || progress !== undefined || !onBack || !landed.current || prefersReducedMotion()) return;
     if (event.pointerType === "mouse" && event.button !== 0) return;
+    if ((scroller.current?.scrollTop ?? 0) > 0) return;
     drag.current = { id: event.pointerId, from: event.clientY, last: event.clientY, at: event.timeStamp, velocity: 0, live: false };
   };
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -460,7 +829,7 @@ export function IosDetails({
       state.live = true;
       event.currentTarget.setPointerCapture(state.id);
       const list = timeline.current ?? build("enter");
-      if (list) { timeline.current = list; list.forEach(animation => { animation.pause(); try { animation.currentTime = iosDetailsMotion.enter; } catch { /* no timeline yet */ } }); }
+      if (list) { timeline.current = list; seekTo(list, iosDetailsMotion.enter); }
     }
     const elapsed = event.timeStamp - state.at;
     if (elapsed > 0) state.velocity = (event.clientY - state.last) / elapsed;
@@ -470,7 +839,7 @@ export function IosDetails({
     // the rise stands `1 - dy / height` of the way up.
     const height = root.current?.getBoundingClientRect().height || 1;
     const back = riseSeek(clamp01(1 - dy / height)) * iosDetailsMotion.sheet;
-    timeline.current?.forEach(animation => { animation.pause(); try { animation.currentTime = back; } catch { /* no timeline yet */ } });
+    if (timeline.current) seekTo(timeline.current, back);
   };
   const onPointerEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
     const state = drag.current;
@@ -484,6 +853,68 @@ export function IosDetails({
     if (dy > iosDetailsMotion.dragCommit || state.velocity > iosDetailsMotion.dragVelocity) onBack?.();
     playIn();
   };
+
+  // The stack, in order. With no shared content it is the four measured cells on their measured
+  // tops; each group that is present pushes the ones under it down by its height plus the measured
+  // 20, and Block Contact stays last.
+  const groups: ReactNode[] = [];
+  let cursor = cell.top;
+  const place = (height: number, render: (top: number) => ReactNode) => {
+    groups.push(render(cursor));
+    cursor += height + cell.gap;
+  };
+  if (phone !== undefined) {
+    place(cell.twoLine, top => (
+      <Cell key="phone" top={top} height={cell.twoLine}>
+        <span data-slot="phone-label" className="absolute" style={{ left: cell.inset, top: 16.875, fontSize: 13, lineHeight: "16px", transform: "translateY(-0.6667px)", color: "var(--ios-dt-secondary)" }}>{phoneLabel}</span>
+        <span data-slot="phone-value" className="absolute" style={{ left: cell.inset, top: 34.375, fontSize: 17, lineHeight: "22px", color: "var(--ios-dt-label)" }}>{phone}</span>
+        {tag && (
+          <span data-slot="tag" className="absolute flex items-center justify-center"
+            style={{ left: 312.3333, top: 19.3333, transform: "translateY(0.3333px)", width: 41, height: 11.3333, borderRadius: 3.5, background: "var(--ios-dt-tag)", color: "var(--ios-dt-tag-label)", fontSize: 8.5, lineHeight: 1, fontWeight: 700, letterSpacing: 0 }}>
+            {tag}
+          </span>
+        )}
+      </Cell>
+    ));
+  }
+  if (links.length > 0) {
+    place(links.length * cell.row, top => (
+      <Cell key="links" top={top} height={links.length * cell.row}>
+        {links.map((link, index) => (
+          <div key={link.id} className="absolute" style={{ left: 0, right: 0, top: index * cell.row, height: cell.row }}>
+            {index > 0 && <Separator top={0} />}
+            <button type="button" data-slot="link" onClick={link.onPress}
+              className={cn("absolute inset-0 flex items-center text-left", rowFocus)}
+              style={{ paddingLeft: cell.inset, fontSize: 17, lineHeight: "22px", transform: "translateY(0.6667px)", color: "var(--ios-dt-blue)" }}>
+              {link.label}
+            </button>
+          </div>
+        ))}
+      </Cell>
+    ));
+  }
+  place(cell.row, top => (
+    <Cell key="hide-alerts" top={top} height={cell.row}>
+      <div className="absolute inset-0 flex items-center justify-between" style={{ paddingLeft: cell.inset, paddingRight: 14 }}>
+        <span data-slot="hide-alerts-label" style={{ ...titleType, transform: "translateY(0.6667px)" }}>{hideAlertsLabel}</span>
+        <IosSwitch checked={hideAlerts} onChange={onHideAlertsChange} label={hideAlertsLabel} style={{ transform: "translateY(0.3333px)" }} />
+      </div>
+    </Cell>
+  ));
+  if (photos && photos.items.length > 0) place(photosHeight(photos), top => <PhotosCell key="photos" section={photos} top={top} />);
+  if (sharedLinks && sharedLinks.items.length > 0) place(listHeight(sharedLinks), top => <ListCell key="shared-links" section={sharedLinks} title="Links" top={top} />);
+  if (attachments && attachments.items.length > 0) place(listHeight(attachments), top => <ListCell key="attachments" section={attachments} title="Attachments" top={top} />);
+  place(cell.row, top => (
+    <Cell key="block" top={top} height={cell.row}>
+      <button type="button" data-slot="block" onClick={onBlock}
+        className={cn("absolute inset-0 flex items-center text-left", rowFocus)}
+        style={{ paddingLeft: cell.inset, fontSize: 17, lineHeight: "22px", transform: "translateY(0.6667px)", color: "var(--ios-dt-red)" }}>
+        {blockLabel}
+      </button>
+    </Cell>
+  ));
+  // The page ends 20 below the last group: the measured gap, used as the bottom inset.
+  const pageHeight = cursor;
 
   return (
     <div ref={root} data-slot="ios-details" data-state={open ? "open" : "closing"}
@@ -512,22 +943,6 @@ export function IosDetails({
           whole CSS px, and the entrance is cancelled the moment it lands for exactly that reason. */}
       <div ref={content} data-slot="details-content" className="absolute inset-0"
         style={closing ? { pointerEvents: "none" } : undefined}>
-        <GlassCircle size={44} data-slot="back" aria-label="Back" onClick={onBack} style={{ left: 16, top: 62 }}>
-          <svg aria-hidden="true" width="44" height="44" viewBox="0 0 44 44" fill="none" stroke="var(--ios-dt-glyph)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M24.8 13.87 16.2 22.17 24.8 30.47" />
-          </svg>
-        </GlassCircle>
-
-        <div aria-hidden="true" data-slot="avatar" className="absolute flex items-center justify-center overflow-hidden rounded-full text-white"
-          style={{ left: 161, top: 62, width: 80, height: 80, fontSize: 37.5, lineHeight: 1, fontWeight: 650, background: "linear-gradient(var(--ios-dt-av-top), var(--ios-dt-av-bottom))" }}>
-          {avatar ?? letters}
-        </div>
-
-        <h1 id={titleId} data-slot="name" className="absolute m-0 whitespace-nowrap text-center"
-          style={{ left: 0, right: 0, top: 146.15, fontSize: 28, lineHeight: "33px", fontWeight: 700, letterSpacing: 0, color: "var(--ios-dt-label)" }}>
-          {name}
-        </h1>
-
         {actions.map((action, index) => (
           <GlassCircle key={action.id} size={54} data-slot="action" data-action={action.id} aria-label={action.label}
             aria-disabled={action.disabled || undefined} onClick={action.disabled ? undefined : action.onPress}
@@ -536,48 +951,41 @@ export function IosDetails({
           </GlassCircle>
         ))}
 
-        {phone !== undefined && (
-          <Cell top={269.6667} height={70.6667}>
-            <span data-slot="phone-label" className="absolute" style={{ left: 16, top: 16.875, fontSize: 13, lineHeight: "16px", transform: "translateY(-0.6667px)", color: "var(--ios-dt-secondary)" }}>{phoneLabel}</span>
-            <span data-slot="phone-value" className="absolute" style={{ left: 16, top: 34.375, fontSize: 17, lineHeight: "22px", color: "var(--ios-dt-label)" }}>{phone}</span>
-            {tag && (
-              <span data-slot="tag" className="absolute flex items-center justify-center"
-                style={{ left: 312.3333, top: 19.3333, transform: "translateY(0.3333px)", width: 41, height: 11.3333, borderRadius: 3.5, background: "var(--ios-dt-tag)", color: "var(--ios-dt-tag-label)", fontSize: 8.5, lineHeight: 1, fontWeight: 700, letterSpacing: 0 }}>
-                {tag}
-              </span>
-            )}
-          </Cell>
+        {/* The cells scroll; the header above them does not, it collapses. With only the measured
+            stack the page is shorter than the screen, so there is nothing to scroll and nothing to
+            collapse, and the frame is the capture's. */}
+        <div ref={scroller} data-slot="details-scroll" className="absolute inset-0" onScroll={onScroll}
+          style={{ overflowY: scroll === undefined ? "auto" : "hidden", overscrollBehavior: "contain" }}>
+          <div data-slot="details-page" className="relative" style={{ height: pageHeight }}>{groups}</div>
+        </div>
+
+        {collapsing && (
+          // The nav bar's own glass, under the name once the header has collapsed into it: measured
+          // fill, rim and shadow from `ios-nav-bar.tsx`. Its width is the name's, so it is only in
+          // the tree while the collapse is running.
+          <span aria-hidden="true" data-slot="collapsed-pill" className="pointer-events-none absolute" style={{
+            top: iosDetailsCollapse.pill.top, height: iosDetailsCollapse.pill.height, borderRadius: iosDetailsCollapse.pill.radius,
+            opacity: 0, background: "var(--ios-dt-glass)", boxShadow: "var(--ios-dt-glass-rim), var(--ios-dt-glass-shadow)",
+            backdropFilter: `blur(${iosDetailsCollapse.blur}px)`, WebkitBackdropFilter: `blur(${iosDetailsCollapse.blur}px)`,
+            ...continuous,
+          }} />
         )}
 
-        {links.length > 0 && (
-          <Cell top={360.3333} height={links.length * 52}>
-            {links.map((link, index) => (
-              <div key={link.id} className="absolute" style={{ left: 0, right: 0, top: index * 52, height: 52 }}>
-                {index > 0 && <span aria-hidden="true" data-slot="separator" className="absolute" style={{ left: 16, right: 16, top: -1.3333, transform: "translateY(0.3333px)", height: 1, background: "var(--ios-dt-separator)" }} />}
-                <button type="button" data-slot="link" onClick={link.onPress}
-                  className="absolute inset-0 flex items-center text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#0088ff]"
-                  style={{ paddingLeft: 16, fontSize: 17, lineHeight: "22px", transform: "translateY(0.6667px)", color: "var(--ios-dt-blue)" }}>
-                  {link.label}
-                </button>
-              </div>
-            ))}
-          </Cell>
-        )}
+        <div aria-hidden="true" data-slot="avatar" className="absolute flex items-center justify-center overflow-hidden rounded-full text-white"
+          style={{ left: 161, top: 62, width: 80, height: 80, fontSize: 37.5, lineHeight: 1, fontWeight: 650, background: "linear-gradient(var(--ios-dt-av-top), var(--ios-dt-av-bottom))" }}>
+          {avatar ?? letters}
+        </div>
 
-        <Cell top={484.3333} height={52}>
-          <div className="absolute inset-0 flex items-center justify-between" style={{ paddingLeft: 16, paddingRight: 14 }}>
-            <span data-slot="hide-alerts-label" style={{ fontSize: 17, lineHeight: "22px", transform: "translateY(0.6667px)", color: "var(--ios-dt-label)" }}>{hideAlertsLabel}</span>
-            <IosSwitch checked={hideAlerts} onChange={onHideAlertsChange} label={hideAlertsLabel} style={{ transform: "translateY(0.3333px)" }} />
-          </div>
-        </Cell>
+        <h1 id={titleId} data-slot="name" className="absolute m-0 whitespace-nowrap text-center"
+          style={{ left: 0, right: 0, top: 146.15, fontSize: 28, lineHeight: "33px", fontWeight: 700, letterSpacing: 0, color: "var(--ios-dt-label)" }}>
+          <span ref={nameInk}>{name}</span>
+        </h1>
 
-        <Cell top={556.3333} height={52}>
-          <button type="button" data-slot="block" onClick={onBlock}
-            className="absolute inset-0 flex items-center text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#0088ff]"
-            style={{ paddingLeft: 16, fontSize: 17, lineHeight: "22px", transform: "translateY(0.6667px)", color: "var(--ios-dt-red)" }}>
-            {blockLabel}
-          </button>
-        </Cell>
+        <GlassCircle size={44} data-slot="back" aria-label="Back" onClick={onBack} style={{ left: 16, top: 62 }}>
+          <svg aria-hidden="true" width="44" height="44" viewBox="0 0 44 44" fill="none" stroke="var(--ios-dt-glyph)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M24.8 13.87 16.2 22.17 24.8 30.47" />
+          </svg>
+        </GlassCircle>
       </div>
     </div>
   );
