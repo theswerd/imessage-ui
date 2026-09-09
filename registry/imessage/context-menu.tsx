@@ -72,6 +72,27 @@ export const iosMessageMenu: ContextMenuItem[] = [
   { id: "select", label: "Select", icon: "select" },
   { id: "more", label: "More…", icon: "more" },
 ];
+/**
+ * The menu behind the sidebar's list-options button, whose `aria-haspopup="menu"` used to be a
+ * promise nothing kept. Every label is ChatKit's own, out of `ChatKit.loctable`: `ALL_MESSAGES`,
+ * `UNKNOWN_SENDERS`, `KNOWN_SENDERS`, `UNREAD_MESSAGES` and `RECENTLY_DELETED`, with `FILTER_BY` as
+ * the heading the framework carries for them.
+ *
+ * **UNMEASURED: the order, the grouping and the check mark.** No capture in `references/` holds this
+ * menu open. What the strings settle is which rows exist and how they are spelled; the sequence here
+ * is the one the framework's own `CHANGE_FILTER_MODE_INTENT` inbox list reads in, and Recently
+ * Deleted is separated because it opens a screen rather than filtering the list. The menu's *chrome*
+ * is measured - it is `contextMenuMetrics.macos`, the same 302 pt AppKit menu the transcript uses.
+ */
+export const macosListFilterMenu: ContextMenuItem[] = [
+  { id: "all", label: "All Messages" },
+  { id: "known", label: "Known Senders" },
+  { id: "unknown", label: "Unknown Senders" },
+  { id: "unread", label: "Unread Messages" },
+  { separator: true },
+  { id: "recently-deleted", label: "Recently Deleted" },
+];
+
 export const macosMessageMenu: ContextMenuItem[] = [
   { id: "tapback-details", label: "Tapback Details…", icon: "tapback-details" },
   { id: "reply", label: "Reply…", icon: "reply" },

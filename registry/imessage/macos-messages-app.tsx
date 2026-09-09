@@ -9,7 +9,7 @@ import { MacSidebar, macSidebarMetrics, type SidebarConversation } from "@/regis
 import { MacHeader, macHeaderMetrics, type MacHeaderMember } from "@/registry/imessage/macos-header";
 import { MacComposer } from "@/registry/imessage/macos-composer";
 import { MessageList, type Message, type MessageListHandle } from "@/registry/imessage/message-list";
-import { ContextMenu, macosMessageMenu } from "@/registry/imessage/context-menu";
+import { ContextMenu, macosListFilterMenu, macosMessageMenu } from "@/registry/imessage/context-menu";
 import { TapbackBar, type TapbackSelection } from "@/registry/imessage/tapback-bar";
 import { MacPlusMenu, macPlusMenuMetrics } from "@/registry/imessage/macos-plus-menu";
 import { MacDetails, type MacDetailsAction, type MacDetailsAttachment, type MacDetailsHandle, type MacDetailsLink, type MacDetailsParticipant, type MacDetailsPhoto, type MacDetailsTab } from "@/registry/imessage/macos-details";
@@ -337,6 +337,8 @@ export type MacMessagesAppProps = {
   onPhotoPickerClose?: () => void;
   /** The Stickers popover the "+" menu's "Stickers" row opens. */
   stickerPicker?: { tab?: string; progress?: number } | null;
+  /** The inbox chosen in the sidebar's list-options menu: "all", "known", "unknown", "unread" or "recently-deleted". */
+  onListFilter?: (id: string) => void;
   onStickerPickerTab?: (tabId: string) => void;
   onStickerPickerClose?: () => void;
   onStickerSelect?: (sticker: Sticker) => void;
@@ -389,6 +391,7 @@ export function MacMessagesApp({
   searchQuery, onSearch,
   details, onDetailsClose, onDetailsTabChange, onDetailsWidthChange, detailsContent,
   onQuickLook, photoPicker, photos, onPhotoPickerSelectionChange, onPhotoPickerClose,
+  onListFilter,
   stickerPicker, onStickerPickerTab, onStickerPickerClose, onStickerSelect, onStickerPlace,
   footer, renderReactions = defaultReactions, overlay, className, style, frameRef,
 }: MacMessagesAppProps) {
@@ -514,6 +517,13 @@ export function MacMessagesApp({
    * pressed. The "+" menu's Stickers row and the composer's smiley both open the same browser.
    */
   const [stickerAnchor, setStickerAnchor] = useState("attach-button");
+  /**
+   * The sidebar's list-options menu, and which inbox it has chosen. The button declares
+   * `aria-haspopup="menu"` and used to open nothing at all; see `macosListFilterMenu` for where its
+   * rows come from and what about them is not measured.
+   */
+  const [listFilterOpen, setListFilterOpen] = useState(false);
+  const [listFilter, setListFilter] = useState("all");
   const closeStickerPicker = () => { setOwnSticker(null); onStickerPickerClose?.(); };
 
   /**
@@ -722,11 +732,25 @@ export function MacMessagesApp({
    * participants, and a draft has no last message to preview and no date to stamp.
    */
   const composeRows = useMemo(() => {
+  /**
+   * What each inbox leaves in the list. "Unread Messages" is the only one this data can answer: a
+   * row carries `unread`, and nothing in a conversation fixture says whether its sender is known, so
+   * Known and Unknown Senders report through `onListFilter` and leave the list alone rather than
+   * pretending to a distinction the rows do not carry.
+   */
     if (!composing) return sidebarConversations;
     const draft: SidebarConversation = { id: macCompose.rowId, name: macCompose.title, initials: "", preview: "", time: "" };
     const pinned = sidebarConversations.filter(item => item.pinned);
     return [...pinned, draft, ...sidebarConversations.filter(item => !item.pinned)];
   }, [composing, sidebarConversations]);
+
+  /**
+   * What each inbox leaves in the list. "Unread Messages" is the only one this data can answer: a row
+   * carries `unread`, and nothing in a conversation fixture says whether its sender is known, so
+   * Known and Unknown Senders report through `onListFilter` and leave the list alone rather than
+   * pretending to a distinction the rows do not carry. Recently Deleted is a screen, not a filter.
+   */
+  const filteredRows = listFilter === "unread" ? composeRows.filter(row => row.unread) : composeRows;
 
   const closePlusMenu = () => { setOwnPlusMenu(false); onPlusMenuClose?.(); };
   /**
@@ -1019,9 +1043,20 @@ export function MacMessagesApp({
             // While composing, the draft's row is the selected one and the conversation the pane was
             // showing gives up its highlight. Choosing any row leaves compose, which is what ends it
             // natively — there is no other way out of a Mac draft than going somewhere else.
-            <MacSidebar conversations={composeRows} selectedId={composing ? macCompose.rowId : selectedId}
+            <>
+            <MacSidebar conversations={filteredRows} selectedId={composing ? macCompose.rowId : selectedId}
               onSelect={id => { if (id === macCompose.rowId) return; closeCompose(); onSelectConversation?.(id); }} active={active} footer={footer}
-              searchQuery={searchQuery} onSearch={onSearch} className="absolute inset-0" />
+              searchQuery={searchQuery} onSearch={onSearch} onOptions={() => setListFilterOpen(open => !open)} className="absolute inset-0" />
+            {/* Under the button, inside the sidebar, in the sidebar's own coordinates: the menu's box
+                is `contextMenuMetrics.macos`, and 302 is wider than the sidebar, so it is pulled back
+                to the sidebar's trailing edge the way AppKit pulls a menu inside its window. */}
+            {listFilterOpen && (
+              <ContextMenu variant="macos" items={macosListFilterMenu} open
+                style={{ position: "absolute", right: 8, top: macSidebarMetrics.options.centerY + 18, zIndex: 30 }}
+                onAction={id => { setListFilterOpen(false); if (id !== "recently-deleted") setListFilter(id); onListFilter?.(id); }}
+                onClose={() => setListFilterOpen(false)} />
+            )}
+            </>
           }
           content={detailsShown ? (
             // The inspector takes the whole content area and hands the pane back as its `conversation`,

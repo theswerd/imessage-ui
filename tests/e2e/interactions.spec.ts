@@ -979,3 +979,34 @@ test("the macOS composer's smiley opens the sticker browser on itself, and close
   await smiley.click();
   await expect(popover).toBeHidden();
 });
+
+/**
+ * The sidebar's list-options button declares `aria-haspopup="menu"`, and used to open nothing at all:
+ * `MacSidebar` takes an `onOptions` the shell never passed. It now opens the inbox menu, whose rows
+ * are ChatKit's own strings (`ALL_MESSAGES`, `KNOWN_SENDERS`, `UNKNOWN_SENDERS`, `UNREAD_MESSAGES`,
+ * `RECENTLY_DELETED`), and Unread Messages actually filters the list.
+ */
+test("the macOS sidebar's options button opens the inbox menu and Unread filters the list", async ({ page }, info) => {
+  test.skip(platformFor(info) !== "macos", "the sidebar is the Mac's");
+  await openScene(page, info, "list-unread");
+  const rows = page.locator('[data-slot="sidebar-row"]');
+  const all = await rows.count();
+  expect(all, "the unread scene has rows to filter").toBeGreaterThan(1);
+
+  await page.locator('[data-slot="sidebar-options"]').click();
+  const menu = page.locator('[data-slot="menu-item"]');
+  await expect(menu).toHaveText(["All Messages", "Known Senders", "Unknown Senders", "Unread Messages", "Recently Deleted"]);
+
+  await page.getByRole("menuitem", { name: "Unread Messages" }).click();
+  await expect(menu).toHaveCount(0);
+  const unread = await rows.count();
+  expect(unread, "an inbox with fewer rows in it").toBeLessThan(all);
+  // Every row left is one that announces itself unread.
+  for (let i = 0; i < unread; i++) {
+    await expect(rows.nth(i).locator('[data-slot="row-unread"], [data-slot="pinned-unread"]')).toHaveCount(1);
+  }
+
+  await page.locator('[data-slot="sidebar-options"]').click();
+  await page.getByRole("menuitem", { name: "All Messages" }).click();
+  await expect(rows).toHaveCount(all);
+});
