@@ -159,6 +159,8 @@ uses; over a strongly coloured conversation it will read too neutral. The blend 
 multiply fits the neutral samples and not the green one, colour-burn fits one green sample and not the
 neutral ones, and the glyph cores of 11pt text at 3x are too thin to settle it.
 
+**A message sent with an effect keeps a Replay control.** ChatKit carries `REPLAY_BUTTON_TITLE` ("Replay") for the visible label and a per-effect accessible name beside it: `EFFECT_CONTROL_BUTTON_TITLE_IMPACT` / `_LOUD` / `_GENTLE` / `_FOCUS` for the bubble effects and `FSM_CONTROL_BUTTON_TITLE_*` for the screen ones ("Replay Slam", "Replay Balloons"). There is no Invisible Ink title in either table — it is revealed, not replayed. **UNMEASURED:** where the control sits; no capture holds one.
+
 **Bubble effect motion** is measured, in `references/ios/motion/effects.md`: Slam 640 ms from about 8x
 down through a 0.92 squash to a 1.07 rebound, Loud 1230 ms up to a 2.35x swell with a shake, Gentle
 about 3000 ms from 0.38 with a long relax, and Invisible Ink with no motion at all.
