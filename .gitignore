@@ -16,3 +16,7 @@ app/lab/tmp-*/
 .open-next/
 .wrangler/
 cloudflare-env.d.ts
+
+# Vercel project link; the deploy is per-account, not per-checkout.
+.vercel/
+.vercel

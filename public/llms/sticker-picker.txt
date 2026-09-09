@@ -1,0 +1,21 @@
+# iOS sticker picker
+
+The sheet the plus menu's Stickers row opens: category tabs, a search field, the sticker grid, and drag to place a sticker on a message.
+
+## Requirements
+
+React 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor.
+
+## Install
+
+```sh
+npx shadcn@latest add http://localhost:3100/r/sticker-picker.json
+```
+
+## Usage
+
+```tsx
+Install the full collection, then import the components you need from @/components/imessage/.
+```
+
+Components render UI only. Supply your own message data, persistence, uploads, and send handlers. No iMessage or Apple service connection is included.

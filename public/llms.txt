@@ -11,6 +11,7 @@ Namespace: @imessage → http://localhost:3100/r/{name}.json
 - [Screen-space fill hook](http://localhost:3100/llms/use-screen-space.txt): Keeps bubble fills aligned to the screen-space gradient while a list scrolls.
 - [Message bubble](http://localhost:3100/llms/message-bubble.txt): Native iOS 26 and macOS 26 bubbles: traced outline and tail, screen-space gradient fill, status, edited, reactions, and emoji-only messages.
 - [Tapback](http://localhost:3100/llms/tapback.txt): The native reaction balloon: six classic Tapbacks and custom emoji, own and others' colors, counts, and the selected state.
+- [Tapback details](http://localhost:3100/llms/tapback-details.txt): The surface "Tapback Details…" opens: who reacted and with what, as a sheet on iOS and an anchored popover on macOS, with your own reaction removable.
 - [Typing indicator](http://localhost:3100/llms/typing-indicator.txt): The native typing bubble with its three staggered dots and trailing circles.
 - [Date separator](http://localhost:3100/llms/date-separator.txt): Date headers: the iOS two-line header with its service line, the mid-list one-liner, and the macOS variant.
 - [Link preview](http://localhost:3100/llms/link-preview.txt): The measured compact link card, plus a rich variant with an image, title and host.
@@ -37,6 +38,7 @@ Namespace: @imessage → http://localhost:3100/r/{name}.json
 - [iOS Messages app](http://localhost:3100/llms/ios-messages-app.txt): The complete iOS 26 Messages app: list, conversation, New Message sheet, and the long-press overlay.
 - [macOS Messages app](http://localhost:3100/llms/macos-messages-app.txt): The complete macOS 26 Messages window: sidebar, header, message log, composer, and the right-click menu.
 - [macOS plus menu](http://localhost:3100/llms/macos-plus-menu.txt): The popover that opens from the composer's plus button: Photos, Stickers, Genmoji, Image Playground, #images, Message Effects.
+- [macOS conversation details](http://localhost:3100/llms/macos-details.txt): The inspector pane that slides in from the right of the window: contact, call actions, shared photos, links and documents, and the conversation options.
 - [Message effects](http://localhost:3100/llms/message-effects.txt): Send with effect on a bubble: the slam, loud and gentle animations and the Invisible Ink reveal, replayable on demand.
 - [Screen effects](http://localhost:3100/llms/screen-effects.txt): The full-screen send effects, drawn deterministically on a canvas so they can be scrubbed and screenshotted.
 - [iOS effects picker](http://localhost:3100/llms/ios-effects-picker.txt): The iOS "Send with effect" screen: the Bubble/Screen tabs, the effect rail, the preview bubble and its caption.
@@ -46,9 +48,14 @@ Namespace: @imessage → http://localhost:3100/r/{name}.json
 - [Audio message](http://localhost:3100/llms/message-audio.txt): A voice message bubble with a waveform, play control, and a seekable position.
 - [Edit and undo send](http://localhost:3100/llms/message-edit.txt): Edit a sent message in place, the Edited label, and the undo-send removal.
 - [iOS conversation details](http://localhost:3100/llms/ios-details.txt): The details screen: contact, call actions, and the grouped settings cells.
+- [iOS group details](http://localhost:3100/llms/group-details.txt): A group conversation's details screen: the stacked group photo, an editable name, the members, and the shared photos and links.
 - [iOS plus menu](http://localhost:3100/llms/ios-plus-menu.txt): The attachment sheet with its app rows and the embedded photo grid.
 - [iOS photo picker](http://localhost:3100/llms/photo-picker.txt): The Photos panel under the composer: a scrolling three-column grid with the sheet grabber and tile selection.
+- [iOS sticker picker](http://localhost:3100/llms/sticker-picker.txt): The sheet the plus menu's Stickers row opens: category tabs, a search field, the sticker grid, and drag to place a sticker on a message.
 - [iOS selection mode](http://localhost:3100/llms/ios-select-mode.txt): Selection circles beside messages, the close button, and the bottom toolbar.
+- [iOS search](http://localhost:3100/llms/ios-search.txt): The search state of the conversation list: the field rising under the nav, a Cancel button, and results grouped into Conversations, Messages, Photos and Links.
 - [Swipe for times](http://localhost:3100/llms/ios-swipe-times.txt): The drag that shifts the conversation left to reveal per-message times.
 - [Conversation notices](http://localhost:3100/llms/ios-notices.txt): The unknown-sender notice, the failed-send badge, and the Not Delivered label.
 - [System message](http://localhost:3100/llms/system-message.txt): The centred grey lines that are not bubbles: group renames, joins and leaves, the group photo, a missed call, a reaction summary, and the unknown-sender sentence.
+- [Group avatar](http://localhost:3100/llms/group-avatar.txt): The stacked faces a group conversation shows in the list, the nav bar, the details header and the macOS sidebar.
+- [Audio recorder](http://localhost:3100/llms/audio-recorder.txt): The composer turning into a voice-message recorder: live waveform, running timer, and the send, stop and cancel controls.

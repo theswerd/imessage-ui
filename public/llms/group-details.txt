@@ -1,0 +1,21 @@
+# iOS group details
+
+A group conversation's details screen: the stacked group photo, an editable name, the members, and the shared photos and links.
+
+## Requirements
+
+React 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor.
+
+## Install
+
+```sh
+npx shadcn@latest add http://localhost:3100/r/group-details.json
+```
+
+## Usage
+
+```tsx
+Install the full collection, then import the components you need from @/components/imessage/.
+```
+
+Components render UI only. Supply your own message data, persistence, uploads, and send handlers. No iMessage or Apple service connection is included.

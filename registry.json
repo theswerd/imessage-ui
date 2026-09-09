@@ -97,7 +97,7 @@
       "name": "tapback-details",
       "type": "registry:ui",
       "title": "Tapback details",
-      "description": "The surface \"Tapback Details…\" opens: who reacted and with what, as a sheet on iOS and an anchored popover on macOS, with your own reaction removable.",
+      "description": "The surface \"Tapback Details\u2026\" opens: who reacted and with what, as a sheet on iOS and an anchored popover on macOS, with your own reaction removable.",
       "registryDependencies": [
         "@imessage/avatar",
         "@imessage/platform",
@@ -872,13 +872,48 @@
       ]
     },
     {
+      "name": "group-avatar",
+      "type": "registry:ui",
+      "title": "Group avatar",
+      "description": "The stacked faces a group conversation shows in the list, the nav bar, the details header and the macOS sidebar.",
+      "registryDependencies": [
+        "@imessage/avatar"
+      ],
+      "files": [
+        {
+          "path": "registry/imessage/group-avatar.tsx",
+          "type": "registry:ui",
+          "target": "components/imessage/group-avatar.tsx"
+        }
+      ]
+    },
+    {
+      "name": "audio-recorder",
+      "type": "registry:ui",
+      "title": "Audio recorder",
+      "description": "The composer turning into a voice-message recorder: live waveform, running timer, and the send, stop and cancel controls.",
+      "registryDependencies": [
+        "@imessage/platform",
+        "@imessage/tokens"
+      ],
+      "files": [
+        {
+          "path": "registry/imessage/audio-recorder.tsx",
+          "type": "registry:ui",
+          "target": "components/imessage/audio-recorder.tsx"
+        }
+      ]
+    },
+    {
       "name": "index",
       "type": "registry:style",
       "title": "iMessage UI",
       "description": "The whole kit: every component plus the conversation pane and both app shells.",
       "registryDependencies": [
+        "@imessage/audio-recorder",
         "@imessage/conversation",
         "@imessage/facetime-card",
+        "@imessage/group-avatar",
         "@imessage/group-details",
         "@imessage/image-viewer",
         "@imessage/ios-details",
