@@ -5,12 +5,13 @@
   "description": "Emits the measured light and dark palette as CSS variables for one platform.",
   "registryDependencies": [
     "http://localhost:3100/r/platform.json",
+    "http://localhost:3100/r/tapback.json",
     "http://localhost:3100/r/tokens.json"
   ],
   "files": [
     {
       "path": "registry/imessage/palette.tsx",
-      "content": "import { palettes, paletteVars } from \"@/components/imessage/tokens\";\nimport type { Platform } from \"@/components/imessage/platform\";\n\nfunction block(selector: string, vars: Record<string, string>) {\n  return `${selector}{${Object.entries(vars).map(([k, v]) => `${k}:${v}`).join(\";\")}}`;\n}\n\n/**\n * Emits the measured palette as CSS custom properties for one platform, in both themes, scoped to\n * `[data-im-platform=\"ios\"|\"macos\"]`. Dark values apply under a `.dark` ancestor (the same rule the\n * rest of the registry uses). Render it once per app shell; it is tiny and idempotent.\n */\nexport function PaletteStyle({ platform }: { platform: Platform }) {\n  const scope = `[data-im-platform=\"${platform}\"]`;\n  const css = block(scope, paletteVars(palettes[platform].light)) + block(`.dark ${scope}`, paletteVars(palettes[platform].dark));\n  return <style data-slot=\"palette\" data-platform={platform}>{css}</style>;\n}\n",
+      "content": "import { palettes, paletteVars } from \"@/components/imessage/tokens\";\nimport { tapbackVars } from \"@/components/imessage/tapback\";\nimport type { Platform } from \"@/components/imessage/platform\";\n\nfunction block(selector: string, vars: Record<string, string>) {\n  return `${selector}{${Object.entries(vars).map(([k, v]) => `${k}:${v}`).join(\";\")}}`;\n}\n\n/**\n * Emits the measured palette as CSS custom properties for one platform, in both themes, scoped to\n * `[data-im-platform=\"ios\"|\"macos\"]`. Dark values apply under a `.dark` ancestor (the same rule the\n * rest of the registry uses). Render it once per app shell; it is tiny and idempotent.\n *\n * It emits `tapbackVars` too. Those are the measured glass, dim and menu colours the long-press\n * overlay and both context menus read, and until now only the tapback lab spread them, so every\n * shell and every harness scenario silently fell back to the hardcoded light-iOS defaults baked into\n * the components. A dark long-press menu was drawing light-theme glass because of it.\n */\nexport function PaletteStyle({ platform }: { platform: Platform }) {\n  const scope = `[data-im-platform=\"${platform}\"]`;\n  const css =\n    block(scope, { ...paletteVars(palettes[platform].light), ...tapbackVars(\"light\", platform) }) +\n    block(`.dark ${scope}`, { ...paletteVars(palettes[platform].dark), ...tapbackVars(\"dark\", platform) });\n  return <style data-slot=\"palette\" data-platform={platform}>{css}</style>;\n}\n",
       "type": "registry:ui",
       "target": "components/imessage/palette.tsx"
     }

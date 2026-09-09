@@ -13,3 +13,6 @@ public/references/**/*.png
 
 # Temporary probe routes agents create while verifying a surface; never committed.
 app/lab/tmp-*/
+.open-next/
+.wrangler/
+cloudflare-env.d.ts

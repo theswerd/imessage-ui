@@ -360,13 +360,19 @@ export function formatShiftReport(report: ShiftReport, mismatchRatio: number | n
   return lines.join("\n");
 }
 
+/** Splits `--name=number` flags out of argv so the positional arguments keep their old order. */
 export function parseFlags(argv: string[]): { positional: string[]; flags: Record<string, number> } {
   const positional: string[] = [];
   const flags: Record<string, number> = {};
   for (const arg of argv) {
-    const named = /^--([a-z-]+)=(-?[0-9.]+)$/.exec(arg);
-    if (named) flags[named[1]] = Number(named[2]);
-    else positional.push(arg);
+    if (!arg.startsWith("--")) {
+      positional.push(arg);
+      continue;
+    }
+    const named = /^--([a-z-]+)=(.*)$/.exec(arg);
+    const value = named ? Number(named[2]) : Number.NaN;
+    if (!named || !Number.isFinite(value)) throw new Error(`shift: ${arg} is not a --name=number flag`);
+    flags[named[1]] = value;
   }
   return { positional, flags };
 }

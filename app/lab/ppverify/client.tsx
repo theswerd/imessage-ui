@@ -21,6 +21,8 @@ export function PpVerify({
   useFixtures,
   many,
   initial,
+  uncontrolled,
+  empty,
 }: {
   progress?: number;
   startOpen: boolean;
@@ -30,6 +32,8 @@ export function PpVerify({
   useFixtures: boolean;
   many: boolean;
   initial: string[];
+  uncontrolled: boolean;
+  empty: boolean;
 }) {
   const [open, setOpen] = useState(startOpen);
   const [mounted, setMounted] = useState(true);
@@ -38,7 +42,8 @@ export function PpVerify({
   const [events, setEvents] = useState<string[]>([]);
 
   const base = useFixtures ? fixtures : undefined;
-  const photos = many && base ? [...base, ...base, ...base].map((p, i) => ({ ...p, id: `${p.id}-${i}` })) : base;
+  const spread = many && base ? [...base, ...base, ...base].map((p, i) => ({ ...p, id: `${p.id}-${i}` })) : base;
+  const photos = empty ? [] : spread;
 
   return (
     <div>
@@ -55,7 +60,7 @@ export function PpVerify({
             progress={progress}
             ordered={ordered}
             multiple={multiple}
-            selected={selected}
+            selected={uncontrolled ? undefined : selected}
             onSelectionChange={(next, photo, isSelected) => {
               setSelected(next);
               setEvents(prev => [...prev, `${photo.id}:${isSelected ? "on" : "off"}:${next.join("|")}`]);

@@ -21,7 +21,22 @@ import { cn } from "@/lib/utils";
  * do not add up, as on the device) in light; in dark #191919 under a 1pt specular rim that ramps
  * inward, measured over black on the back button's integer box as 12.6% → 9.6% → 6.1% white across
  * its three device rows. Shadows are painted on a layer beneath every surface so neighbors never
- * shade each other. The bar's own background is transparent; content scrolls under it.
+ * shade each other.
+ *
+ * Those captures pin the *composite*, not the fill. Both put a flat page behind every glass surface
+ * here, so the light fill is pinned to white at any alpha and the dark fill only to the product
+ * alpha × colour (0.9 × 28 = 25.2 = #191919). Halving both alphas while holding those products
+ * (rgba(255,255,255,0.45) and rgba(56,56,56,0.45)) leaves the dark diff bit-identical at 0.31% and
+ * the light one at 380 → 386 mismatched px of 361,800. So 90% is a choice, not a measurement, and it
+ * is the number that decides how much of a bubble scrolled under the bar shows through. Unverified.
+ *
+ * The bar's own background is transparent and content scrolls under it, which `dateheader-mid-light.png`
+ * and `dateheader-mid-dark.png` show is not what the device does: an incoming bubble crossing the bar is
+ * pulled toward the page background across the bar's whole width, outside every glass surface. Sampled
+ * down x 95, dark #262629 (38,38,41) reads (9,9,10) at y 105, (23,23,25) at y 140, and only returns to
+ * (38,38,41) at y 195; light #e9e9eb (233,233,235) reads (246,246,247) at y 105 and settles at y 150.
+ * The light and dark ramps do not agree as one blend toward the page colour, in sRGB or in linear light,
+ * so the mechanism is recorded and not built.
  *
  * Two sub-pixel offsets are transforms because Chrome quantizes paint, not layout: text baselines and
  * inline-SVG paint offsets snap to whole CSS px, so the name and the chevron each carry a 1/3-px

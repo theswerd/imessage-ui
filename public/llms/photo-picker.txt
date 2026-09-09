@@ -1,0 +1,21 @@
+# iOS photo picker
+
+The Photos panel under the composer: a scrolling three-column grid with the sheet grabber and tile selection.
+
+## Requirements
+
+React 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor.
+
+## Install
+
+```sh
+npx shadcn@latest add http://localhost:3100/r/photo-picker.json
+```
+
+## Usage
+
+```tsx
+Install the full collection, then import the components you need from @/components/imessage/.
+```
+
+Components render UI only. Supply your own message data, persistence, uploads, and send handlers. No iMessage or Apple service connection is included.

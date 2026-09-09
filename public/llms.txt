@@ -42,10 +42,13 @@ Namespace: @imessage → http://localhost:3100/r/{name}.json
 - [iOS effects picker](http://localhost:3100/llms/ios-effects-picker.txt): The iOS "Send with effect" screen: the Bubble/Screen tabs, the effect rail, the preview bubble and its caption.
 - [Inline reply](http://localhost:3100/llms/message-reply.txt): The quoted stub above a reply, the reply-count affordance, and the focused thread view.
 - [Photo message](http://localhost:3100/llms/message-image.txt): Photos and videos in the bubble's shape, tail included, with the native multi-photo grid.
+- [Photo viewer](http://localhost:3100/llms/image-viewer.txt): The full-screen viewer a photo opens into: zoom out of the tile, swipe between the message's photos, pinch and pan, react, and drag down to close.
 - [Audio message](http://localhost:3100/llms/message-audio.txt): A voice message bubble with a waveform, play control, and a seekable position.
 - [Edit and undo send](http://localhost:3100/llms/message-edit.txt): Edit a sent message in place, the Edited label, and the undo-send removal.
 - [iOS conversation details](http://localhost:3100/llms/ios-details.txt): The details screen: contact, call actions, and the grouped settings cells.
 - [iOS plus menu](http://localhost:3100/llms/ios-plus-menu.txt): The attachment sheet with its app rows and the embedded photo grid.
+- [iOS photo picker](http://localhost:3100/llms/photo-picker.txt): The Photos panel under the composer: a scrolling three-column grid with the sheet grabber and tile selection.
 - [iOS selection mode](http://localhost:3100/llms/ios-select-mode.txt): Selection circles beside messages, the close button, and the bottom toolbar.
 - [Swipe for times](http://localhost:3100/llms/ios-swipe-times.txt): The drag that shifts the conversation left to reveal per-message times.
 - [Conversation notices](http://localhost:3100/llms/ios-notices.txt): The unknown-sender notice, the failed-send badge, and the Not Delivered label.
+- [System message](http://localhost:3100/llms/system-message.txt): The centred grey lines that are not bubbles: group renames, joins and leaves, the group photo, a missed call, a reaction summary, and the unknown-sender sentence.

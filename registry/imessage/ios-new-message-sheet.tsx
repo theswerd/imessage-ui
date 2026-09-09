@@ -16,6 +16,14 @@ import { cn } from "@/lib/utils";
  * the sheet while the field reads #fdfdfd under a 0.67pt pure-white rim inset on all four sides
  * (measured on every edge of `newmsg-light.png`), which is why it carries its own fill and rim vars.
  * Dark values are standard system colors, not measured.
+ *
+ * Sampling the flat interiors of `newmsg-light.png` against our render agrees to within 0.02 of a
+ * level per channel on all four surfaces: the dim over the presenting screen 204, the X button's glass
+ * 255 either side of its cross, the "To:" field 253, and the sheet's own fill 255. What that cannot
+ * see is the X button's alpha. Its only backdrop in the capture is the flat #ffffff sheet, so
+ * rgba(255,255,255,a) composites to #ffffff for every a, and the capture pins the fill to white while
+ * leaving 0.9 unverified. The "To:" field carries a flat #fdfdfd instead of a translucent fill for the
+ * same reason: over this sheet the two are indistinguishable.
  */
 export type IosNewMessageSheetProps = Omit<ComponentProps<"div">, "onChange"> & {
   title?: string;

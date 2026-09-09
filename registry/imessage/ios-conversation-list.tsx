@@ -28,6 +28,15 @@ import { IosMicIcon } from "@/registry/imessage/ios-composer";
  *
  * Neither capture shows these, so they are not measured against pixels: a preview long enough to
  * wrap to two lines, and a name or preview long enough to truncate.
+ *
+ * Nor the glass fill's alpha. Both captures have the last row ending 400pt above the bottom bar, so
+ * every point of both surfaces sits over the flat page: sampling their glass-only interiors (the pill
+ * left of the magnifier, its mid span, right of the mic, and the compose circle either side of its
+ * glyph) gives 255 in light and 25 in dark in the capture and in our render alike, mean signed error
+ * 0.00 per channel on all five. That pins the light fill to white at any alpha and the dark fill only
+ * to alpha × colour = 25. The 90% is carried over from the nav bar, where the same is true; see the
+ * note there. It decides how much of a row scrolled under the bar shows through, which nothing here
+ * measures.
  */
 export type IosConversation = {
   id: string;

@@ -6,6 +6,7 @@
   "registryDependencies": [
     "http://localhost:3100/r/conversation.json",
     "http://localhost:3100/r/facetime-card.json",
+    "http://localhost:3100/r/image-viewer.json",
     "http://localhost:3100/r/ios-details.json",
     "http://localhost:3100/r/ios-messages-app.json",
     "http://localhost:3100/r/ios-notices.json",
@@ -21,7 +22,9 @@
     "http://localhost:3100/r/message-image.json",
     "http://localhost:3100/r/message-motion.json",
     "http://localhost:3100/r/message-reply.json",
+    "http://localhost:3100/r/photo-picker.json",
     "http://localhost:3100/r/screen-effects.json",
+    "http://localhost:3100/r/system-message.json",
     "http://localhost:3100/r/use-long-press.json"
   ],
   "type": "registry:style"

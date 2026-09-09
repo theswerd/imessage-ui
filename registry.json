@@ -460,6 +460,7 @@
       "description": "Emits the measured light and dark palette as CSS variables for one platform.",
       "registryDependencies": [
         "@imessage/platform",
+        "@imessage/tapback",
         "@imessage/tokens"
       ],
       "files": [
@@ -482,15 +483,20 @@
         "@imessage/ios-nav-bar",
         "@imessage/ios-new-message-sheet",
         "@imessage/ios-status-bar",
+        "@imessage/link-preview",
         "@imessage/message-actions",
+        "@imessage/message-attachment",
+        "@imessage/message-audio",
         "@imessage/message-bubble",
+        "@imessage/message-image",
         "@imessage/message-list",
         "@imessage/message-motion",
         "@imessage/message-reply",
         "@imessage/palette",
         "@imessage/platform",
         "@imessage/tapback",
-        "@imessage/tapback-bar"
+        "@imessage/tapback-bar",
+        "@imessage/tokens"
       ],
       "files": [
         {
@@ -763,6 +769,25 @@
       ]
     },
     {
+      "name": "system-message",
+      "type": "registry:ui",
+      "title": "System message",
+      "description": "The centred grey lines that are not bubbles: group renames, joins and leaves, the group photo, a missed call, a reaction summary, and the unknown-sender sentence.",
+      "registryDependencies": [
+        "@imessage/ios-notices",
+        "@imessage/platform",
+        "@imessage/tapback",
+        "@imessage/tokens"
+      ],
+      "files": [
+        {
+          "path": "registry/imessage/system-message.tsx",
+          "type": "registry:ui",
+          "target": "components/imessage/system-message.tsx"
+        }
+      ]
+    },
+    {
       "name": "index",
       "type": "registry:style",
       "title": "iMessage UI",
@@ -788,6 +813,7 @@
         "@imessage/message-reply",
         "@imessage/photo-picker",
         "@imessage/screen-effects",
+        "@imessage/system-message",
         "@imessage/use-long-press"
       ]
     }

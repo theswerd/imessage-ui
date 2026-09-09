@@ -20,6 +20,8 @@ export default async function PpVerifyPage({ searchParams }: { searchParams: Pro
         useFixtures={one("photos") !== "samples"}
         many={one("many") === "1"}
         initial={initial}
+        uncontrolled={one("uncontrolled") === "1"}
+        empty={one("empty") === "1"}
       />
     </>
   );
