@@ -435,7 +435,11 @@ export const scenarios = [
   // The macOS inspector. Packed early for the same reason the push rows are: its easing is the same
   // cubic-bezier(0.32, 0.72, 0, 1). At progress 1 the component cancels its own timeline, so the
   // settled checkpoint screenshots plain styles.
-  { id: "details-open", title: "Open the inspector", group: "Screens", duration: 300, checkpoints: [0, 45, 100, 180, 300], only: "macos" },
+  // Both shells present their own details surface, so this one is not Mac-only any more: the phone
+  // pushes `IosDetails` over the conversation and the Mac slides its inspector in beside it. The
+  // phone's group case already had `group-details-open`; the 1:1 case had no moving checkpoint at
+  // all, so nothing in the visual suite ever caught it mid-presentation.
+  { id: "details-open", title: "Open the details", group: "Screens", duration: 360, checkpoints: [0, 45, 100, 180, 300, 360] },
   { id: "details-photos", title: "Inspector: Photos", group: "Screens", duration: 0, checkpoints: [0], only: "macos" },
   // The inspector on a GROUP, which is the only way to reach the part of the pane the new capture
   // fit settles: the row of Ø 70 participant faces under the cards, with its Add button, plus the
@@ -955,6 +959,9 @@ export function frameAt(id: ScenarioId, milliseconds: number): SceneFrame {
       break;
     case "details-open":
       frame.screen = "details";
+      // Each shell reads its own: the phone's screen runs `iosDetailsMotion.enter`, the Mac's
+      // inspector its own shorter slide, and neither looks at the other's field.
+      frame.details = { progress: clamp01(t / unverifiedMotion.detailsOpen) };
       frame.detailsPane = { open: true, progress: clamp01(t / unverifiedMotion.macDetailsOpen) };
       break;
     case "details-photos":

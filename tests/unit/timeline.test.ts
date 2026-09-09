@@ -213,11 +213,19 @@ describe("the presented surfaces", () => {
     expect(settled.screen).toBe("details");
     expect(settled.details).toEqual({ progress: 1 });
     expect(settled.detailsPane).toEqual({ open: true, progress: 1 });
-    expect(scenarioFor("details-open").duration).toBe(unverifiedMotion.macDetailsOpen);
+    // `details-open` runs on both shells now. It used to be Mac-only, which left the phone's
+    // one-to-one details screen with no moving checkpoint at all — the group case had
+    // `group-details-open` and the 1:1 case had nothing, so no visual baseline ever caught it
+    // mid-presentation. The scenario is as long as the phone's entrance, and each shell reads its
+    // own field off the frame, so the Mac's shorter slide still settles inside it.
+    expect(scenarioFor("details-open").duration).toBe(unverifiedMotion.detailsOpen);
+    expect(frameAt("details-open", 180).details!.progress).toBeCloseTo(0.5, 6);
+    expect(frameAt("details-open", 360).details!.progress).toBe(1);
     expect(frameAt("details-open", 150).detailsPane!.progress).toBeCloseTo(0.5, 6);
     expect(frameAt("details-open", 300).detailsPane!.progress).toBe(1);
     expect(frameAt("details-photos", 0).detailsPane!.tab).toBe("photos");
-    for (const id of ["details-open", "details-photos"] as const) expect(scenarioRuns(id, "ios")).toBe(false);
+    expect(scenarioRuns("details-open", "ios")).toBe(true);
+    expect(scenarioRuns("details-photos", "ios")).toBe(false);
     // The group screen is the iOS one, and it seeks the same `iosDetailsMotion.enter` the
     // one-to-one screen does, because `group-details.tsx` imports it rather than restating it.
     expect(scenarioFor("group-details-open").duration).toBe(unverifiedMotion.detailsOpen);

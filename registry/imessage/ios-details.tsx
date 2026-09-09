@@ -1131,6 +1131,15 @@ export function IosDetails({
       onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd}
       className={cn("relative isolate size-full select-none overflow-hidden", vars, className)}
       style={{ fontFamily: font, ...style }} {...props}>
+      {/*
+        The morphing avatar and title *are* the nav bar's, moving. The backdrop draws the whole
+        conversation behind, its own nav bar included, so at progress 0 - where the morph starts
+        exactly on top of the pill, and where the backdrop's blur has not come up yet - the name was
+        painted twice within 0.2 pt of itself, at two different sizes, and read as a smear. UIKit
+        hides a morph's source view for the length of the transition; this is that, in one rule.
+        Scoped to the backdrop, which is `aria-hidden` and inert either way.
+      */}
+      <style>{`[data-slot="ios-details"] [data-slot="backdrop"] [data-slot="ios-nav-bar"] :is([data-slot="name"],[data-slot="avatar"]){visibility:hidden}`}</style>
       {backdrop !== undefined && (
         <div aria-hidden="true" data-slot="backdrop" className="absolute inset-0 -z-10 overflow-hidden">
           {/*
