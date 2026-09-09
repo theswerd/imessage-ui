@@ -949,3 +949,33 @@ test("opening a photo from the stack leaves the stack behind the viewer", async 
   });
   expect(isolated, "the stack makes its own stacking context").toBe("isolate");
 });
+
+/**
+ * The composer's smiley opens the sticker browser and closes it again. It used to call an `onEmoji`
+ * the shell never passed, so on this app the button was dead: it took the click, kept its pressed
+ * look, and opened nothing. Two things had to change for the second click to close it — the button
+ * is now exempt from the popovers' press-outside dismissal, or the dismissal and the button's own
+ * handler cancelled each other out inside one gesture — and the popover anchors to whichever button
+ * raised it rather than always to the "+".
+ */
+test("the macOS composer's smiley opens the sticker browser on itself, and closes it", async ({ page }, info) => {
+  test.skip(platformFor(info) !== "macos", "the composer's smiley is the Mac's");
+  await openScene(page, info, "conversation");
+  const smiley = page.locator('[data-slot="emoji-button"]');
+  const plus = page.locator('[data-slot="attach-button"]');
+
+  await smiley.click();
+  const popover = page.locator('[data-slot="sticker-picker"][data-platform="macos"] [data-slot="mac-popover"]');
+  await expect(popover).toBeVisible();
+  const box = (await popover.boundingBox())!;
+  const smileyBox = (await smiley.boundingBox())!;
+  const plusBox = (await plus.boundingBox())!;
+  // Nearer the button that opened it than the one that did not: the old placement put it on the "+".
+  expect(Math.abs(box.x + box.width - (smileyBox.x + smileyBox.width)))
+    .toBeLessThan(Math.abs(box.x - plusBox.x));
+  // Above the composer, as a popover that has nowhere below it must be.
+  expect(box.y + box.height).toBeLessThanOrEqual(smileyBox.y + smileyBox.height);
+
+  await smiley.click();
+  await expect(popover).toBeHidden();
+});

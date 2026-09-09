@@ -359,6 +359,8 @@ function useMacPopoverPlacement(
   box: { width: number; height: number },
   arrow: { width: number; height: number },
   radius: number,
+  /** Which composer button the popover hangs off. The smiley opens this one too. */
+  anchorSlot: string,
 ) {
   const [placement, setPlacement] = useState<{ left: number; top: number; arrowX: number } | null>(null);
   useLayoutEffect(() => {
@@ -366,7 +368,7 @@ function useMacPopoverPlacement(
     if (!enabled || !node) return;
     const base = node.getBoundingClientRect();
     const host = node.closest("[data-im-platform]") ?? node.ownerDocument.body;
-    const button = host.querySelector('[data-slot="attach-button"]');
+    const button = host.querySelector(`[data-slot="${anchorSlot}"]`);
     const rect = button?.getBoundingClientRect();
     const a = macStickerPickerMetrics.anchor;
     const anchor = rect
@@ -382,7 +384,7 @@ function useMacPopoverPlacement(
     // The pose is committed before the browser paints, so no frame shows the popover unplaced.
     // eslint-disable-next-line react-hooks/set-state-in-effect -- a layout measurement, see above
     setPlacement({ left, top: anchor.top - arrow.height - box.height, arrowX: Math.max(inset, Math.min(centre, box.width - inset)) });
-  }, [root, enabled, box.width, box.height, arrow.width, arrow.height, radius]);
+  }, [root, enabled, box.width, box.height, arrow.width, arrow.height, radius, anchorSlot]);
   return placement;
 }
 
@@ -659,6 +661,12 @@ type DragState = {
 
 export type StickerPickerProps = Omit<ComponentProps<"div">, "onSelect" | "children"> & {
   /**
+   * The composer button this popover hangs off on the Mac, by `data-slot`. Defaults to the "+", which
+   * is what opens it from the plus menu; the smiley passes its own so the arrow points at the button
+   * that was actually pressed rather than always at the "+".
+   */
+  anchorSlot?: string;
+  /**
    * Which Messages to be. Left off, it is read from the nearest `[data-im-platform]` ancestor, so
    * the macOS shell gets the macOS popover without passing anything. See `macStickerPickerMetrics`.
    */
@@ -713,6 +721,7 @@ export type StickerPickerProps = Omit<ComponentProps<"div">, "onSelect" | "child
 
 export function StickerPicker({
   platform: platformProp,
+  anchorSlot = "attach-button",
   tabs = stickerPickerTabs,
   tab: tabProp,
   defaultTab,
@@ -794,7 +803,7 @@ export function StickerPicker({
    * the drag's own "did it land inside the card" test and the seeked drag preview — reads these four
    * and not the props, so one set of arithmetic serves both presentations.
    */
-  const placement = useMacPopoverPlacement(root, mac, { width: mm.width, height: mm.height }, mm.arrow, mm.radius);
+  const placement = useMacPopoverPlacement(root, mac, { width: mm.width, height: mm.height }, mm.arrow, mm.radius, anchorSlot);
   const boxWidth = mac ? mm.width : width;
   const boxHeight = mac ? mm.height : height;
   const boxLeft = mac ? (placement?.left ?? 0) : left;

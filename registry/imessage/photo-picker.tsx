@@ -365,6 +365,8 @@ function useMacPopoverPlacement(
   box: { width: number; height: number },
   arrow: { width: number; height: number },
   radius: number,
+  /** Which composer button the popover hangs off. The smiley opens the sticker one too. */
+  anchorSlot: string,
 ) {
   const [placement, setPlacement] = useState<{ left: number; top: number; arrowX: number } | null>(null);
   const last = useRef<{ left: number; top: number; arrowX: number } | null>(null);
@@ -406,7 +408,7 @@ function useMacPopoverPlacement(
       base = { left: box.left, top: box.top, width: box.width, height: box.height };
     }
     const host = node.closest("[data-im-platform]") ?? node.ownerDocument.body;
-    const button = host.querySelector('[data-slot="attach-button"]');
+    const button = host.querySelector(`[data-slot="${anchorSlot}"]`);
     const rect = button?.getBoundingClientRect();
     const a = macPhotoPickerMetrics.anchor;
     // In the root's own coordinates, so the caller's box can be the pane or a wrapper inside it.
@@ -443,7 +445,7 @@ function useMacPopoverPlacement(
     const observer = new ResizeObserver(place);
     observer.observe(host);
     return () => { cancelAnimationFrame(frame); observer.disconnect(); };
-  }, [root, enabled, box.width, box.height, arrow.width, arrow.height, radius]);
+  }, [root, enabled, box.width, box.height, arrow.width, arrow.height, radius, anchorSlot]);
   return placement;
 }
 
@@ -518,6 +520,12 @@ export const photoPickerSamples: PhotoPickerPhoto[] = [
 ];
 
 export type PhotoPickerProps = Omit<ComponentProps<"div">, "onSelect" | "children"> & {
+  /**
+   * The composer button this popover hangs off on the Mac, by `data-slot`. Defaults to the "+", which
+   * is what opens it from the plus menu; the smiley passes its own so the arrow points at the button
+   * that was actually pressed rather than always at the "+".
+   */
+  anchorSlot?: string;
   /**
    * Which Messages to be. Left off, it is read from the nearest `[data-im-platform]` ancestor, so
    * the macOS shell gets the macOS popover without passing anything. See `macPhotoPickerMetrics`.
@@ -607,6 +615,7 @@ function SearchGlyph({ scale = 0.72 }: { scale?: number }) {
 
 export function PhotoPicker({
   platform: platformProp,
+  anchorSlot = "attach-button",
   photos = photoPickerSamples,
   selected: selectedProp,
   defaultSelected,
@@ -687,7 +696,7 @@ export function PhotoPicker({
   const macGridHeight = mm.grid.inset * 2 + macRows * macTile + (macRows - 1) * mm.grid.gap;
   const macHeight = Math.min(mm.maxHeight, Math.round(macGridHeight + mm.heightPadding));
 
-  const placement = useMacPopoverPlacement(panel, mac, { width: mm.width, height: macHeight }, mm.arrow, mm.radius);
+  const placement = useMacPopoverPlacement(panel, mac, { width: mm.width, height: macHeight }, mm.arrow, mm.radius, anchorSlot);
 
   const collapsedHeight = height;
   /**

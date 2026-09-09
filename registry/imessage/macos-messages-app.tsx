@@ -509,6 +509,11 @@ export function MacMessagesApp({
     setClosingSticker(stickerValue == null && seenSticker);
   }
   const stickerShown = stickerValue != null || closingSticker;
+  /**
+   * Which composer button the sticker popover hangs off, so its arrow points at the one that was
+   * pressed. The "+" menu's Stickers row and the composer's smiley both open the same browser.
+   */
+  const [stickerAnchor, setStickerAnchor] = useState("attach-button");
   const closeStickerPicker = () => { setOwnSticker(null); onStickerPickerClose?.(); };
 
   /**
@@ -732,7 +737,7 @@ export function MacMessagesApp({
   const selectPlusItem = (id: string) => {
     closePlusMenu();
     if (id === "photos") { setOwnSticker(null); setOwnPhotoPicker({ selected: [], detent: "collapsed" }); }
-    if (id === "stickers") { setOwnPhotoPicker(null); setOwnSticker({}); }
+    if (id === "stickers") { setOwnPhotoPicker(null); setStickerAnchor("attach-button"); setOwnSticker({}); }
     onPlusMenuSelect?.(id);
   };
 
@@ -763,7 +768,10 @@ export function MacMessagesApp({
     };
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); dismiss(); } };
     const onPointer = (event: PointerEvent) => {
-      const hit = (event.target as HTMLElement | null)?.closest?.('[data-slot="mac-attachment-popover"], [data-slot="attach-button"]');
+      // The two buttons that open one of these are exempt, or a click on either would be dismissed
+      // here and re-opened by its own handler in the same gesture — which is what left the smiley
+      // unable to close what it had just opened.
+      const hit = (event.target as HTMLElement | null)?.closest?.('[data-slot="mac-attachment-popover"], [data-slot="attach-button"], [data-slot="emoji-button"]');
       if (!hit) dismiss();
     };
     document.addEventListener("keydown", onKey, true);
@@ -862,7 +870,17 @@ export function MacMessagesApp({
                 </div>
               )}
               <MacComposer className="absolute bottom-0 left-0 w-full" value={composer?.value} disabled={composer?.disabled} onChange={composer?.onChange}
-                onSend={composer?.onSend ?? (() => {})} onEmoji={composer?.onEmoji} onAudio={composer?.onAudio}
+                onSend={composer?.onSend ?? (() => {})} onAudio={composer?.onAudio}
+                /* The smiley is the sticker browser, the same surface the "+" menu's Stickers row
+                   opens, and it toggles like the "+" does rather than stacking a second popover on
+                   whatever is already up. It used to call a callback the shell never passed, so on
+                   this app the button was dead: it took a click, kept its pressed look, and opened
+                   nothing. A consumer's own `onEmoji` still runs after. */
+                onEmoji={() => {
+                  if (stickerUp) closeStickerPicker();
+                  else { setOwnPhotoPicker(null); setOwnPlusMenu(false); setStickerAnchor("emoji-button"); setOwnSticker({}); }
+                  composer?.onEmoji?.();
+                }}
                 onAttach={() => {
                   // "+" is a toggle: it closes whatever it opened, and otherwise raises the menu.
                   if (popoverUp) dismissPopovers();
@@ -878,19 +896,25 @@ export function MacMessagesApp({
                 <div data-slot="mac-attachment-popover" className="pointer-events-none absolute inset-0" style={{ zIndex: 25 }}>
                   {/* The popover's own box, under the sheet, because the sheet's layer has to stay the
                       whole pane for a dragged sticker to travel across the transcript. */}
-                  <div aria-hidden="true" className={cn("absolute", popoverChrome)} style={{
-                    left: macAttachmentPopovers.left,
-                    top: macAttachmentPopovers.bottom - macAttachmentPopovers.stickers.height,
-                    width: macAttachmentPopovers.stickers.width, height: macAttachmentPopovers.stickers.height,
-                    borderRadius: macAttachmentPopovers.radius,
-                  }} />
+                  {/* The chrome behind the sheet only when the shell is placing the box itself. Off
+                      the smiley the picker places its own — the "+" is the only anchor a capture
+                      holds, so the left edge here is measured for that one button and nothing else. */}
+                  {stickerAnchor === "attach-button" && (
+                    <div aria-hidden="true" className={cn("absolute", popoverChrome)} style={{
+                      left: macAttachmentPopovers.left,
+                      top: macAttachmentPopovers.bottom - macAttachmentPopovers.stickers.height,
+                      width: macAttachmentPopovers.stickers.width, height: macAttachmentPopovers.stickers.height,
+                      borderRadius: macAttachmentPopovers.radius,
+                    }} />
+                  )}
                   <StickerPicker
                     open={stickerValue != null}
                     progress={stickerValue?.progress}
                     tab={stickerValue?.tab}
                     scrim={false}
-                    left={macAttachmentPopovers.left}
-                    top={macAttachmentPopovers.bottom - macAttachmentPopovers.stickers.height}
+                    anchorSlot={stickerAnchor}
+                    left={stickerAnchor === "attach-button" ? macAttachmentPopovers.left : undefined}
+                    top={stickerAnchor === "attach-button" ? macAttachmentPopovers.bottom - macAttachmentPopovers.stickers.height : undefined}
                     width={macAttachmentPopovers.stickers.width}
                     height={macAttachmentPopovers.stickers.height}
                     onTabChange={tabId => { setOwnSticker(current => (current ? { ...current, tab: tabId } : current)); onStickerPickerTab?.(tabId); }}
