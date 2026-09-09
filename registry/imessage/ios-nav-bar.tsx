@@ -1,6 +1,6 @@
 "use client";
 
-import type { ComponentProps, CSSProperties, ReactNode } from "react";
+import { useRef, useState, type ComponentProps, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -37,7 +37,12 @@ import { cn } from "@/lib/utils";
  * (32,32,35) at y 160 where that bubble ends; the next one down, at x 30, is still (36,36,39) at y 175
  * and reaches (38,38,41) only at y 195, 47 below the bar. Light #e9e9eb (233,233,235) reads
  * (246,246,246) at y 105 and settles by y 150. The two ramps do not agree as one blend toward the page
- * colour, in sRGB or in linear light, so the mechanism is recorded and not built.
+ * colour, and they still do not once each is solved on its own, but each on its own is a clean
+ * straight line: that is `ios-scroll-edge`, which the app now draws between the transcript and this
+ * bar. The wash is not this component's - the bar is furniture over it, not the thing that paints it.
+ *
+ * Both controls respond to a finger - they dim, and the round one shrinks. Neither number is in the
+ * captures; see `iosNavPress` for where they come from and what is borrowed.
  *
  * Two sub-pixel offsets are transforms because Chrome quantizes paint, not layout: text baselines and
  * inline-SVG paint offsets snap to whole CSS px, so the name and the chevron each carry a 1/3-px
@@ -62,6 +67,84 @@ const vars =
 
 /** Apple's continuous corner (superellipse n≈2.2, measured on the pill). Browsers without corner-shape fall back to round. */
 const capsule = { cornerShape: "superellipse(1.14)" } as CSSProperties;
+
+/**
+ * What a finger does to these controls.
+ *
+ * **Borrowed, not measured.** No capture in this repo holds a pressed control, so the two numbers
+ * come from ChatKit, and they are the only two it has: grepping the framework's whole selector table
+ * for `touchAlpha|touchScale|pressedAlpha|pressedScale|highlightAlpha|highlightScale|dimAlpha|
+ * touchDownAlpha|touchDownScale` returns `replyButtonTouchAlpha` = 0.4 and `replyButtonTouchScale`
+ * = 0.85 and nothing else. Read at both idioms with the swizzle in place, `CKUIBehaviorPhone`
+ * (idiom 0) and `CKUIBehaviorMac` (idiom 5) agree on both.
+ *
+ * They belong to a different button, but to the nearest one ChatKit records: the reply button is
+ * itself a blurred glass pill (`replyButtonBackgroundBlurRadius` 5, `replyButtonBorderWidth` 0.5,
+ * `replyButtonEdgeInsets` {8, 14, 8, 14}), and ChatKit applies both to the whole view on
+ * `_buttonTouchDown` and takes them off on `_buttonTouchUpInside`, which is what the glass circle
+ * here does. iOS 26 renders the pressed state of a `glassButtonConfiguration` button in UIKit, not in
+ * ChatKit, so there is no closer number to find.
+ *
+ * The **scale is not applied to the name pill**: 0.85 on a 187.33-wide capsule pulls each end 14 pt
+ * inward, which reads as a different control rather than a pressed one. Recorded here, drawn only on
+ * the round back button.
+ *
+ * `release` is **unmeasured** - nothing in this repo records a control in motion. Press-down is
+ * instant, which is what a direct-manipulation highlight is; only the release eases back.
+ */
+export const iosNavPress = { alpha: 0.4, scale: 0.85, release: 100 };
+
+/**
+ * Press state that a finger, a mouse and the keyboard all reach.
+ *
+ * Pointer events rather than `:active`: Chrome holds `:active` back on a touch until the gesture has
+ * resolved into a tap rather than a scroll, so a finger that is still down is not reliably styled and
+ * a driven `Input.dispatchTouchEvent` hold cannot be proved. The pointer is captured so the release
+ * always lands back here, and while it is held the press follows the pointer out of the button's own
+ * box, which is what iOS does when a finger slides off a control.
+ *
+ * A finger that slides off does not come back, and that is Chromium rather than this hook: driving a
+ * real touch 60 px off the button logs `pointerdown -> pointermove(outside) -> touchmove ->
+ * pointercancel -> lostpointercapture`, i.e. gesture arbitration takes the pointer away the moment
+ * the finger pans, and the touchmove back onto the control delivers no pointer event at all. A mouse
+ * keeps its pointer, so dragging off a held button drops the press and dragging back on takes it up
+ * again.
+ *
+ * Nothing here moves focus, deliberately: both engines match `:focus-visible` on a programmatic focus
+ * taken while a pointer is still down, so a press opened by a finger would draw a ring iOS never
+ * draws (`tapback-bar.tsx` and `audio-recorder.tsx` carry the two fixes for the places that do have
+ * to move focus). The ring these buttons keep is the keyboard one, and it is reached by tabbing.
+ */
+function usePress() {
+  const [pressed, setPressed] = useState(false);
+  const held = useRef(false);
+  const release = () => { held.current = false; setPressed(false); };
+  return {
+    pressed,
+    handlers: {
+      onPointerDown(event: PointerEvent<HTMLElement>) {
+        if (event.pointerType === "mouse" && event.button !== 0) return;
+        held.current = true;
+        try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* the pointer ended before this handler ran */ }
+        setPressed(true);
+      },
+      onPointerMove(event: PointerEvent<HTMLElement>) {
+        if (!held.current) return;
+        const box = event.currentTarget.getBoundingClientRect();
+        setPressed(event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom);
+      },
+      onPointerUp: release,
+      onPointerCancel: release,
+      onLostPointerCapture: release,
+      onKeyDown(event: KeyboardEvent<HTMLElement>) { if (event.key === " " || event.key === "Enter") setPressed(true); },
+      onKeyUp: release,
+      onBlur: release,
+    },
+  };
+}
+
+/** Instant down, eased back up; `data-pressed` turns the transition off so the dim lands on the frame the finger does. */
+const pressTransition = "transition-[opacity,transform] ease-out data-pressed:transition-none motion-reduce:transition-none";
 
 /**
  * Shadow layer (beneath every surface of the bar), then the blur, then the translucent surface. The
@@ -91,11 +174,13 @@ export function initialsOf(name: string): string {
 
 export function IosNavBar({ name, initials, avatar, onBack, onDetails, className, style, ...props }: IosNavBarProps) {
   const letters = initials ?? initialsOf(name);
+  const back = usePress();
+  const title = usePress();
   return (
     <header data-slot="ios-nav-bar" className={cn("relative isolate h-[94px] w-full select-none", vars, className)} style={{ fontFamily: font, ...style }} {...props}>
-      <button type="button" data-slot="back" aria-label="Back" onClick={onBack}
-        className="absolute flex items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-blue-500"
-        style={{ left: 16, top: 8, width: 44, height: 44 }}>
+      <button type="button" data-slot="back" aria-label="Back" onClick={onBack} data-pressed={back.pressed || undefined} {...back.handlers}
+        className={cn("absolute flex items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-blue-500", pressTransition)}
+        style={{ left: 16, top: 8, width: 44, height: 44, transitionDuration: `${iosNavPress.release}ms`, opacity: back.pressed ? iosNavPress.alpha : undefined, transform: back.pressed ? `scale(${iosNavPress.scale})` : undefined }}>
         <GlassLayers round />
         <svg aria-hidden="true" className="relative" width="44" height="44" viewBox="0 0 44 44" fill="none" stroke="var(--ios-nav-label)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
           <path d="M24.8 13.87 16.2 22.17 24.8 30.47" />
@@ -103,9 +188,10 @@ export function IosNavBar({ name, initials, avatar, onBack, onDetails, className
       </button>
       {/* Padding and gap are solved, not chosen: they place the 17pt text run and the chevron on the
           measured ink positions while the pill's own box comes out 187.33 wide, centered on x 201. */}
-      <button type="button" data-slot="title" aria-label={`${name}, details`} onClick={onDetails}
-        className="absolute flex items-center whitespace-nowrap rounded-full focus-visible:outline-2 focus-visible:outline-blue-500"
-        style={{ left: "50%", top: 63, height: 32.3333, transform: "translate(-50%, 0)", padding: "0.3333px 10.7188px 0 12.9531px", gap: 6.1875, ...capsule }}>
+      <button type="button" data-slot="title" aria-label={`${name}, details`} onClick={onDetails} data-pressed={title.pressed || undefined} {...title.handlers}
+        className={cn("absolute flex items-center whitespace-nowrap rounded-full focus-visible:outline-2 focus-visible:outline-blue-500", pressTransition)}
+        /* Alpha only. `iosNavPress.scale` on a capsule this wide moves each end 14 pt, which is a different control rather than a pressed one. */
+        style={{ left: "50%", top: 63, height: 32.3333, transform: "translate(-50%, 0)", padding: "0.3333px 10.7188px 0 12.9531px", gap: 6.1875, transitionDuration: `${iosNavPress.release}ms`, opacity: title.pressed ? iosNavPress.alpha : undefined, ...capsule }}>
         <GlassLayers />
         <span data-slot="name" className="relative" style={{ transform: "translateY(0.3333px)", fontSize: 17, lineHeight: 1, fontWeight: 700, letterSpacing: 0, color: "var(--ios-nav-label)" }}>{name}</span>
         <svg aria-hidden="true" className="relative" width="8.6667" height="16.6667" viewBox="-2 -2 8.6667 16.6667" style={{ margin: -2, transform: "translateX(-0.3333px)" }} fill="none" stroke="var(--ios-nav-chevron)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">

@@ -118,7 +118,9 @@ const easeOut = (u: number) => 1 - (1 - u) * (1 - u);
 /** Apple's continuous corner. Browsers without `corner-shape` fall back to a plain round corner. */
 const continuous = { cornerShape: "superellipse(1.14)" } as CSSProperties;
 
-export type PlusMenuIcon = "camera" | "photos" | "stickers" | "cash" | "audio" | "images" | "checkin";
+export type PlusMenuIcon =
+  | "camera" | "photos" | "stickers" | "cash" | "audio" | "images" | "checkin"
+  | "location" | "polls" | "genmoji" | "playground" | "music" | "sendlater" | "store";
 
 export type PlusMenuItem = {
   id: string;
@@ -129,6 +131,33 @@ export type PlusMenuItem = {
   iconCenterX?: number;
   onSelect?: () => void;
 };
+
+/**
+ * The menu does not stop at "Check In" — the capture only reaches there because the sheet cuts the
+ * seventh row off, and now that the list scrolls the rows below it have somewhere to go.
+ *
+ * What belongs there is not a guess. ChatKit ships one artwork per send-menu row, and the full set
+ * in `Assets.car` is app-store, audio, camera, check-in, digital-touch, generative-playground,
+ * genmoji, hashtag-images, location, memoji, music, pay, photos, polls, send-later, stickers and
+ * tap-to-radar; `ChatKit.loctable` carries the matching `SEND_MENU_ITEM_TITLE_*` strings, which is
+ * where these labels come from, spelling and all — "Apple Cash" really does carry a non-breaking
+ * space in the framework. Seven of that set are already above. Memoji and Digital Touch are left out
+ * because their artwork is a face and a pair of hands that a redraw would only caricature, and
+ * tap-to-radar is Apple's internal bug reporter.
+ *
+ * **UNMEASURED: the order.** `plus-menu-open-light.png` pins the first seven rows and nothing below,
+ * so the order here is only the one the framework's own asset names sort into. The row *geometry* is
+ * the measured 66.5 pitch either way.
+ */
+export const plusMenuRest: PlusMenuItem[] = [
+  { id: "location", label: "Location", icon: "location" },
+  { id: "polls", label: "Polls", icon: "polls" },
+  { id: "genmoji", label: "Genmoji", icon: "genmoji" },
+  { id: "playground", label: "Playground", icon: "playground" },
+  { id: "music", label: "Music", icon: "music" },
+  { id: "sendlater", label: "Send Later", icon: "sendlater" },
+  { id: "store", label: "Store", icon: "store" },
+];
 
 /**
  * Apple Cash is the one row whose artwork is not the shared Ø39 disc: in
@@ -144,7 +173,9 @@ export const defaultPlusMenuItems: PlusMenuItem[] = [
   { id: "audio", label: "Audio", icon: "audio" },
   { id: "images", label: "#images", icon: "images" },
   { id: "checkin", label: "Check In", icon: "checkin" },
+  ...plusMenuRest,
 ];
+
 
 /**
  * Sheet geometry, in points, read off the capture.
@@ -243,6 +274,12 @@ function AppIcon({ icon, size = plusMenuMetrics.iconSize }: { icon: PlusMenuIcon
   const id = useId();
   const s = size;
   const common = { width: s, height: s, viewBox: "0 0 39 39" } as const;
+  // The seven the capture holds are below; the rest of ChatKit's send-menu artwork lives in
+  // `AppIconRest` so this function does not run to a thousand lines.
+  if (icon === "location" || icon === "sendlater" || icon === "polls" || icon === "store"
+    || icon === "music" || icon === "playground" || icon === "genmoji") {
+    return <AppIconRest icon={icon} id={id} common={common} />;
+  }
   if (icon === "camera") {
     return (
       <svg aria-hidden="true" {...common}>
@@ -322,6 +359,143 @@ function AppIcon({ icon, size = plusMenuMetrics.iconSize }: { icon: PlusMenuIcon
     <svg aria-hidden="true" {...common}>
       <circle cx="19.5" cy="19.5" r="19.5" fill="#ffd42e" />
       <path d="M12.2 20.4 17.3 25.5 28.2 12.4" fill="none" stroke="#3a2a06" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/**
+ * The rest of the send menu, redrawn from ChatKit's own artwork rather than from a capture — see
+ * `plusMenuRest` for why they are here at all. Every rendition is `send-menu-<name>-glass` in
+ * `ChatKit.framework/Resources/Assets.car`, pulled at the phone idiom, and each is a Ø39 disc inside
+ * a 54 box (ink 7.5–46.5 both ways), which is the same 39 `plusMenuMetrics.iconSize` already carries.
+ *
+ * Colours and radii are read off those PNGs at 2x, averaging 36 angles per radius so a glyph cannot
+ * bias a ring:
+ *
+ * - **Location**: green field, flat #5ce58c from r 10.5 out, running #30e7a6 at the top of r 18 to
+ *   #82df6c at the bottom. A near-white ring (#e9faef) fills r 6.0–9.6 and a #2490fc dot fills r 6.
+ * - **Send Later**: no disc at all. A #2ec0fe clock face fills r 11.5 with its hands cut out of it
+ *   (the radial average climbs 0.14 → 1.0 alpha from r 1 to r 8, which is the hands' angular share
+ *   shrinking), and a dashed ring of the same blue sits at r 16.5–19.5.
+ * - **Polls**: amber, flat #ffb72a, #ffae01 to #ffbb4f down the same r 18.
+ * - **Store**: blue, flat #1d8df4, #22b3f8 to #1662ee.
+ * - **Music**: #ff4d6f to #fe002a.
+ * - **Playground**: #313131 to #0f0f0f.
+ * - **Genmoji**: no flat field — #f77449 at the top of r 18, #f862c0 at the right, #27b5fb at the
+ *   bottom and #eabe8a at the left, i.e. a hue sweep, so it is drawn as one.
+ *
+ * The glyphs themselves are redrawn, not traced: these are Apple's app icons and the kit ships its
+ * own hand-drawn stand-ins for the seven that were already here for the same reason.
+ */
+function AppIconRest({ icon, id, common }: { icon: PlusMenuIcon; id: string; common: { width: number; height: number; viewBox: string } }) {
+  if (icon === "location") {
+    return (
+      <svg aria-hidden="true" {...common}>
+        <defs><linearGradient id={`${id}-loc`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#30e7a6" /><stop offset="1" stopColor="#82df6c" /></linearGradient></defs>
+        <circle cx="19.5" cy="19.5" r="19.5" fill={`url(#${id}-loc)`} />
+        <circle cx="19.5" cy="19.5" r="9.6" fill="#e9faef" />
+        <circle cx="19.5" cy="19.5" r="6" fill="#2490fc" />
+      </svg>
+    );
+  }
+  if (icon === "sendlater") {
+    return (
+      <svg aria-hidden="true" {...common}>
+        {/* The ring's 22 dashes are a count, not a measurement: the radial average only says the ring
+            is dashed and where it sits. */}
+        <circle cx="19.5" cy="19.5" r="18" fill="none" stroke="#2ec0fe" strokeWidth="3" strokeDasharray="2.6 2.6" strokeLinecap="round" />
+        <circle cx="19.5" cy="19.5" r="11.5" fill="#2ec0fe" />
+        <path d="M19.5 11.6V19.5H26" fill="none" stroke="#ffffff" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (icon === "polls") {
+    return (
+      <svg aria-hidden="true" {...common}>
+        <defs><linearGradient id={`${id}-poll`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#ffae01" /><stop offset="1" stopColor="#ffbb4f" /></linearGradient></defs>
+        <circle cx="19.5" cy="19.5" r="19.5" fill={`url(#${id}-poll)`} />
+        <g fill="#ffffff">
+          <rect x="9.4" y="11.6" width="20.2" height="4.2" rx="2.1" />
+          <rect x="9.4" y="17.4" width="14.6" height="4.2" rx="2.1" />
+          <rect x="9.4" y="23.2" width="9.4" height="4.2" rx="2.1" />
+        </g>
+      </svg>
+    );
+  }
+  if (icon === "store") {
+    return (
+      <svg aria-hidden="true" {...common}>
+        <defs><linearGradient id={`${id}-st`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#22b3f8" /><stop offset="1" stopColor="#1662ee" /></linearGradient></defs>
+        <circle cx="19.5" cy="19.5" r="19.5" fill={`url(#${id}-st)`} />
+        {/* The App Store's "A": two legs, the crossbar, and the short stroke that overshoots left. */}
+        <g fill="none" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M13.1 27.6 21.4 13.2" />
+          <path d="M25.9 27.6 17.6 13.2" />
+          <path d="M10.4 22.7H26.6" />
+          <path d="M15.6 27.6H10.9" />
+        </g>
+      </svg>
+    );
+  }
+  if (icon === "music") {
+    return (
+      <svg aria-hidden="true" {...common}>
+        <defs><linearGradient id={`${id}-mu`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#ff4d6f" /><stop offset="1" stopColor="#fe002a" /></linearGradient></defs>
+        <circle cx="19.5" cy="19.5" r="19.5" fill={`url(#${id}-mu)`} />
+        <g fill="#ffffff">
+          <path d="M16.4 12.9 27.4 10.5v3.6l-11 2.4z" />
+          <rect x="15" y="13.6" width="1.9" height="11.6" rx="0.95" />
+          <rect x="25.9" y="11.2" width="1.9" height="11" rx="0.95" />
+          <ellipse cx="13" cy="25.6" rx="4" ry="3.2" />
+          <ellipse cx="23.9" cy="22.6" rx="4" ry="3.2" />
+        </g>
+      </svg>
+    );
+  }
+  if (icon === "playground") {
+    return (
+      <svg aria-hidden="true" {...common}>
+        <defs>
+          <linearGradient id={`${id}-pg`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#313131" /><stop offset="1" stopColor="#0f0f0f" /></linearGradient>
+          <linearGradient id={`${id}-orb`} x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="#ff6f4d" /><stop offset="0.35" stopColor="#f45fd0" />
+            <stop offset="0.7" stopColor="#6f7bff" /><stop offset="1" stopColor="#3ec6ff" />
+          </linearGradient>
+        </defs>
+        <circle cx="19.5" cy="19.5" r="19.5" fill={`url(#${id}-pg)`} />
+        <g fill="none" stroke={`url(#${id}-orb)`} strokeWidth="1.9">
+          <ellipse cx="19.5" cy="19.5" rx="10.4" ry="4.6" />
+          <ellipse cx="19.5" cy="19.5" rx="10.4" ry="4.6" transform="rotate(60 19.5 19.5)" />
+          <ellipse cx="19.5" cy="19.5" rx="10.4" ry="4.6" transform="rotate(120 19.5 19.5)" />
+        </g>
+        <circle cx="19.5" cy="19.5" r="3.1" fill={`url(#${id}-orb)`} />
+      </svg>
+    );
+  }
+  // genmoji
+  return (
+    <svg aria-hidden="true" {...common}>
+      <defs>
+        <linearGradient id={`${id}-gm`} x1="0.5" y1="0" x2="0.5" y2="1">
+          <stop offset="0" stopColor="#f77449" /><stop offset="0.5" stopColor="#f862c0" /><stop offset="1" stopColor="#27b5fb" />
+        </linearGradient>
+        <linearGradient id={`${id}-gm2`} x1="0" y1="0.5" x2="1" y2="0.5">
+          <stop offset="0" stopColor="#eabe8a" stopOpacity="0.85" /><stop offset="0.55" stopColor="#ffffff" stopOpacity="0" /><stop offset="1" stopColor="#f862c0" stopOpacity="0.85" />
+        </linearGradient>
+      </defs>
+      <circle cx="19.5" cy="19.5" r="19.5" fill={`url(#${id}-gm)`} />
+      <circle cx="19.5" cy="19.5" r="19.5" fill={`url(#${id}-gm2)`} />
+      <g fill="none" stroke="#ffffff" strokeWidth="2.2" strokeLinecap="round">
+        <circle cx="18.1" cy="19.9" r="9.3" />
+        <path d="M13.9 22.6a5.6 5.6 0 0 0 8.4 0" />
+      </g>
+      <g fill="#ffffff">
+        <circle cx="14.8" cy="17.2" r="1.5" />
+        <circle cx="21.4" cy="17.2" r="1.5" />
+      </g>
+      <g stroke="#ffffff" strokeWidth="2" strokeLinecap="round">
+        <path d="M29.2 8.6v5.2M26.6 11.2h5.2" />
+      </g>
     </svg>
   );
 }
