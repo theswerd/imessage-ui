@@ -48,7 +48,21 @@ export const bubbleMetrics: Record<Platform, BubbleMetrics> = {
     lineHeight: 20,
     paddingX: 13.85,
     paddingY: 10,
-    radius: 19,
+    /**
+     * Two independent sources agree and the 19 that was here did not match either.
+     *
+     * Tracing the first bubble's top-right corner in `conv3-light.png` - the sub-pixel x where
+     * coverage crosses 0.5, row by row for 69 rows - and least-squares fitting a circle over it
+     * gives **r = 20.010**, rms 0.197. `-[CKUIBehaviorPhone balloonCornerRadius]` is **20.0107**,
+     * and `CKUIBehaviorMac` inherits the same number. The shipped 19 fits the same trace at rms
+     * 0.526, two and a half times worse.
+     *
+     * The real corner is very slightly *more* than circular: a superellipse fit lands at r 20.96,
+     * n 2.14 (CSS `superellipse(1.10)`) for rms 0.142, and the measured edge is still 0.18 pt out
+     * at 20 pt down where every circle has closed. That is Apple's continuous corner, and closing
+     * it needs `corner-shape`, which this bubble does not use yet.
+     */
+    radius: 20.0107,
     minWidth: 48,
     maxWidth: 280.5,
     /** Unverified: 0.17 under `maxWidth`. `message-list` uses the ratio on iOS too, so a bubble is
