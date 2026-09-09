@@ -53,6 +53,12 @@ export type IosComposerProps = Omit<ComponentProps<"form">, "onSubmit" | "onChan
   onMic?: () => void;
   placeholder?: string;
   disabled?: boolean;
+  /**
+   * The screen has an editing session open - a caret is somewhere, the keyboard is up. iOS lifts the
+   * composer while that is true: the field fills a shade darker and the shadow under it strengthens.
+   * See `composerLift`.
+   */
+  raised?: boolean;
   /** Tallest the field grows before it scrolls, in lines. */
   maxLines?: number;
 };
@@ -66,6 +72,26 @@ const TOP_EDGE = 1 / 3;
 const vars =
   "[--ios-cmp-glass:rgba(255,255,255,0.9)] [--ios-cmp-rim:none] [--ios-cmp-shadow:0_6px_36px_4px_rgba(0,0,0,0.065)] [--ios-cmp-shadow-round:0_5px_20px_6px_rgba(0,0,0,0.055)] [--ios-cmp-glyph:#1a1919] [--ios-cmp-text:#000000] [--ios-cmp-placeholder:#bdbdbd] [--ios-cmp-mic:#b4b8bf] [--ios-cmp-caret:#0088ff] " +
   "dark:[--ios-cmp-glass:rgba(28,28,28,0.9)] dark:[--ios-cmp-rim:inset_0_0_0_1px_rgba(255,255,255,0.09)] dark:[--ios-cmp-shadow:none] dark:[--ios-cmp-shadow-round:none] dark:[--ios-cmp-glyph:#f4f3f4] dark:[--ios-cmp-text:#ffffff] dark:[--ios-cmp-placeholder:#5d5d5d] dark:[--ios-cmp-mic:#636466] dark:[--ios-cmp-caret:#0091ff]";
+
+/**
+ * The composer fills a shade darker while an editing session is open, and the captures separate that
+ * cleanly from everything else it might have been confused with.
+ *
+ * `conv3-light.png` and `list-light.png` - no caret anywhere on the screen - have the field at 255.
+ * `paste-check.png` has a caret in the composer and `newmsg-light.png` has one in the To: field
+ * while its own composer sits empty and unfocused; both read 253. So the trigger is the session, not
+ * a full field and not composer focus. Both were shot on a simulator with a hardware keyboard, which
+ * is why no software keyboard gives it away.
+ *
+ * The shadow is **not** part of this, which took three captures to establish. Measuring the darkness
+ * below the composer's bottom edge at 0, 2.7, 5.3 … 24 pt: conv3, list and newmsg all read
+ * 11, 10, 9, 8, 7, 6, 5, 4, and only `paste-check` reads 18, 17, 15, 13, 12, 10, 8, 7 - the same
+ * curve scaled by 1.601 (least squares over 28,969 pixels). What is different about paste-check is
+ * that its field is four lines tall, so the extra shadow follows the box's height rather than the
+ * session. A CSS `box-shadow` does grow with its box, but not by nearly that much; closing the
+ * remainder needs a capture of a two-line composer to tell a height law from a step.
+ */
+const composerLift = "[--ios-cmp-glass:rgba(253,253,253,0.9)]";
 
 /** `clip` stops the shadow at the midpoint of the 12pt gap toward a neighboring glass element, so the two shadows read as one (they never add up on the device). */
 function GlassLayers({ round = false, clip }: { round?: boolean; clip?: "left" | "right" }) {
@@ -111,7 +137,7 @@ function ComposerMicIcon() {
 }
 
 export function IosComposer({
-  value, defaultValue = "", onChange, onSend, onAttach, attachExpanded, onMic, placeholder = "iMessage", disabled = false, maxLines = 8, className, style, ...props
+  value, defaultValue = "", onChange, onSend, onAttach, attachExpanded, onMic, placeholder = "iMessage", disabled = false, raised = false, maxLines = 8, className, style, ...props
 }: IosComposerProps) {
   const [draft, setDraft] = useState(defaultValue);
   const text = value ?? draft;
@@ -158,7 +184,7 @@ export function IosComposer({
   }
 
   return (
-    <form data-slot="ios-composer" aria-label="Send a message" className={cn("relative isolate flex w-full items-end select-none", vars, className)}
+    <form data-slot="ios-composer" data-raised={raised || undefined} aria-label="Send a message" className={cn("relative isolate flex w-full items-end select-none", vars, raised && composerLift, className)}
       style={{ padding: "0 28px 28px 28px", fontFamily: font, ...style }} onSubmit={event => { event.preventDefault(); void send(); }} {...props}>
       <button type="button" data-slot="attach" aria-label="Add attachment" aria-haspopup="menu" aria-expanded={attachExpanded} disabled={disabled} onClick={onAttach}
         className="relative flex shrink-0 items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-blue-500 disabled:opacity-50"

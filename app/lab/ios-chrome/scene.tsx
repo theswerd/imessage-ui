@@ -68,7 +68,7 @@ export function IosChromeScene({ scene, theme }: { scene: ChromeScene; theme: "l
       <div data-testid="lab" className={theme} style={frame}>
         <IosStatusBar time="1:58" className="absolute left-0 top-0" />
         <IosNewMessageSheet caret>
-          <IosComposer placeholder="" />
+          <IosComposer placeholder="" raised />
         </IosNewMessageSheet>
       </div>
     );
@@ -78,7 +78,10 @@ export function IosChromeScene({ scene, theme }: { scene: ChromeScene; theme: "l
     <div data-testid="lab" className={theme} style={frame}>
       <IosStatusBar time={longpress ? (dark ? "3:15" : "2:12") : dark ? "1:45" : "1:48"} className="absolute left-0 top-0" />
       <IosNavBar name="+1 (888) 555-1212" initials="JA" className="absolute left-0 top-[54px]" />
-      <IosComposer className="absolute bottom-0 left-0" defaultValue={scene === "composer-text" ? pasteText : ""} />
+      {/* `paste-check.png` was taken with a caret in the composer and `newmsg-light.png` with one in
+          the To: field, so both show the raised composer; `conv3-light.png` and `list-light.png` have
+          no editing session anywhere and show the resting one. See `composerLift`. */}
+      <IosComposer className="absolute bottom-0 left-0" raised={scene === "composer-text"} defaultValue={scene === "composer-text" ? pasteText : ""} />
       {/* The long-press overlay's dim, over the chrome rather than beside it — see the scene doc. It is
           `message-actions`' own backdrop value, not a copy, so the two cannot drift apart. */}
       {longpress && <div data-slot="backdrop" aria-hidden="true" style={{ position: "absolute", inset: 0, background: messageActionsDim }} />}
