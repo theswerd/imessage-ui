@@ -13,11 +13,22 @@ import { cn } from "@/lib/utils";
  * the Ø39 app icon is centred at x 63.17 and the label starts at x 108 (ink cap height 17.5, i.e.
  * ≈25pt). "Check In" is clipped by the sheet's bottom edge, which is how the capture shows it.
  *
- * Known gap: the glass under-blurs. Native dissolves the 17pt bubble text behind the sheet
- * completely; ours still passes about 55% more high-frequency detail (high-pass std 9.6 against the
- * capture's 6.2 over x 200–330, y 380–700). Raising the radius cannot close it: on this element
- * Chromium renders `backdrop-filter: blur()` identically for every value from 2px to 200px, so the
- * 45px below is only nominal.
+ * Glass, refitted. The radius does matter, which an earlier note here denied: sweeping it and
+ * measuring the horizontal-derivative std behind the sheet over x 210–320, y 400–690 gives 4.17 at
+ * 10px, 4.20 at 14, 4.51 at 20, 5.13 at 30 and 5.91 at the 45 this used to carry, against the
+ * capture's **4.26**. Detail *rises* past about 14px, so a bigger radius was making it worse, not
+ * better - Chromium's wide-radius backdrop blur puts back more than it takes out.
+ *
+ * Radius and tint were then solved together: for each radius, render the sheet once with a black
+ * tint and once with a white one - the result is linear in the tint - and least-squares the tint
+ * that lands on the capture over every glass pixel in the sheet's right third, clear of the labels.
+ * The best neutral answer is blur 20, alpha 0.72, tint 248, at rms 7.24 against the shipped
+ * 45/0.62/255's 8.55.
+ *
+ * Letting the tint go per-channel reaches rms 4.9, but it comes out green (236, 252, 240), and the
+ * only plus-menu capture there is sits over a thread of green bubbles. That is this scene's backdrop
+ * leaking into the fit, so the neutral answer ships. A second capture of the sheet over a blue or
+ * grey thread would settle whether the material really is tinted.
  *
  * Photos grid: three 129.67 square tiles per row with 1.33 gaps, x 5.33–396.67, first row top 485,
  * radius 12, with a 35 × 5 sheet grabber over the middle of the first row. Tiles here are solid
@@ -69,7 +80,7 @@ const font = "-apple-system, BlinkMacSystemFont, sans-serif";
  * needs no ramp of its own.
  */
 const vars =
-  "[--ios-pm-label:#000000] [--ios-pm-glass:255_255_255] [--ios-pm-alpha:0.62] [--ios-pm-shadow-alpha:0.066] [--ios-pm-rim:0_0_0_0_rgba(0,0,0,0)] " +
+  "[--ios-pm-label:#000000] [--ios-pm-glass:248_248_248] [--ios-pm-alpha:0.72] [--ios-pm-shadow-alpha:0.066] [--ios-pm-rim:0_0_0_0_rgba(0,0,0,0)] " +
   "dark:[--ios-pm-label:#f4f3f4] dark:[--ios-pm-glass:28_28_28] dark:[--ios-pm-alpha:0.72] dark:[--ios-pm-shadow-alpha:0] dark:[--ios-pm-rim:inset_0_0_0_1px_rgba(255,255,255,0.09)]";
 
 /**
@@ -85,7 +96,7 @@ export const plusMenuMotion = {
   buttonAlpha: 0.9,
   buttonBlur: 24,
   /** Nominal: Chromium renders every blur radius alike on this element (see the file comment). */
-  sheetBlur: 45,
+  sheetBlur: 20,
   sheetSaturate: 1.9,
   /** The sheet's glass takes over from the button's under it, before the box has grown enough to see. */
   glassFade: 0.12,
