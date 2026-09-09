@@ -226,7 +226,12 @@ export function MacPlusMenu({ open = true, onExited, progress, items = defaultPl
   useEffect(() => {
     // A scrubbed entrance must not move the caret: the harness seeks frames, it does not open menus.
     if (!open || !autoFocus || progress !== undefined) return;
-    list.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+    // The menu takes the focus, not its first row: a row focused programmatically while the pointer
+    // that opened the menu is still down matches `:focus-visible` in Chrome and WebKit alike - the
+    // gesture has not resolved, so the modality is still the keyboard default - and paints a ring on
+    // a menu opened with a mouse. `onKeyDown` is on this element, so every key still arrives, and
+    // the first arrow moves to a row where the ring is correct. See `tapback-bar.tsx`.
+    list.current?.focus({ preventScroll: true });
   }, [open, autoFocus, progress]);
 
   /**
@@ -261,8 +266,10 @@ export function MacPlusMenu({ open = true, onExited, progress, items = defaultPl
     const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
-      const step = event.key === "ArrowDown" ? 1 : -1;
-      buttons[(index + step + buttons.length) % buttons.length]?.focus();
+      // -1 while the focus is still on the menu itself, which is where it starts: Down goes to the
+      // first row and Up to the last. Wrapping arithmetic on -1 reaches neither.
+      if (index < 0) buttons[event.key === "ArrowDown" ? 0 : buttons.length - 1]?.focus();
+      else buttons[(index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus();
     }
     if (event.key === "Home") { event.preventDefault(); buttons[0]?.focus(); }
     if (event.key === "End") { event.preventDefault(); buttons[buttons.length - 1]?.focus(); }
@@ -278,6 +285,7 @@ export function MacPlusMenu({ open = true, onExited, progress, items = defaultPl
       data-state={state}
       role="menu"
       aria-labelledby={`${id}-label`}
+      tabIndex={-1}
       onKeyDown={onKeyDown}
       className={cn(
         "absolute z-40 select-none bg-[var(--pm-fill)] text-[var(--pm-text)] shadow-[var(--pm-edge)]",

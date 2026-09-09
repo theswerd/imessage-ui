@@ -714,7 +714,13 @@ export function AudioRecorder({
 
   useEffect(() => {
     if (!autoFocus || !open || progress !== undefined) return;
-    (recording ? stopButton.current : playButton.current)?.focus({ preventScroll: true });
+    // `focusVisible: false` because this focus is programmatic and the gesture that opened the
+    // recorder is usually still in flight: both Chrome and WebKit only suppress the ring on a
+    // programmatic focus once the pointer interaction has *resolved*, and a held touch has not, so
+    // without it the primary control gets a ring iOS never draws. A menu can put the focus on its
+    // container instead and let the first arrow key light a row (see `tapback-bar.tsx`); the
+    // recorder has one control that matters, and a screen reader should land on it.
+    (recording ? stopButton.current : playButton.current)?.focus({ preventScroll: true, focusVisible: false });
   }, [autoFocus, open, progress, recording]);
 
   const seek = (clientX: number) => {
