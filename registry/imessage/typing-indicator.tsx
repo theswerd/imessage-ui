@@ -9,17 +9,32 @@ import { bubbleMetrics, palettes } from "@/registry/imessage/tokens";
 /**
  * The "someone is typing" balloon.
  *
- * NOT MEASURED. No capture in `references/` shows a typing indicator: every iOS and macOS still, both
- * 60 fps recordings and every motion contact sheet were checked on 2026-09-08 and none contains one.
+ * No capture in `references/` shows a typing indicator - every iOS and macOS still, both 60 fps
+ * recordings and every motion contact sheet were checked on 2026-09-08 and none contains one - but
+ * ChatKit describes the whole balloon, and the dots that used to be invented here now come from it:
  *
- * What is anchored to a capture is the balloon itself. It is an incoming bubble, so it takes the
- * measured incoming geometry rather than numbers of its own: the one-line body height
- * (2 x paddingY + lineHeight), the measured corner radius, the traced tail on the bottom-left, and
- * the incoming screen-space fill, all read from `bubbleMetrics` and `bubble-shape` so it can never
- * drift from a real bubble. The message list insets it by the same measured edge inset as a bubble.
+ * | value | ChatKit | what was here |
+ * |---|---|---|
+ * | dot diameter | `transcriptTypingIndicatorThinkingDotDiameter` **8.5** | 10 |
+ * | dot pitch | `transcriptTypingIndicatorThinkingDotSpace` **12.5** centre to centre | 15 (10 + 5) |
+ * | balloon | `transcriptTypingIndicatorLargeBubbleSize` **{57.5, 35}** | 3 dots plus the bubble's padding |
+ * | whole indicator | `transcriptTypingIndicatorDefaultSize` **{78.5, 35}** | - |
  *
- * Only the dots are invented: diameter, spacing and the 1.2 s pulse are provisional, and the dot
- * colour reuses the platform's measured secondary-label gray because no capture shows the real one.
+ * 12.5 is the pitch and not the gap: three 8.5 dots at that pitch span 33.5, which leaves 12 of
+ * padding on each side of the 57.5 balloon. Read as a gap they would span 50.5 and leave 3.5, which
+ * no balloon looks like. The balloon's own 35 height replaces the one-line bubble height this used to
+ * borrow, and it is 3 pt shorter than the 38 that measured 2 x 10 + 20 gives.
+ *
+ * ChatKit also has the two smaller bubbles that trail it - `…MediumBubbleSize` {11.5, 11.5} at
+ * `…MediumBubbleOffset` (7, -7.5), and the large one at `…LargeBubbleOffset` (14, -28.5) - which is
+ * how the 78.5 x 35 whole is bigger than the 57.5 balloon. Those are not drawn here yet.
+ *
+ * What is still anchored to a capture: the balloon is an incoming bubble, so its corner radius, its
+ * traced bottom-left tail and its incoming screen-space fill are read from `bubbleMetrics` and
+ * `bubble-shape` and can never drift from a real bubble.
+ *
+ * Still invented: the 1.2 s pulse and its stagger, and the dot colour, which reuses the platform's
+ * measured secondary-label gray because nothing shows the real one.
  * The pulse is a CSS animation with negative delays, so every dot is inside its active phase at every
  * time: pausing `document.getAnimations()` and setting `currentTime` pins the balloon to a frame, and
  * that frozen frame is the one the animation shows while running.
@@ -28,7 +43,7 @@ export type TypingIndicatorMetrics = {
   /** Body box, both derived from the measured one-line incoming bubble. */
   width: number;
   height: number;
-  /** Provisional: dot diameter and the gap between two dots. */
+  /** `transcriptTypingIndicatorThinkingDotDiameter`, and the gap that its 12.5 pitch implies. */
   dot: number;
   dotGap: number;
   /** Measured bubble radius and tail scale, carried through so the balloon matches a bubble exactly. */
@@ -36,18 +51,21 @@ export type TypingIndicatorMetrics = {
   tailScale: number;
 };
 
-/** The only free numbers in the balloon. Everything else falls out of the measured bubble. */
-const dotSizes: Record<Platform, { dot: number; dotGap: number }> = {
-  ios: { dot: 10, dotGap: 5 },
-  macos: { dot: 7, dotGap: 3.5 },
-};
+/**
+ * `transcriptTypingIndicatorThinkingDotDiameter` and `…ThinkingDotSpace`, with the balloon box from
+ * `transcriptTypingIndicatorLargeBubbleSize`. macOS scales them by the ratio its bubble already
+ * carries, because `CKUIBehaviorMac` does not override any of the three and its balloon is smaller.
+ */
+const chatKitDots = { dot: 8.5, pitch: 12.5, balloon: { width: 57.5, height: 35 } } as const;
 
 function metricsFor(platform: Platform): TypingIndicatorMetrics {
   const b = bubbleMetrics[platform];
-  const { dot, dotGap } = dotSizes[platform];
+  const scale = platform === "ios" ? 1 : b.lineHeight / bubbleMetrics.ios.lineHeight;
+  const dot = chatKitDots.dot * scale;
+  const dotGap = (chatKitDots.pitch - chatKitDots.dot) * scale;
   return {
-    width: 2 * b.paddingX + 3 * dot + 2 * dotGap,
-    height: 2 * b.paddingY + b.lineHeight,
+    width: chatKitDots.balloon.width * scale,
+    height: chatKitDots.balloon.height * scale,
     dot,
     dotGap,
     radius: b.radius,

@@ -382,7 +382,14 @@ app surfaces, not reproductions of a native Messages element, and are marked unv
 No native capture exists yet for these, so they are built from the documented pattern and must not be
 described as measured:
 
-- The typing indicator's geometry and dot animation.
+- The typing indicator's **dot animation**. Its geometry is no longer open: ChatKit gives
+  `transcriptTypingIndicatorLargeBubbleSize` **{57.5, 35}**,
+  `transcriptTypingIndicatorThinkingDotDiameter` **8.5** and
+  `transcriptTypingIndicatorThinkingDotSpace` **12.5**, which is a centre-to-centre pitch, not a
+  gap: three 8.5 dots at 12.5 span 33.5 and leave 12 of padding each side of the 57.5 balloon,
+  where reading it as a gap would leave 3.5. It also has the two smaller bubbles that trail the
+  balloon (`…MediumBubbleSize` {11.5, 11.5} at (7, -7.5), the large one at (14, -28.5), whole
+  indicator `transcriptTypingIndicatorDefaultSize` {78.5, 35}), which the kit does not draw yet.
 - **The macOS tapback overshoot.** `tapback-apply-frames-100-123.png` ends while the balloon is still
   growing, so the peak scale and the settle in `tapbackAppear` are invented; only the 110 ms rise, the
   trail's lack of delay, and the 183 ms menu dissolve are measured. See "macOS tapback motion".
