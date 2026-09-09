@@ -1,9 +1,11 @@
 # iMessage UI
 
 A shadcn registry of Messages components for the web, measured against the real apps: **iOS 26.0** in the
-iPhone 17 Pro simulator and **macOS 26.5 Messages 26.0**. Every size, colour, radius and timing in
-`registry/imessage/` comes from a native capture, and `references/SPEC.md` records where each number
-came from. The registry layout follows [theswerd/brainless](https://github.com/theswerd/brainless):
+iPhone 17 Pro simulator and **macOS 26.5 Messages 26.0**. No size, colour, radius or timing in
+`registry/imessage/` is invented where it could be read instead: most come from a native capture, the
+rest from Apple's own ChatKit and PhotoKit constants, and `references/SPEC.md` records which — down to
+the handful that are still judgement and say so. The registry layout follows
+[theswerd/brainless](https://github.com/theswerd/brainless):
 owned source in `registry/`, a generated catalog at `/r/registry.json`, installable item JSON, and
 per-component agent docs at `/llms.txt`.
 
@@ -19,12 +21,42 @@ bun run dev
   scenario, a theme, and a checkpoint on the timeline, then keep interacting with the result. Deep
   links are reproducible, for example
   `/harness?platform=ios&scene=long-press&t=880&theme=light`, and `&embed=1` drops the site chrome.
-- `/lab/...` holds the pixel labs. Each one reconstructs a specific native capture at native geometry
-  so it can be diffed against it: `/lab` (bubbles), `/lab/ios-chrome`, `/lab/ios-screens`,
-  `/lab/macos-chrome`, `/lab/list`, `/lab/tapback`, `/lab/effects` and `/lab/reply`. The effects lab
-  also reconstructs the iOS "Send with effect" screen, which is measured:
-  `/lab/effects?picker=1&choose=slam`, and `&tab=screen` for the other tab.
+  There are 66 scenarios in six groups (Messages, Previews, Interactions, Screens, Effects,
+  FaceTime); some are one platform only, and the picker says so. Every timed one is *scrubbed*, not
+  played: `/harness?platform=ios&scene=search-open&t=130` renders the same frame every time.
+- `/lab/...` holds the pixel labs, listed below.
 - [localhost:3100/docs](http://localhost:3100/docs) lists the catalog.
+
+### The pixel labs
+
+Each lab renders one surface at native geometry (402 × 874 pt for iOS, 960 × 640 for the macOS
+window) so `scripts/measure/compare.ts` can diff it against a capture. Most reconstruct a specific
+frame in `references/`; the ones marked below have no capture to diff against and exist so that one
+can be taken, and so the framework-derived geometry has somewhere to be looked at. Each lab's own
+docblock lists its scenes, its query parameters and the regions worth diffing.
+
+| Route | Reconstructs |
+|---|---|
+| `/lab` | bubbles and the conversation scenes (`?scene=ios-conv3&theme=light`) |
+| `/lab/list` | the message area alone, iOS and macOS (`?platform=macos&theme=dark`) |
+| `/lab/ios-chrome` | status bar, nav bar, composer, list, the long-press dim |
+| `/lab/ios-screens` | details, plus menu, select mode, swipe-for-times, notices, attachments |
+| `/lab/macos-chrome` | the window, the conversation pane, the `+` popover |
+| `/lab/macos-pane` | the four `conversation-pane-*.png` crops, header and composer included |
+| `/lab/tapback` | the balloon and the long-press menu, whole-frame |
+| `/lab/effects` | bubble and screen effects, and the measured "Send with effect" screen (`?picker=1&choose=slam`, `&tab=screen`) |
+| `/lab/reply` | the quoted stub and the thread view — no capture backs these |
+| `/lab/search` | `search-active-light.png`, `search-noresults-dark.png`, and the two transitions |
+| `/lab/photoviewer` | `image-viewer-chrome-dark.png`, `image-viewer-fit-dark.png`, plus states no capture reaches |
+| `/lab/photo-picker` | `photo-picker-light.png`, the panel alone, and the selection badge |
+| `/lab/ios-sticker-picker` | `sticker-picker-light.png`, plus the posed sticker drag |
+| `/lab/groupavatar` | `references/group-avatar/snowglobe-{light,dark}.png`, and the sender gutter |
+| `/lab/system-message` | the unknown-sender notice in `incoming-light.png`; the other status lines have no capture |
+| `/lab/group-details` | the iOS group details screen — **no group capture exists**; it shares the measured one-to-one frame |
+| `/lab/tapback-details` | the Tapback Details platter — **no capture**; ChatKit-derived |
+| `/lab/audio-recorder` | the voice-recorder row — **no capture**; ChatKit-derived |
+| `/lab/macos-details` | the macOS inspector — **no capture**; the lab's docblock has the recipe for taking one |
+| `/lab/crop` | not a surface: a viewport that re-origins another lab so a standalone crop capture (`tapback-bar-crop.png`, `context-menu-crop.png`) can be diffed without redrawing the scene |
 
 ## How fidelity is checked
 
@@ -42,9 +74,11 @@ bun run test:visual     # checkpoint screenshots against tests/e2e/baselines
 bun run test:report     # HTML results, traces, failure videos
 ```
 
-The visual suite makes hundreds of navigations per project. Against the dev server, on-demand route
-compilation becomes the bottleneck and navigations time out; against a production server the same 336
-tests finish in under two minutes. So for a full run:
+The visual suite makes hundreds of navigations per project: 2 themes × 66 scenarios × 4
+browser/platform projects = 528 tests, less the ones skipped because the surface is one-platform.
+Against the dev server, on-demand route compilation becomes the bottleneck and navigations time out,
+so run it against a production server. (The "under two minutes" figure this file used to quote was
+measured when the suite was 336 tests; the current suite has not been timed.) For a full run:
 
 ```sh
 bun run serve:test                                    # build, then serve on :3101
@@ -91,8 +125,11 @@ and fix the spec.
 references/SPEC.md          Every measured number, and how it was measured
 references/PLAN.md          Component map and working rules
 references/ios/captures/    iOS 26 simulator frames, 402x874 pt at 3x
-references/ios/motion/      60 fps recordings and contact sheets of send and long press
+references/ios/motion/      60 fps recordings and contact sheets: send, long press, search open/close
 references/macos/captures/  macOS 26 window crops at 2x
+references/group-avatar/    The only committed frames that show a group avatar
+references/group-details/   The ChatKit cell renders behind the group details screen
+references/*.md             One working note per surface that needed more than a capture
 references/ios/bubble-tail-beziers.json  The traced bubble tail, as fitted cubics
 ```
 
@@ -101,7 +138,7 @@ Captures use dedicated fixture conversations only. The bubble outline in
 where the tail leaves the edge, its neck, bulge and tip are all fitted to sub-pixel coverage from a
 3x capture, and rendering it back over the original leaves 1.5% mismatched pixels, all of them text.
 
-Three findings shape the whole implementation:
+Four findings shape the whole implementation:
 
 - **Bubble fill is a screen-space gradient.** A bubble's colour depends on where it sits on screen,
   not on the bubble. `use-screen-space.ts` keeps every bubble's `--bubble-bottom` in sync while the
@@ -114,6 +151,50 @@ Three findings shape the whole implementation:
   eight screen effects rather than nine. Both come from the captures in
   `references/ios/captures/effects-*.png`; the bubble-effect timings in
   `references/ios/motion/effects.md` come from 60 fps recordings of each one being sent.
+
+## Components
+
+54 components plus an `index` style that pulls in all of them. Every one installs to
+`components/imessage/<name>.tsx` and is addressable on its own as `@imessage/<name>`.
+[/docs](http://localhost:3100/docs) renders the same list with live previews, and
+`/llms/<name>.txt` is the per-component agent doc.
+
+| Group | Items |
+|---|---|
+| Foundations | `platform` `tokens` `palette` `bubble-shape` `use-screen-space` `use-long-press` |
+| Transcript | `message-bubble` `message-list` `date-separator` `typing-indicator` `system-message` `ios-notices` `link-preview` `message-attachment` `message-image` `message-audio` `facetime-card` `avatar` `group-avatar` |
+| Reactions and menus | `tapback` `tapback-bar` `tapback-details` `context-menu` `message-actions` |
+| Motion and effects | `message-motion` `message-effects` `screen-effects` `ios-effects-picker` |
+| Replies and editing | `message-reply` `message-edit` |
+| iOS chrome and screens | `ios-status-bar` `ios-nav-bar` `ios-composer` `ios-conversation-list` `ios-new-message-sheet` `ios-search` `ios-select-mode` `ios-swipe-times` `ios-details` `group-details` `ios-plus-menu` |
+| macOS chrome and screens | `macos-window` `macos-sidebar` `macos-header` `macos-composer` `macos-plus-menu` `macos-details` |
+| Pickers and capture | `photo-picker` `sticker-picker` `image-viewer` `audio-recorder` |
+| Blocks | `conversation` `ios-messages-app` `macos-messages-app` |
+
+### What backs the ten newest surfaces
+
+These ten are wired into both shells and into the harness. That is not the same as being measured,
+and the difference matters, so it is spelled out. "Capture" means a frame in `references/` that
+`compare.ts` can diff a lab against; "ChatKit/PhotoKit" means a value read out of Apple's own
+framework with a Catalyst probe, which is Apple's number but not a picture of the screen.
+
+| Surface | Component | What backs it |
+|---|---|---|
+| Photo viewer | `image-viewer` | 2 captures (`image-viewer-{chrome,fit}-dark.png`, dark only), plus PhotoKit constants for the motion |
+| iOS search | `ios-search` | 2 captures (`search-active-light.png`, `search-noresults-dark.png`) and two 60 fps recordings for the open and the close |
+| Photos picker | `photo-picker` | 1 capture (`photo-picker-light.png`, light, collapsed, nothing selected); the sheet's motion is borrowed, not measured |
+| Sticker picker | `sticker-picker` | 1 capture (`sticker-picker-light.png`); the drag timings are ChatKit, the sheet's entrance is borrowed |
+| Group avatar | `group-avatar` | dedicated captures in `references/group-avatar/` |
+| Status lines | `system-message` | one capture, and only for the unknown-sender notice; the group lines' spacing is ChatKit, and `gapAbove` is unverified on both platforms |
+| iOS group details | `group-details` | **no group capture exists anywhere in `references/`.** It shares its frame, cell for cell, with the measured one-to-one `ios-details`, and imports that screen's motion rather than restating it; the group-only parts are ChatKit |
+| Tapback Details | `tapback-details` | **no capture.** ChatKit; the platter's entrance is judgement borrowed from the measured long-press overlay |
+| Audio recorder | `audio-recorder` | **no capture, and none can be made** without driving the mic button — every geometric number is ChatKit (`references/audio-recorder.md` has the probe) |
+| macOS inspector | `macos-details` | **no capture.** ChatKit; `/lab/macos-details` carries the recipe for taking one |
+
+`references/SPEC.md` § "Still unverified" is the full list for the whole kit, and each of these
+surfaces has a working note beside it (`references/image-viewer.md`, `ios-search.md`,
+`photo-picker.md`, `sticker-picker.md`, `group-avatar.md`, `group-details.md`, `system-message.md`,
+`tapback-details.md`, `audio-recorder.md`) recording the method rather than the result.
 
 ## Registry
 
@@ -135,16 +216,55 @@ dark styles. Set `REGISTRY_URL=https://your-origin.example` when building for ho
 `bun run registry:build` runs the official `shadcn build` and then rewrites dependency URLs and import
 paths. `bun run test:registry` installs into clean root and `src/` consumers.
 
-The two entry points are the whole apps:
+The two entry points are the whole apps. Left like this they own their own presented surfaces, so the
+gesture that opens one natively opens it here with nothing wired: the composer's `+` opens the plus
+menu, its mic opens the voice recorder, a photo in the transcript opens the full-screen viewer, the
+nav bar's name pill opens details, the list's search field opens search, a tapback balloon opens the
+Tapback Details platter.
 
 ```tsx
 <IosMessagesApp contact={{ name: "Alex Morgan" }} messages={messages} composer={{ onSend }} />
+
 <MacMessagesApp contact={{ name: "Alex Morgan" }} conversations={conversations} selectedId="alex"
   messages={messages} composer={{ onSend }} />
 ```
 
-`<Conversation platform="ios" | "macos">` is the single pane without the app chrome, and every part
-is installable on its own. Applications own transport, storage, uploads and real calls.
+Pass a surface's prop instead and the caller owns it. Every one of them takes the same shape: a value
+or `null` to state it, and an optional `progress` (0..1) that *seeks* its entrance rather than playing
+it, which is what makes a harness checkpoint a pure function of its props. A group is `participants`
+on either shell — two or more turns the avatar slot into the Snowglobe stack and the transcript into a
+group one.
+
+```tsx
+<IosMessagesApp
+  contact={{ name: "Alex Morgan" }}
+  participants={[{ name: "Alex Morgan" }, { name: "Jamie Chen" }, { name: "Sam Rivera" }]}
+  messages={messages}
+  photos={library}                                   // what the Photos picker offers
+  photoViewer={viewer}                               // { id, index, progress?, chrome?, dismiss? } | null
+  onOpenPhoto={(id, index) => setViewer({ id, index })}
+  onClosePhoto={() => setViewer(null)}
+  search={search}                                    // { query?, sections?, progress?, closing? } | null
+  onSearchQueryChange={setQuery}
+  composer={{ onSend, onMic }}
+/>
+
+<MacMessagesApp
+  contact={{ name: "Alex Morgan" }}
+  conversations={conversations}
+  selectedId="alex"
+  messages={messages}
+  details={{ open: true, tab: "photos" }}            // the inspector beside the transcript (⌥⌘I)
+  detailsContent={{ photos: shared, links, attachments }}
+  onQuickLook={(id, index) => showInQuickLook(id, index)}
+  composer={{ onSend }}
+/>
+```
+
+`onQuickLook` is not an oversight: macOS Messages has no in-window photo viewer, so this shell does
+not draw one and hands the event out instead. `<Conversation platform="ios" | "macos">` is the single
+pane without the app chrome, and every part is installable on its own. Applications own transport,
+storage, uploads and real calls.
 
 
 ## Deploying

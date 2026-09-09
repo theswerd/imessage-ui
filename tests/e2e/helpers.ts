@@ -117,8 +117,15 @@ export function composerForm(page: Page): Locator {
 export function composerField(page: Page): Locator {
   return page.getByRole("textbox", { name: "Message", exact: true });
 }
+/**
+ * The Tapback bar, whichever shell drew it. iOS floats it above the pressed message as a `menu` of
+ * its own; the macOS bar is the header *of* the context menu, so it is a `group` inside that single
+ * `menu` - a nested `menu` would be announced as a submenu with no parent item, and `menuitemradio`
+ * still needs a menu ancestor (see registry/imessage/tapback-bar.tsx). Either way the options are
+ * reached from here.
+ */
 export function tapbackMenu(page: Page): Locator {
-  return page.getByRole("menu", { name: "Tapback" });
+  return page.getByRole("menu", { name: "Tapback" }).or(page.getByRole("group", { name: "Tapback" }));
 }
 export function actionsMenu(page: Page): Locator {
   return page.getByRole("menu", { name: "Message actions" });

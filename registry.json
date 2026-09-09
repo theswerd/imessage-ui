@@ -187,6 +187,7 @@
       "title": "Conversation",
       "description": "A complete, composable conversation for either platform: header, scrolling log with clusters and reactions, typing state, and a composer. Bring your own data and send handler.",
       "registryDependencies": [
+        "@imessage/group-avatar",
         "@imessage/ios-composer",
         "@imessage/ios-nav-bar",
         "@imessage/macos-composer",
@@ -271,7 +272,8 @@
       "title": "macOS sidebar",
       "description": "The conversation list sidebar with search, pinned conversations, rows, and selection states.",
       "registryDependencies": [
-        "@imessage/avatar"
+        "@imessage/avatar",
+        "@imessage/group-avatar"
       ],
       "files": [
         {
@@ -287,7 +289,8 @@
       "title": "macOS header",
       "description": "The translucent conversation header with compose, contact, and video controls.",
       "registryDependencies": [
-        "@imessage/avatar"
+        "@imessage/avatar",
+        "@imessage/group-avatar"
       ],
       "files": [
         {
@@ -382,6 +385,7 @@
       "description": "The scrolling log: clusters and tails, date headers, status labels, sender names, emoji-only rows, link cards, attachments, and the typing indicator.",
       "registryDependencies": [
         "@imessage/date-separator",
+        "@imessage/group-avatar",
         "@imessage/ios-notices",
         "@imessage/link-preview",
         "@imessage/message-attachment",
@@ -391,6 +395,7 @@
         "@imessage/message-image",
         "@imessage/message-reply",
         "@imessage/platform",
+        "@imessage/system-message",
         "@imessage/tokens",
         "@imessage/typing-indicator",
         "@imessage/use-screen-space"
@@ -448,6 +453,7 @@
       "title": "iOS conversation list",
       "description": "The Messages list screen: large title, rows with avatars and previews, search pill, and compose button.",
       "registryDependencies": [
+        "@imessage/group-avatar",
         "@imessage/ios-composer",
         "@imessage/ios-nav-bar"
       ],
@@ -496,11 +502,18 @@
       "title": "iOS Messages app",
       "description": "The complete iOS 26 Messages app: list, conversation, New Message sheet, and the long-press overlay.",
       "registryDependencies": [
+        "@imessage/audio-recorder",
+        "@imessage/group-avatar",
+        "@imessage/group-details",
+        "@imessage/image-viewer",
         "@imessage/ios-composer",
         "@imessage/ios-conversation-list",
+        "@imessage/ios-details",
         "@imessage/ios-effects-picker",
         "@imessage/ios-nav-bar",
         "@imessage/ios-new-message-sheet",
+        "@imessage/ios-plus-menu",
+        "@imessage/ios-search",
         "@imessage/ios-status-bar",
         "@imessage/link-preview",
         "@imessage/message-actions",
@@ -512,9 +525,13 @@
         "@imessage/message-motion",
         "@imessage/message-reply",
         "@imessage/palette",
+        "@imessage/photo-picker",
         "@imessage/platform",
+        "@imessage/sticker-picker",
+        "@imessage/system-message",
         "@imessage/tapback",
         "@imessage/tapback-bar",
+        "@imessage/tapback-details",
         "@imessage/tokens"
       ],
       "files": [
@@ -534,6 +551,7 @@
         "@imessage/context-menu",
         "@imessage/ios-messages-app",
         "@imessage/macos-composer",
+        "@imessage/macos-details",
         "@imessage/macos-header",
         "@imessage/macos-plus-menu",
         "@imessage/macos-sidebar",
@@ -541,7 +559,9 @@
         "@imessage/message-list",
         "@imessage/message-motion",
         "@imessage/palette",
+        "@imessage/photo-picker",
         "@imessage/platform",
+        "@imessage/sticker-picker",
         "@imessage/tapback-bar"
       ],
       "files": [

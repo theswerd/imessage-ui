@@ -4,6 +4,7 @@ import type { ComponentProps, CSSProperties } from "react";
 import { cn } from "@/lib/utils";
 import { IosLargeTitle } from "@/registry/imessage/ios-nav-bar";
 import { IosMicIcon } from "@/registry/imessage/ios-composer";
+import { GroupAvatar, groupAvatarMetrics, type GroupParticipant } from "@/registry/imessage/group-avatar";
 
 /**
  * iOS 26 Messages list screen, measured from `references/ios/captures/list-light.png` and
@@ -45,6 +46,13 @@ export type IosConversation = {
   preview: string;
   time: string;
   unread?: boolean;
+  /**
+   * The people in a group conversation. Two or more draws `group-avatar.tsx`'s Snowglobe stack on
+   * the framework's `conversationListContactImageDiameter` (45 on the phone) instead of the monogram
+   * circle; one, or none, keeps the monogram, because native skips `SnowglobeUIView` entirely for a
+   * single contact and a lone face must not get a plate.
+   */
+  members?: readonly GroupParticipant[];
 };
 
 export type IosConversationListProps = Omit<ComponentProps<"div">, "onSelect"> & {
@@ -105,10 +113,15 @@ export function IosConversationList({ conversations, onSelect, onCompose, onSear
                 <button type="button" onClick={() => onSelect?.(conversation)} aria-label={`${conversation.unread ? "Unread. " : ""}${conversation.name}, ${conversation.time}, ${conversation.preview}`}
                   className="absolute inset-0 w-full text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-500">
                   {conversation.unread && <span aria-hidden="true" data-slot="unread" className="absolute rounded-full bg-[var(--ios-list-unread)]" style={{ left: UNREAD_LEFT, top: (ROW - UNREAD) / 2, width: UNREAD, height: UNREAD }} />}
-                  <span aria-hidden="true" data-slot="avatar" className="absolute flex items-center justify-center overflow-hidden rounded-full text-white"
-                    style={{ left: 26, top: 20, width: 45, height: 45, fontSize: 21, lineHeight: 1, fontWeight: 600, background: "linear-gradient(var(--ios-list-avatar-top), var(--ios-list-avatar-bottom))" }}>
-                    {letters}
-                  </span>
+                  {conversation.members && conversation.members.length > 1 ? (
+                    <GroupAvatar aria-hidden="true" data-slot="avatar" participants={conversation.members} role={undefined}
+                      size={groupAvatarMetrics.phone.conversationList} className="absolute" style={{ left: 26, top: 20 }} />
+                  ) : (
+                    <span aria-hidden="true" data-slot="avatar" className="absolute flex items-center justify-center overflow-hidden rounded-full text-white"
+                      style={{ left: 26, top: 20, width: 45, height: 45, fontSize: 21, lineHeight: 1, fontWeight: 600, background: "linear-gradient(var(--ios-list-avatar-top), var(--ios-list-avatar-bottom))" }}>
+                      {letters}
+                    </span>
+                  )}
                   <span aria-hidden="true" data-slot="name" className="absolute truncate" style={{ left: 83, right: 96, top: 14, transform: "translateY(0.3333px)", fontSize: 17, lineHeight: 1, fontWeight: 600, letterSpacing: 0, color: "var(--ios-list-label)" }}>
                     {conversation.name}
                   </span>

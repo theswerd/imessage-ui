@@ -720,7 +720,12 @@ export function AudioRecorder({
     // without it the primary control gets a ring iOS never draws. A menu can put the focus on its
     // container instead and let the first arrow key light a row (see `tapback-bar.tsx`); the
     // recorder has one control that matters, and a screen reader should land on it.
-    (recording ? stopButton.current : playButton.current)?.focus({ preventScroll: true, focusVisible: false });
+    // The option is typed here rather than passed as a literal: `focusVisible` ships in browsers but
+    // is not in TypeScript's DOM lib as of 5.9, and in this repo it only type-checks because
+    // @radix-ui/react-slider augments FocusOptions globally. A consumer installs these components
+    // without radix, so a bare literal fails `tsc` there. Declaring it locally keeps both honest.
+    const focus: FocusOptions & { focusVisible?: boolean } = { preventScroll: true, focusVisible: false };
+    (recording ? stopButton.current : playButton.current)?.focus(focus);
   }, [autoFocus, open, progress, recording]);
 
   const seek = (clientX: number) => {

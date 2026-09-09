@@ -10,6 +10,7 @@ import { IosComposer } from "@/registry/imessage/ios-composer";
 import { MacHeader, macHeaderMetrics } from "@/registry/imessage/macos-header";
 import { MacComposer, macComposerMetrics } from "@/registry/imessage/macos-composer";
 import { Tapback, type TapbackType } from "@/registry/imessage/tapback";
+import { GroupAvatar, groupAvatarMetrics, type GroupParticipant } from "@/registry/imessage/group-avatar";
 
 export type { Message as ConversationMessage };
 
@@ -30,6 +31,11 @@ export type ConversationProps = Omit<ComponentProps<"section">, "children"> & {
   messages: Message[];
   typing?: boolean;
   group?: boolean;
+  /**
+   * The people in a group conversation. Two or more draws the Snowglobe stack in the header's own
+   * avatar slot and marks the pane as a group, so the transcript spends its sender gutter.
+   */
+  participants?: readonly GroupParticipant[];
   now?: Date | number;
   onSend?: (text: string) => void | Promise<void>;
   onAttach?: () => void;
@@ -47,7 +53,7 @@ export type ConversationProps = Omit<ComponentProps<"section">, "children"> & {
  * A complete conversation pane for either platform: header, the scrolling log with native clusters,
  * tails, date headers and reactions, and the composer. Bring your own data and send handler.
  */
-export function Conversation({ platform = "ios", name, initials, messages, typing = false, group = false, now, onSend, onAttach, onBack, onVideoCall, onDetails, onReaction, renderReactions, width, height, className, style, ...props }: ConversationProps) {
+export function Conversation({ platform = "ios", name, initials, messages, typing = false, group = false, participants, now, onSend, onAttach, onBack, onVideoCall, onDetails, onReaction, renderReactions, width, height, className, style, ...props }: ConversationProps) {
   const frame = useRef<HTMLElement>(null);
   const list = useRef<MessageListHandle>(null);
   const ios = platform === "ios";
@@ -60,22 +66,28 @@ export function Conversation({ platform = "ios", name, initials, messages, typin
     </div>
   ) : undefined);
   const size = { width: width ?? (ios ? 402 : 630), height: height ?? (ios ? 760 : 640) };
+  const isGroup = group || (participants?.length ?? 0) > 1;
+  // The header's avatar slot is Ø60 on iOS and `macHeaderMetrics.avatar.size` on the Mac; a group
+  // fills it with its own faces rather than a monogram, which is what a Ø-slot `CKAvatarView` draws.
+  const groupPhoto = participants && participants.length > 1
+    ? <GroupAvatar participants={participants} name={name} size={ios ? groupAvatarMetrics.phone.groupAvatar : macHeaderMetrics.avatar.size} />
+    : undefined;
   return (
     <PlatformProvider platform={platform}>
       <PaletteStyle platform={platform} />
       <section ref={frame} aria-label={`Conversation with ${name}`} data-slot="conversation" data-im-platform={platform}
         className={cn("relative isolate overflow-hidden font-sans", ios ? "rounded-[24px]" : "rounded-[12px]", className)}
         style={{ ...size, background: "var(--im-bg)", color: "var(--im-incoming-text)", ...style }} {...props}>
-        <MessageList ref={list} frameRef={frame} messages={messages} typing={typing ? { sender: name } : false} group={group} now={now}
+        <MessageList ref={list} frameRef={frame} messages={messages} typing={typing ? { sender: name } : false} group={isGroup} now={now}
           anchor={ios ? "top" : "bottom"} insetTop={ios ? 115.5 : macHeaderMetrics.height + 29.3} insetBottom={ios ? 79 : macListBottom} renderReactions={reactions} className="absolute inset-0" />
         {ios ? (
           <>
-            <IosNavBar name={name} initials={initials} onBack={onBack} onDetails={onDetails} className="absolute left-0 top-0" />
+            <IosNavBar name={name} initials={initials} avatar={groupPhoto} onBack={onBack} onDetails={onDetails} className="absolute left-0 top-0" />
             {onSend && <IosComposer className="absolute bottom-0 left-0" onSend={onSend} onAttach={onAttach} />}
           </>
         ) : (
           <>
-            <MacHeader name={name} initials={initials} onVideoCall={onVideoCall} onOpenDetails={onDetails} className="absolute left-0 top-0 w-full" style={{ height: macHeaderMetrics.height }} />
+            <MacHeader name={name} initials={initials} avatar={groupPhoto} onVideoCall={onVideoCall} onOpenDetails={onDetails} className="absolute left-0 top-0 w-full" style={{ height: macHeaderMetrics.height }} />
             {onSend && <MacComposer className="absolute bottom-0 left-0 w-full" onSend={onSend} onAttach={onAttach} />}
           </>
         )}

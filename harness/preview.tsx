@@ -10,7 +10,8 @@ import { FaceTimeCard, type FaceTimeState } from "@/registry/imessage/facetime-c
 import { useBubbleEffectOnMessage } from "@/registry/imessage/message-effects";
 import type { EffectsPickerSelection } from "@/registry/imessage/ios-effects-picker";
 import { ScreenEffect } from "@/registry/imessage/screen-effects";
-import { contact, conversationList, frameAt, now, platforms, type FixtureMessage, type Platform, type Reaction, type ScenarioId } from "./scenarios";
+import type { IosSearchSection } from "@/registry/imessage/ios-search";
+import { contact, conversationList, frameAt, now, platforms, type FixtureMessage, type Platform, type Reaction, type ScenarioId, type SceneFrame } from "./scenarios";
 import { cn } from "@/lib/utils";
 
 function toMessage(fixture: FixtureMessage): Message {
@@ -18,8 +19,11 @@ function toMessage(fixture: FixtureMessage): Message {
   return {
     id: fixture.id, text: fixture.text, direction: fixture.direction, service: fixture.service, sentAt, sender: fixture.sender, senderInitials: fixture.senderInitials,
     status: fixture.failed ? "failed" : fixture.status, readAt: fixture.readMinutesAgo === undefined ? undefined : now.getTime() - fixture.readMinutesAgo * 60_000, edited: fixture.edited,
-    reactions: fixture.reactions?.map(reaction => ({ type: reaction.type, byMe: reaction.byMe, emoji: reaction.emoji })),
-    kind: fixture.link ? "link" : fixture.attachment ? "attachment" : fixture.images ? "image" : fixture.audio ? "audio" : "text",
+    reactions: fixture.reactions?.map(reaction => ({ type: reaction.type, byMe: reaction.byMe, emoji: reaction.emoji, by: reaction.by, byInitials: reaction.byInitials })),
+    // A status line is a kind of its own: it draws as one of `system-message.tsx`'s centred grey
+    // sentences rather than a balloon, so it is checked before every balloon kind.
+    kind: fixture.system ? "system" : fixture.link ? "link" : fixture.attachment ? "attachment" : fixture.images ? "image" : fixture.audio ? "audio" : "text",
+    system: fixture.system,
     link: fixture.link ? { url: fixture.link.url, host: fixture.link.host, title: fixture.link.title } : undefined,
     attachments: fixture.attachment ? [{ name: fixture.attachment.name, size: fixture.attachment.size, href: fixture.attachment.href }] : undefined,
     images: fixture.images,
@@ -33,6 +37,92 @@ function toMessage(fixture: FixtureMessage): Message {
 function selectionToReaction(selection: TapbackSelection): Reaction {
   return "type" in selection ? { type: selection.type, byMe: true } : { type: "emoji", emoji: selection.emoji, byMe: true };
 }
+
+/** "Alex Morgan" → "AM": the monogram a face falls back to when the fixture carries only a name. */
+function initialsOf(name: string): string {
+  return name.trim().split(/\s+/).slice(0, 2).map(part => part[0] ?? "").join("").toUpperCase();
+}
+
+/**
+ * The group's people, in the shape both shells take: two or more turn the nav bar's (or the header's)
+ * avatar slot into `group-avatar.tsx`'s Snowglobe stack, give the transcript its sender gutter, and
+ * fill the details screen's participant list. The iOS shell wants `{ name, initials, src }` and the
+ * macOS one `{ initials, name, photo }`, so one object satisfies both.
+ */
+function participantsOf(frame: SceneFrame) {
+  return frame.group?.participants.map(name => ({ name, initials: initialsOf(name) }));
+}
+
+/**
+ * What the details surfaces show below the name. Both screens draw a cell (or, on the Mac, a tab)
+ * only for a section that has something in it, so without this the inspector is Info alone and the
+ * `details-photos` scenario would be indistinguishable from `details`. The five photos are the same
+ * files the transcript and the photo viewer use, so one conversation's shared media is one set.
+ */
+const sharedPhotos = [
+  { id: "sh1", src: "/fixtures/shore.jpg", alt: "Shore" },
+  { id: "sh2", src: "/fixtures/ridge.jpg", alt: "Ridge" },
+  { id: "sh3", src: "/fixtures/bloom.jpg", alt: "Bloom" },
+  { id: "sh4", src: "/fixtures/dusk.jpg", alt: "Dusk" },
+  { id: "sh5", src: "/fixtures/frost.jpg", alt: "Frost" },
+];
+const sharedLinks = [
+  { id: "ln1", title: "Design systems at scale", host: "freestyle.sh", domain: "freestyle.sh" },
+  { id: "ln2", title: "The design of everyday tools", host: "example.com", domain: "example.com" },
+  { id: "ln3", title: "Type design notes", host: "example.org", domain: "example.org" },
+];
+const sharedFiles = [
+  { id: "at1", name: "Design brief.pdf", title: "Design brief.pdf", meta: "1.2 MB", detail: "1.2 MB" },
+  { id: "at2", name: "Design tokens.csv", title: "Design tokens.csv", meta: "8 KB", detail: "8 KB" },
+];
+/** The iOS details screen's shape: a titled, countable section per kind. */
+const iosDetailsContent = {
+  phoneLabel: "iPhone",
+  phone: "+1 (555) 010-0100",
+  photos: { title: "Photos", count: sharedPhotos.length, items: sharedPhotos.map(photo => ({ id: photo.id, src: photo.src, alt: photo.alt })) },
+  sharedLinks: { title: "Links", count: sharedLinks.length, items: sharedLinks.map(link => ({ id: link.id, title: link.title, detail: link.domain })) },
+  attachments: { title: "Attachments", count: sharedFiles.length, items: sharedFiles.map(file => ({ id: file.id, title: file.title, detail: file.detail })) },
+};
+/** The macOS inspector's shape: flat arrays, one tab each. */
+const macDetailsContent = {
+  handles: [{ id: "h1", label: "iMessage", value: contact.handle }, { id: "h2", label: "phone", value: "+1 (555) 010-0100" }],
+  photos: sharedPhotos.map(photo => ({ id: photo.id, src: photo.src, alt: photo.alt })),
+  links: sharedLinks.map(link => ({ id: link.id, title: link.title, host: link.host })),
+  attachments: sharedFiles.map(file => ({ id: file.id, name: file.name, meta: file.meta })),
+};
+
+/**
+ * The search results fixture. Copied from `app/lab/search/scene.tsx` on purpose, in particular the
+ * first message: its match falls well past the end of a one-line balloon, so it is the row that
+ * proves the balloon anchors its visible window on the match rather than on its own start. A short
+ * message would pass whether the anchoring worked or not.
+ */
+const searchSections: IosSearchSection[] = [
+  { kind: "conversations", results: [
+    { id: "design", name: "Design Crit", initials: "DC", preview: "Sam Rivera: Tuesday morning at 9?", time: "9:21 AM" },
+    { id: "sam", name: "Sam Rivera", initials: "SR", preview: "But have failed to deliver on performance using it", time: "Yesterday" },
+  ] },
+  { kind: "messages", results: [
+    { id: "sm1", name: "Sam Rivera", initials: "SR", conversation: "Design Crit", text: "Tuesday morning at 9 works for the design review.", time: "9:21 AM" },
+    { id: "sm2", name: "You", initials: "BS", conversation: "Alex Morgan", text: "I moved the design notes into the shared folder this morning.", time: "Yesterday", fromMe: true },
+    { id: "sm3", name: "Jamie Chen", initials: "JC", text: "Can you send the design file again? The link expired and the design tokens changed.", time: "Monday" },
+    { id: "sm4", name: "Riley Park", initials: "RP", text: "Design day is on.", time: "Monday" },
+  ] },
+  { kind: "photos", results: [
+    { id: "sp1", src: "/fixtures/shore.jpg", name: "Alex Morgan", time: "Yesterday" },
+    { id: "sp2", src: "/fixtures/ridge.jpg", name: "Jamie Chen", time: "Monday" },
+    { id: "sp3", src: "/fixtures/bloom.jpg", name: "Sam Rivera", time: "Monday" },
+    { id: "sp4", src: "/fixtures/dusk.jpg", name: "Riley Park", time: "Sunday" },
+  ] },
+  { kind: "links", results: [
+    { id: "sl1", title: "Design systems at scale", domain: "freestyle.sh", time: "Monday", src: "/fixtures/frost.jpg" },
+    { id: "sl2", title: "The design of everyday tools", domain: "example.com", time: "Sunday" },
+  ] },
+  { kind: "documents", results: [
+    { id: "sd1", title: "Design brief.pdf", time: "Monday" },
+    { id: "sd2", title: "Design tokens.csv", time: "Sunday" },
+  ] },
+];
 
 export type HarnessPreviewProps = { platform: Platform; scenario: ScenarioId; time: number; interactive?: boolean; onEvent?: (event: string) => void; width?: number; failSends?: boolean };
 
@@ -81,6 +171,32 @@ export function HarnessPreview({ platform, scenario, time, interactive = true, o
     ? { tab: frame.effectsPicker.tab, selection: frame.effectsPicker.bubble ? { bubble: frame.effectsPicker.bubble } : frame.effectsPicker.screen ? { screen: frame.effectsPicker.screen } : null, progress: frame.effectsPicker.progress }
     : null;
   const picker = livePicker ?? timelinePicker;
+  /*
+   * The presented surfaces. Each shell owns its own copy of every one of them while the matching
+   * prop is `undefined` — that is how the composer's `+`, its mic, the nav bar's name pill, a tap on
+   * a photo or on a tapback balloon, and the list's search field all keep working with nothing wired
+   * — so a scenario that does not state a surface must pass `undefined` rather than `null`, which
+   * would take it away from the shell and freeze it shut. Everything below therefore reads
+   * "the frame's value, if it has one, otherwise nothing at all".
+   */
+  const participants = participantsOf(frame);
+  const plusMenuState = frame.plusMenu ?? undefined;
+  const photoViewer = frame.photoViewer ?? undefined;
+  const photoPicker = frame.photoPicker ? { selected: frame.photoPicker.selected, detent: frame.photoPicker.detent, progress: frame.photoPicker.progress } : undefined;
+  const stickerPicker = frame.stickerPicker ? { tab: frame.stickerPicker.tab, progress: frame.stickerPicker.progress, drag: frame.stickerPicker.drag } : undefined;
+  // `enter` is the entrance; `position` and `transition` are the take and the state-change spring.
+  // Handing any of them over is what stops the row's own clock, so two runs of one checkpoint draw
+  // the same waveform, the same timer and the same bar heights.
+  const audioRecorder = frame.audioRecorder
+    ? { state: frame.audioRecorder.state, position: frame.audioRecorder.position, progress: frame.audioRecorder.enter, transition: frame.audioRecorder.transition }
+    : undefined;
+  const search = frame.search
+    ? { query: frame.search.query, sections: frame.search.results ? searchSections : [], progress: frame.search.progress, closing: frame.search.closing }
+    : undefined;
+  const systemArrival = frame.systemArrival ?? null;
+  // The switch states which conversation the pane is on; the group flag already picks the same row,
+  // so the two agree and a group frame and a switched-to-group frame are the same frame.
+  const selectedConversation = frame.conversationSwitch?.to ?? (frame.group ? "design" : "alex");
   useBubbleEffectOnMessage(deviceFrame, bubbleEffect);
   // The press-and-hold scenario scrubs the hold itself: grow the bubble the way use-long-press does
   // while the finger is down, so the checkpoint before the menu opens is inspectable.
@@ -134,6 +250,10 @@ export function HarnessPreview({ platform, scenario, time, interactive = true, o
     onSendAnimationEnd: () => setLiveSend(null),
     messages, typing: frame.typing ? { sender: contact.name } : false, now, group: !!frame.group,
     contact: frame.group ? { name: frame.group.name, initials: "DC" } : { name: contact.name, initials: contact.initials },
+    // Two or more people put the Snowglobe stack in the avatar slot the details screen's entrance
+    // morphs out of, and give the transcript its sender gutter.
+    participants,
+    systemArrival,
     onTapback: react,
     // Same rule as `defaultReactions`: several people's tapbacks are one aggregate balloon showing
     // the latest, not one balloon each. This copy exists only to carry `animateIn` for a reaction
@@ -160,7 +280,7 @@ export function HarnessPreview({ platform, scenario, time, interactive = true, o
       {platform === "ios" ? (
         <IosMessagesApp {...shared} width={width ?? iosScreen.width} height={iosScreen.height} time="9:41" screen={activeScreen}
           conversations={conversationList.map(item => ({ id: item.id, name: item.name, initials: item.initials, preview: item.preview, time: item.time }))}
-          composer={{ value: composerValue, onChange: setDraft, onSend: send, onAttach: () => onEvent?.("attachment.picker") }}
+          composer={{ value: composerValue, onChange: setDraft, onSend: send, onAttach: () => onEvent?.("attachment.picker"), onMic: () => onEvent?.("audio.record") }}
           screenTransition={screenTransition}
           thread={thread}
           onOpenThread={id => { setThreadId(id); setDismissedThread(false); onEvent?.(`thread.open ${id}`); }}
@@ -169,7 +289,45 @@ export function HarnessPreview({ platform, scenario, time, interactive = true, o
           onSelectConversation={item => { setScreen("conversation"); onEvent?.(`navigation.open ${item.id}`); }}
           onCompose={() => { setScreen("new-message"); onEvent?.("navigation.new-message"); }}
           onCloseNewMessage={() => { setScreen("list"); onEvent?.("navigation.close-new-message"); }}
+          // Every surface below is stated only when the scenario states it; left `undefined` the
+          // shell holds it, so the gesture that opens it natively still opens it in the workbench.
+          // See the block that derives these values for why `undefined` and not `null`.
+          plusMenu={plusMenuState}
+          onPlusMenuSelect={id => onEvent?.(`menu.plus.${id}`)}
+          onPlusMenuClose={() => onEvent?.("menu.plus.close")}
+          photoViewer={photoViewer}
+          onOpenPhoto={(id, index) => onEvent?.(`photo.open ${id} ${index}`)}
+          onPhotoIndexChange={index => onEvent?.(`photo.page ${index}`)}
+          onClosePhoto={() => onEvent?.("photo.close")}
+          onSharePhoto={(id, index) => onEvent?.(`photo.share ${id} ${index}`)}
+          onSavePhoto={(id, index) => onEvent?.(`photo.save ${id} ${index}`)}
+          photoPicker={photoPicker}
+          onPhotoPickerSelectionChange={selected => onEvent?.(`photos.select ${selected.join(",") || "none"}`)}
+          onPhotoPickerDetentChange={detent => onEvent?.(`photos.detent ${detent}`)}
+          onPhotoPickerClose={() => onEvent?.("photos.close")}
+          stickerPicker={stickerPicker}
+          onStickerPickerTab={tab => onEvent?.(`stickers.tab ${tab}`)}
+          onStickerPickerClose={() => onEvent?.("stickers.close")}
+          onStickerSelect={sticker => onEvent?.(`stickers.select ${sticker.id}`)}
+          onStickerEdit={() => onEvent?.("stickers.edit")}
+          audioRecorder={audioRecorder}
+          onAudioRecorderClose={() => onEvent?.("audio.close")}
+          onAudioSend={take => onEvent?.(`audio.send ${take.duration.toFixed(2)}s`)}
+          details={frame.details ?? undefined}
+          detailsContent={iosDetailsContent}
           onDetails={() => onEvent?.("navigation.details")}
+          onCloseDetails={() => onEvent?.("navigation.details.close")}
+          onGroupEvent={event => onEvent?.(`group.${event.type}`)}
+          tapbackDetails={frame.tapbackDetails ?? undefined}
+          onOpenTapbackDetails={id => onEvent?.(`reactions.details ${id}`)}
+          onCloseTapbackDetails={() => onEvent?.("reactions.details.close")}
+          onRemoveTapback={(id, reactor) => onEvent?.(`reactions.remove ${id} ${reactor.id}`)}
+          search={search}
+          onOpenSearch={() => onEvent?.("search.open")}
+          onCloseSearch={() => onEvent?.("search.close")}
+          onSearchQueryChange={query => onEvent?.(`search.query ${query || "(empty)"}`)}
+          onSearchSelect={(result, kind) => onEvent?.(`search.select ${kind} ${result.id}`)}
+          onSearchSeeAll={kind => onEvent?.(`search.see-all ${kind}`)}
           longPress={longPress} onLongPress={interactive ? id => { setPressedId(id); onEvent?.(`reactions.open ${id}`); } : undefined}
           onLongPressClose={() => { setPressedId(null); setDismissedPress(true); onEvent?.("reactions.close"); }}
           effectsPicker={picker && { ...picker, draft: composerValue }}
@@ -182,9 +340,32 @@ export function HarnessPreview({ platform, scenario, time, interactive = true, o
       ) : (
         <MacMessagesApp {...shared} width={width ?? size.width} height={size.height} active
           conversations={conversationList.map(item => ({ id: item.id, name: item.name, initials: item.initials, preview: item.preview, time: item.time, pinned: item.pinned, muted: "muted" in item ? item.muted : undefined }))}
-          selectedId={frame.group ? "design" : "alex"} onSelectConversation={id => onEvent?.(`navigation.open ${id}`)}
-          composer={{ value: composerValue, onChange: setDraft, onSend: send, onAttach: () => { setPlusMenu(current => !(current ?? frame.menu === "plus")); onEvent?.("menu.plus"); } }}
+          selectedId={selectedConversation} onSelectConversation={id => onEvent?.(`navigation.open ${id}`)}
+          composer={{ value: composerValue, onChange: setDraft, onSend: send, onAttach: () => { setPlusMenu(current => !(current ?? frame.menu === "plus")); onEvent?.("menu.plus"); }, onAudio: () => onEvent?.("audio.record") }}
           plusMenu={plusMenu ?? frame.menu === "plus"} onPlusMenuSelect={id => { setPlusMenu(false); onEvent?.(`menu.plus.${id}`); }} onPlusMenuClose={() => setPlusMenu(false)}
+          // `menuTransition` seeks whichever popover is presenting. Only state it while the timeline
+          // is scrubbing the "+" menu, or a live context menu would be frozen on its first frame.
+          menuTransition={frame.plusMenu ? { progress: frame.plusMenu.progress } : null}
+          // The Mac has no in-window photo viewer: a photo there is a Quick Look, an AppKit panel
+          // this kit cannot own, so the shell selects the message and reports.
+          onQuickLook={(id, index) => onEvent?.(`photo.quicklook ${id} ${index}`)}
+          photoPicker={photoPicker}
+          onPhotoPickerSelectionChange={selected => onEvent?.(`photos.select ${selected.join(",") || "none"}`)}
+          onPhotoPickerClose={() => onEvent?.("photos.close")}
+          stickerPicker={stickerPicker}
+          onStickerPickerTab={tab => onEvent?.(`stickers.tab ${tab}`)}
+          onStickerPickerClose={() => onEvent?.("stickers.close")}
+          onStickerSelect={sticker => onEvent?.(`stickers.select ${sticker.id}`)}
+          details={frame.detailsPane ?? undefined}
+          detailsContent={macDetailsContent}
+          onDetailsClose={() => onEvent?.("navigation.details.close")}
+          onDetailsTabChange={tab => onEvent?.(`details.tab ${tab}`)}
+          onDetailsWidthChange={next => onEvent?.(`details.width ${Math.round(next)}`)}
+          searchQuery={frame.sidebarSearch} onSearch={query => onEvent?.(`search.query ${query || "(empty)"}`)}
+          // The pane's crossfade, seeked. The shell derives the *leaving* conversation from a real
+          // change of `selectedId`, so a frame loaded straight at mid-transition has nothing to cross
+          // with — see the `switch-conversation` scenario's own comment.
+          conversationTransition={frame.conversationSwitch ? { progress: frame.conversationSwitch.progress } : null}
           onCompose={() => onEvent?.("navigation.new-message")} onVideoCall={beginCall} onDetails={() => onEvent?.("navigation.details")}
           selectedMessageIds={selectedMessages ?? frame.selectedMessageIds ?? []}
           onSelectMessage={interactive ? (ids, context) => { setSelectedMessages(ids); onEvent?.(`selection.select ${context.id ?? "none"}`); } : undefined}

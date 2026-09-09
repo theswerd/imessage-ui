@@ -112,8 +112,12 @@ export function IosNavBar({ name, initials, avatar, onBack, onDetails, className
           <path d="M1.3 1.3 3.37 6.3333 1.3 11.37" />
         </svg>
       </button>
+      {/* A supplied avatar brings its own artwork — an <img>, or the group photo's Snowglobe stack
+          over its own material plate — so the monogram gradient is dropped rather than left to show
+          through anything translucent. The Ø60 slot, its centre and its shadow are unchanged either
+          way, which is what the details screen's entrance morphs out of. */}
       <div aria-hidden="true" data-slot="avatar" className="absolute flex items-center justify-center overflow-hidden rounded-full text-white"
-        style={{ left: "calc(50% - 30px)", top: 8, width: 60, height: 60, fontSize: 28, lineHeight: 1, fontWeight: 600, background: "linear-gradient(var(--ios-nav-avatar-top), var(--ios-nav-avatar-bottom))", boxShadow: "0 2px 4px var(--ios-nav-avatar-shadow)" }}>
+        style={{ left: "calc(50% - 30px)", top: 8, width: 60, height: 60, fontSize: 28, lineHeight: 1, fontWeight: 600, background: avatar ? undefined : "linear-gradient(var(--ios-nav-avatar-top), var(--ios-nav-avatar-bottom))", boxShadow: "0 2px 4px var(--ios-nav-avatar-shadow)" }}>
         {avatar ?? letters}
       </div>
     </header>

@@ -1,17 +1,20 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { cn } from "@/lib/utils";
 import { PlatformProvider } from "@/registry/imessage/platform";
 import { PaletteStyle } from "@/registry/imessage/palette";
 import { MacWindow, macWindowMetrics } from "@/registry/imessage/macos-window";
 import { MacSidebar, macSidebarMetrics, type SidebarConversation } from "@/registry/imessage/macos-sidebar";
-import { MacHeader, macHeaderMetrics } from "@/registry/imessage/macos-header";
+import { MacHeader, macHeaderMetrics, type MacHeaderMember } from "@/registry/imessage/macos-header";
 import { MacComposer } from "@/registry/imessage/macos-composer";
 import { MessageList, type Message, type MessageListHandle } from "@/registry/imessage/message-list";
 import { ContextMenu, macosMessageMenu } from "@/registry/imessage/context-menu";
 import { TapbackBar, type TapbackSelection } from "@/registry/imessage/tapback-bar";
-import { MacPlusMenu } from "@/registry/imessage/macos-plus-menu";
+import { MacPlusMenu, macPlusMenuMetrics } from "@/registry/imessage/macos-plus-menu";
+import { MacDetails, type MacDetailsAction, type MacDetailsAttachment, type MacDetailsHandle, type MacDetailsLink, type MacDetailsParticipant, type MacDetailsPhoto, type MacDetailsTab } from "@/registry/imessage/macos-details";
+import { PhotoPicker, photoPickerSamples, type PhotoPickerDetent, type PhotoPickerPhoto } from "@/registry/imessage/photo-picker";
+import { StickerPicker, type Sticker, type StickerPlacement } from "@/registry/imessage/sticker-picker";
 import { defaultReactions } from "@/registry/imessage/ios-messages-app";
 import { prefersReducedMotion, useArrivalAnimation, type ArrivalAnimation } from "@/registry/imessage/message-motion";
 
@@ -47,6 +50,56 @@ export const macTransitions = {
 } as const;
 
 /**
+ * The two surfaces the "+" popover's own rows open, and the box each gets.
+ *
+ * The macOS "+" is a **menu**, not the iPhone's app strip: `-[CKUIBehaviorMac
+ * browserButtonShouldUseMenu]` is YES where `CKUIBehaviorPhone`'s is NO, and
+ * `-[CKUIBehaviorMac entryViewSupportsBrowserButton]` is NO. So a row is chosen and a popover opens,
+ * which is what these are. Both sizes are Catalyst-probe readings off `CKUIBehaviorMac` in ChatKit
+ * 26.5, with the Phone reading beside them so the swap is visible:
+ *
+ * - `stickerPopoverSize` = **{320, 480}** on the Mac and {393, 680} on the Phone. The iPhone sheet
+ *   `sticker-picker.tsx` measures is that 393 wide one, which is why it is not simply re-used at its
+ *   own size here.
+ * - There is **no** photo-specific popover selector on either behaviour class — the whole
+ *   `browser|picker|popover` selector list on `CKUIBehaviorMac` was dumped and it holds none — so the
+ *   Photos row takes the generic Mac popover, `popOverWidth` = **252** by `popOverMaxHeight` = **400**.
+ *
+ * **UNMEASURED, and this is the honest part.** No capture in `references/macos/captures` holds either
+ * popover, so only their *sizes* are sourced. Where they sit is a rule, not a reading: they take the
+ * "+" menu's own measured leading edge (pane x 9, flush with the button) and open **upward**, their
+ * bottom edge on the menu's measured top edge, because neither box fits below the button in a 640 pt
+ * window and an AppKit popover flips rather than hangs. The corner is `macPlusMenuMetrics.radius`,
+ * the one macOS popover corner a capture does hold; the iPhone sheets' own 40.42 / 60.33 corners are
+ * struck off, because those are concentric with the iPhone 17 Pro's 62.9 display corner and mean
+ * nothing on a desktop. Everything *inside* each popover is still the iPhone surface's measured
+ * layout, re-flowed to the new width by each component's own `width` prop.
+ *
+ * The **chrome** each box wears is the one macOS popover a capture does hold: the fill, the bright
+ * inset rim and the dark hairline outside it that `macos-plus-menu.tsx` measured off
+ * `plus-menu-{light,dark}-2x.png`, copied here rather than imported the way that file's own note
+ * describes. Each sheet's own iPhone fill is switched off in `macAppStyles` so this one shows: an
+ * iPhone form sheet's glass over a Mac popover's glass would blur the pane twice.
+ */
+export const macAttachmentPopovers = {
+  stickers: { width: 320, height: 480 },
+  photos: { width: 252, height: 400 },
+  left: macPlusMenuMetrics.left,
+  bottom: macPlusMenuMetrics.top,
+  radius: macPlusMenuMetrics.radius,
+} as const;
+
+/** `-[CKUIBehaviorMac popoverPadding]` = 7: what a Mac popover keeps clear inside its own box. */
+const macPopoverPadding = 7;
+
+/** The measured popover fill, rim and outline of `macos-plus-menu.tsx`, on both appearances. */
+const popoverChrome = cn(
+  "bg-[var(--pm-fill)] shadow-[var(--pm-edge)] backdrop-blur-[20px]",
+  "[--pm-edge:inset_0_0_0_1px_rgba(255,255,255,0.8),0_0_0_0.5px_rgba(0,0,0,0.28),0_4px_16px_rgba(0,0,0,0.12)] [--pm-fill:rgba(238,240,241,0.92)]",
+  "dark:[--pm-edge:inset_0_0_0_1px_rgba(255,255,255,0.28),0_0_0_0.5px_rgba(0,0,0,0.85),0_4px_16px_rgba(0,0,0,0.35)] dark:[--pm-fill:rgba(37,39,40,0.94)]",
+);
+
+/**
  * Rules the app needs on elements it does not own: a sidebar row (`macos-sidebar.tsx`), the header it
  * clones while a conversation is leaving (`macos-header.tsx`), and the chrome of a window that is not
  * key. Everything is keyed on this component's own root or on a node only this file renders, so a
@@ -63,9 +116,16 @@ const macAppStyles = `
 [data-slot="header-outgoing"] [data-slot="header-glass"],[data-slot="header-outgoing"] [data-slot="compose-button"],[data-slot="header-outgoing"] [data-slot="video-button"]{display:none}
 :where(.dark,.dark *) [data-slot="macos-messages-app"][data-active="false"] [data-slot="mac-sidebar"]:not(:where([data-preview-theme="light"] *)){--sb-fill:#292929}
 [data-slot="macos-messages-app"][data-active="false"] :is([data-slot="compose-button"],[data-slot="video-button"],[data-slot="attach-button"],[data-slot="emoji-button"],[data-slot="sidebar-options"]){opacity:0.5}
+[data-slot="mac-attachment-popover"] [data-slot="sheet"]{border-radius:${macAttachmentPopovers.radius}px!important;background:transparent!important;box-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+[data-slot="mac-attachment-popover"] [data-slot="photo-picker"]{clip-path:inset(0 round ${macAttachmentPopovers.radius}px)!important;background:transparent!important}
 `;
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+
+/** The monogram a name falls back to when nobody supplied one: its first two words' initials. */
+function initialsOf(name: string): string {
+  return name.trim().split(/\s+/).slice(0, 2).map(part => part[0] ?? "").join("").toUpperCase();
+}
 
 /**
  * Click-to-select, the way a Mac list behaves: a plain click replaces the selection, cmd toggles one
@@ -93,6 +153,14 @@ export type MacMessagesAppProps = {
   onSelectConversation?: (id: string) => void;
   contact: { name: string; initials?: string; photo?: string };
   group?: boolean;
+  /**
+   * Who else is in a group conversation. Two or more puts the Snowglobe stack in the header's Ø40
+   * avatar slot, gives the sidebar row for *this* conversation the same stack, and fills the details
+   * pane's participant list. Leave it out on a group and the shell reads it off the transcript
+   * instead — one entry per person who has spoken, in the order they first did — so a caller that
+   * only sets `group` still gets the group chrome rather than a monogram.
+   */
+  participants?: readonly MacHeaderMember[];
   messages: Message[];
   typing?: boolean | { sender?: string };
   now?: Date | number;
@@ -129,6 +197,69 @@ export type MacMessagesAppProps = {
   onPlusMenuSelect?: (id: string) => void;
   onPlusMenuClose?: () => void;
   /**
+   * The search field in the sidebar. It filters the list in place with nothing wired — on the Mac
+   * `-[CKUIBehaviorMac searchControllerObscuresConversationList]` is NO, so the results *are* the
+   * list — and this only reports what was typed. Pass `searchQuery` to own the text instead.
+   */
+  searchQuery?: string;
+  onSearch?: (query: string) => void;
+  // ---------------------------------------------------------------------------------------------
+  // The surfaces the window can present. Each takes a prop that states it — with `progress` where
+  // there is a transition to seek — and, with that prop left out, is held by the shell, so the click
+  // that opens it natively opens it here with nothing wired. Same contract as the iOS shell.
+  // ---------------------------------------------------------------------------------------------
+  /**
+   * The conversation details inspector, open beside the transcript. Null (or absent while nothing has
+   * opened it) leaves the pane alone. `progress` seeks the slide instead of playing it. `onDetails`
+   * already fires from the header's name pill; ⌥⌘I toggles it, which is what Conversation ▸ Show
+   * Details is bound to in macOS 26 Messages (read off the live app's menu bar:
+   * `AXMenuItemCmdChar` "I", `AXMenuItemCmdModifiers` 2).
+   */
+  details?: { open: boolean; progress?: number; tab?: MacDetailsTab; width?: number; mode?: "push" | "overlay" } | null;
+  onDetailsClose?: () => void;
+  onDetailsTabChange?: (tab: MacDetailsTab) => void;
+  onDetailsWidthChange?: (width: number) => void;
+  /** What the inspector shows. Shared media the app already knows about goes here. */
+  detailsContent?: {
+    subtitle?: string;
+    actions?: MacDetailsAction[];
+    handles?: MacDetailsHandle[];
+    photos?: MacDetailsPhoto[];
+    links?: MacDetailsLink[];
+    attachments?: MacDetailsAttachment[];
+    hideAlerts?: boolean; onHideAlertsChange?: (next: boolean) => void;
+    readReceipts?: boolean; onReadReceiptsChange?: (next: boolean) => void;
+    sharedWithYou?: boolean; onSharedWithYouChange?: (next: boolean) => void;
+    onLeave?: () => void; onBlock?: () => void; onDelete?: () => void;
+    participants?: MacDetailsParticipant[];
+  };
+  /**
+   * A photo in the transcript was opened — clicked, or Space pressed on the message that holds it.
+   *
+   * **There is no in-window photo viewer on macOS, and this shell deliberately does not draw one.**
+   * `-[CKChatController(QuickLook) _displayPreviewItemForMediaObject:]` allocates `CKQLPreviewController`
+   * and presents it modally only when `_CKIsRunningInMacCatalyst()` is false; on Catalyst it skips both
+   * and calls `-presentPreview`, which is AppKit's Quick Look panel — a system window this kit cannot
+   * own. macOS 26 Messages confirms it from the outside: its File menu carries **Quick Look** (read off
+   * the live app), and the transcript has no full-screen viewer to open. `image-viewer.tsx` ships a
+   * `chrome.macos` for the iOS viewer; that is the surface iOS presents, not the one the Mac does, so
+   * it is not used here. Wire this to whatever stands in for the system panel.
+   */
+  onQuickLook?: (id: string, index: number) => void;
+  /** The Photos popover the "+" menu's "Photos" row opens. `progress` seeks its entrance. */
+  photoPicker?: { selected?: string[]; detent?: PhotoPickerDetent; progress?: number } | null;
+  /** What that popover offers. Defaults to `photoPickerSamples`. */
+  photos?: PhotoPickerPhoto[];
+  onPhotoPickerSelectionChange?: (selected: string[]) => void;
+  onPhotoPickerClose?: () => void;
+  /** The Stickers popover the "+" menu's "Stickers" row opens. */
+  stickerPicker?: { tab?: string; progress?: number } | null;
+  onStickerPickerTab?: (tabId: string) => void;
+  onStickerPickerClose?: () => void;
+  onStickerSelect?: (sticker: Sticker) => void;
+  /** A sticker let go over the transcript. `placement` is in the pane's own coordinates. */
+  onStickerPlace?: (sticker: Sticker, placement: StickerPlacement) => void;
+  /**
    * The conversation switch a change of `selectedId` starts: the pane crossfades, the header's name
    * pill crosses with it and the sidebar's selected row travels. With `progress` (0 to 1) it is seeked
    * to that fraction of `macTransitions.conversation.duration` and paused instead of played, which is
@@ -153,6 +284,8 @@ type OutgoingPane = {
   messages: Message[];
   contact: MacMessagesAppProps["contact"];
   group: boolean;
+  /** Its own faces, so a group's stacked photo crosses to the next conversation's instead of popping. */
+  members: MacHeaderMember[] | undefined;
   /** Indices of the row it left and the row it landed on, when both are unpinned sidebar rows. */
   rows: { from: number; to: number } | null;
 };
@@ -165,10 +298,14 @@ type OutgoingPane = {
  * menus fade in and out. Every one of those timings is unmeasured, see `macTransitions`.
  */
 export function MacMessagesApp({
-  width = macScreen.width, height = macScreen.height, active = true, conversations = [], selectedId, onSelectConversation, contact, group = false,
+  width = macScreen.width, height = macScreen.height, active = true, conversations = [], selectedId, onSelectConversation, contact, group = false, participants,
   messages, typing = false, now, composer, onCompose, onVideoCall, onDetails, sendAnimation, receiveAnimation, onSendAnimationEnd,
   selectedMessageIds, onSelectMessage, contextMenu, onContextMenu, onContextMenuClose, onTapback, onMenuAction,
-  plusMenu = false, onPlusMenuSelect, onPlusMenuClose, conversationTransition, menuTransition,
+  plusMenu, onPlusMenuSelect, onPlusMenuClose, conversationTransition, menuTransition,
+  searchQuery, onSearch,
+  details, onDetailsClose, onDetailsTabChange, onDetailsWidthChange, detailsContent,
+  onQuickLook, photoPicker, photos, onPhotoPickerSelectionChange, onPhotoPickerClose,
+  stickerPicker, onStickerPickerTab, onStickerPickerClose, onStickerSelect, onStickerPlace,
   footer, renderReactions = defaultReactions, overlay, className, style, frameRef,
 }: MacMessagesAppProps) {
   const shell = useRef<HTMLDivElement>(null);
@@ -212,13 +349,87 @@ export function MacMessagesApp({
   // still in the tree, so the app keeps it mounted until `onExited`. Derived during render for the
   // same reason the context menu's closing state is: an effect would leave one committed frame with
   // the popover already gone, and the dismissal would never be seen.
-  const [seenPlusMenu, setSeenPlusMenu] = useState(plusMenu);
+  const [ownPlusMenu, setOwnPlusMenu] = useState(false);
+  const plusOpen = plusMenu ?? ownPlusMenu;
+  const [seenPlusMenu, setSeenPlusMenu] = useState(plusOpen);
   const [closingPlusMenu, setClosingPlusMenu] = useState(false);
-  if (seenPlusMenu !== plusMenu) {
-    setSeenPlusMenu(plusMenu);
-    setClosingPlusMenu(!plusMenu && seenPlusMenu);
+  if (seenPlusMenu !== plusOpen) {
+    setSeenPlusMenu(plusOpen);
+    setClosingPlusMenu(!plusOpen && seenPlusMenu);
   }
   const menuProgress = menuTransition?.progress;
+
+  // ---------------------------------------------------------------------------------------------
+  // The presented surfaces. Each is `prop ?? shell-held`, so a caller can state one and a caller who
+  // states nothing still gets the click that opens it. Every "is it leaving" flag below is derived
+  // during render, never in an effect: an effect leaves one committed frame with the surface already
+  // unmounted, and its dismissal never runs. That is the same rule the two menus above follow.
+  // ---------------------------------------------------------------------------------------------
+  const [ownDetails, setOwnDetails] = useState(false);
+  const detailsValue = details === undefined ? (ownDetails ? { open: true } : null) : details;
+  const detailsOpen = detailsValue?.open ?? false;
+  const [seenDetails, setSeenDetails] = useState(detailsOpen);
+  const [closingDetails, setClosingDetails] = useState(false);
+  if (seenDetails !== detailsOpen) {
+    setSeenDetails(detailsOpen);
+    setClosingDetails(!detailsOpen && seenDetails);
+  }
+  const detailsShown = detailsOpen || closingDetails;
+  const closeDetails = () => { setOwnDetails(false); onDetailsClose?.(); };
+  // The inspector's three switch rows. `MacDetails` draws each one only when it has a handler, so a
+  // caller that owns them passes both halves and a caller that owns nothing still gets working rows
+  // rather than an empty panel. These starting values are this component's, not a measurement: no
+  // capture of the pane exists, and what a fresh conversation defaults to is the app's business.
+  const [ownHideAlerts, setOwnHideAlerts] = useState(false);
+  const [ownReadReceipts, setOwnReadReceipts] = useState(true);
+  const [ownSharedWithYou, setOwnSharedWithYou] = useState(true);
+
+  const [ownPhotoPicker, setOwnPhotoPicker] = useState<NonNullable<MacMessagesAppProps["photoPicker"]> | null>(null);
+  const photoValue = photoPicker === undefined ? ownPhotoPicker : photoPicker;
+  const [seenPhotos, setSeenPhotos] = useState(photoValue != null);
+  const [closingPhotos, setClosingPhotos] = useState(false);
+  if (seenPhotos !== (photoValue != null)) {
+    setSeenPhotos(photoValue != null);
+    setClosingPhotos(photoValue == null && seenPhotos);
+  }
+  const photoPickerShown = photoValue != null || closingPhotos;
+  const closePhotoPicker = () => { setOwnPhotoPicker(null); onPhotoPickerClose?.(); };
+
+  const [ownSticker, setOwnSticker] = useState<NonNullable<MacMessagesAppProps["stickerPicker"]> | null>(null);
+  const stickerValue = stickerPicker === undefined ? ownSticker : stickerPicker;
+  const [seenSticker, setSeenSticker] = useState(stickerValue != null);
+  const [closingSticker, setClosingSticker] = useState(false);
+  if (seenSticker !== (stickerValue != null)) {
+    setSeenSticker(stickerValue != null);
+    setClosingSticker(stickerValue == null && seenSticker);
+  }
+  const stickerShown = stickerValue != null || closingSticker;
+  const closeStickerPicker = () => { setOwnSticker(null); onStickerPickerClose?.(); };
+
+  /**
+   * Who is in this conversation. A caller that knows says so; a caller that only set `group` gets the
+   * people the transcript names, in the order they first spoke, which is the honest reading of a log
+   * — it cannot know about a member who has said nothing. You are not in it: `CKAvatarView` is handed
+   * the conversation's *other* participants, so the stack never draws your own face.
+   */
+  const groupMembers = useMemo<MacHeaderMember[] | undefined>(() => {
+    if (participants) return participants.length > 1 ? [...participants] : undefined;
+    if (!group) return undefined;
+    const seen = new Map<string, MacHeaderMember>();
+    for (const message of messages) {
+      if (message.direction !== "incoming" || !message.sender || seen.has(message.sender)) continue;
+      seen.set(message.sender, { name: message.sender, initials: message.senderInitials ?? initialsOf(message.sender), photo: message.senderPhoto });
+    }
+    return seen.size > 1 ? [...seen.values()] : undefined;
+  }, [participants, group, messages]);
+  const isGroup = group || (groupMembers?.length ?? 0) > 1;
+  /** The same people, in the shape the inspector's header pancake and participant list take. */
+  const detailsParticipants = useMemo<MacDetailsParticipant[] | undefined>(() => groupMembers?.map((person, index) => ({
+    id: person.name ?? person.initials ?? String(index),
+    name: person.name ?? person.initials ?? "",
+    initials: person.initials,
+    photo: person.photo,
+  })), [groupMembers]);
 
   // The context menu fades and grows out of the pointer. Only its appearance is animated here, because
   // `context-menu.tsx` already owns the dismissal; the transform origin set here is the corner that
@@ -260,18 +471,18 @@ export function MacMessagesApp({
    * arriving conversation is alone in the pane is never shown. A passive effect would lose exactly
    * that frame, which is why nothing here uses one.
    */
-  const committed = useRef({ id: selectedId, messages, contact, group });
+  const committed = useRef({ id: selectedId, messages, contact, group, members: groupMembers });
   const [outgoingPane, setOutgoingPane] = useState<OutgoingPane | null>(null);
   useLayoutEffect(() => {
     const before = committed.current;
-    committed.current = { id: selectedId, messages, contact, group };
+    committed.current = { id: selectedId, messages, contact, group, members: groupMembers };
     // Opening the first conversation is an arrival, not a switch: there is nothing to cross with.
     if (before.id === selectedId || before.id === undefined || selectedId === undefined) return;
     const rows = conversations.filter(conversation => !conversation.pinned);
     const from = rows.findIndex(row => row.id === before.id);
     const to = rows.findIndex(row => row.id === selectedId);
-    setOutgoingPane({ messages: before.messages, contact: before.contact, group: before.group, rows: from >= 0 && to >= 0 && from !== to ? { from, to } : null });
-  }, [selectedId, messages, contact, group, conversations]);
+    setOutgoingPane({ messages: before.messages, contact: before.contact, group: before.group, members: before.members, rows: from >= 0 && to >= 0 && from !== to ? { from, to } : null });
+  }, [selectedId, messages, contact, group, groupMembers, conversations]);
 
   const switchProgress = conversationTransition?.progress;
   useLayoutEffect(() => {
@@ -357,14 +568,78 @@ export function MacMessagesApp({
     };
   }, [outgoingPane, pane, switchProgress, active]);
 
-  return (
-    <PlatformProvider platform="macos">
-      <PaletteStyle platform="macos" />
-      <div ref={shell} data-im-platform="macos" data-switching={outgoingPane?.rows ? "true" : undefined} className={cn("relative", className)} style={{ width, height, ...style }}>
-        <style>{macAppStyles}</style>
-        <MacWindow width={width} height={height} active={active} data-slot="macos-messages-app"
-          sidebar={<MacSidebar conversations={conversations} selectedId={selectedId} onSelect={onSelectConversation} active={active} footer={footer} className="absolute inset-0" />}
-          content={
+  /**
+   * The sidebar's rows. The row for the conversation the pane is drawing *is* that conversation, so
+   * when it carries no `members` of its own and this is a group it takes the same faces the header
+   * does; otherwise one conversation would read as a group in the pane and as a monogram in the list.
+   * Every other row is exactly what the caller passed.
+   */
+  const sidebarConversations = useMemo(() => (
+    groupMembers
+      ? conversations.map(item => (item.id === selectedId && !item.members ? { ...item, members: groupMembers } : item))
+      : conversations
+  ), [conversations, selectedId, groupMembers]);
+
+  const closePlusMenu = () => { setOwnPlusMenu(false); onPlusMenuClose?.(); };
+  /**
+   * A row of the "+" menu. The two that have a surface in this registry open it; the rest only report,
+   * because there is nothing measured to open. The menu folds back into the "+" either way, which is
+   * what an AppKit menu does once a row has been chosen.
+   */
+  const selectPlusItem = (id: string) => {
+    closePlusMenu();
+    if (id === "photos") { setOwnSticker(null); setOwnPhotoPicker({ selected: [], detent: "collapsed" }); }
+    if (id === "stickers") { setOwnPhotoPicker(null); setOwnSticker({}); }
+    onPlusMenuSelect?.(id);
+  };
+
+  /**
+   * A photo was opened. On the Mac that is a Quick Look, so the shell selects the message the way a
+   * click on it would and reports; it draws nothing. See `onQuickLook` for why there is no viewer.
+   */
+  const quickLook = (id: string, index: number) => {
+    select(id, { shiftKey: false, metaKey: false });
+    onQuickLook?.(id, index);
+  };
+
+  // A popover the "+" menu opened closes on Escape and on a press outside it, the way an AppKit
+  // popover does. The sticker sheet answers Escape itself; this covers the photos panel, which has no
+  // dismissal of its own, and the press-outside both of them need.
+  const photoUp = photoValue != null;
+  const stickerUp = stickerValue != null;
+  const popoverUp = photoUp || stickerUp;
+  const dismissPopovers = () => {
+    if (photoUp) closePhotoPicker();
+    if (stickerUp) closeStickerPicker();
+  };
+  useEffect(() => {
+    if (!photoUp && !stickerUp) return;
+    const dismiss = () => {
+      if (photoUp) { setOwnPhotoPicker(null); onPhotoPickerClose?.(); }
+      if (stickerUp) { setOwnSticker(null); onStickerPickerClose?.(); }
+    };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); dismiss(); } };
+    const onPointer = (event: PointerEvent) => {
+      const hit = (event.target as HTMLElement | null)?.closest?.('[data-slot="mac-attachment-popover"], [data-slot="attach-button"]');
+      if (!hit) dismiss();
+    };
+    document.addEventListener("keydown", onKey, true);
+    // Next tick, so the click on "+" that opened it does not immediately close it.
+    const timer = setTimeout(() => document.addEventListener("pointerdown", onPointer, true), 0);
+    return () => { document.removeEventListener("keydown", onKey, true); clearTimeout(timer); document.removeEventListener("pointerdown", onPointer, true); };
+  }, [photoUp, stickerUp, onPhotoPickerClose, onStickerPickerClose]);
+
+  const pickerPhotos = photos ?? photoPickerSamples;
+  const picked = photoValue?.selected ?? [];
+
+  /**
+   * The transcript, the header, the composer and the two popovers: everything the window's content
+   * area holds when the inspector is closed. Hoisted so `MacDetails` can take it as its
+   * `conversation` and push it aside — the same node either way, so the pane's ref, its handlers and
+   * `pane.current.getBoundingClientRect()` all survive the inspector opening, which is what keeps the
+   * right-click menu landing correctly beside it.
+   */
+  const paneNode = (
             <div ref={pane} data-slot="pane" className="absolute inset-0 overflow-hidden" style={{ background: "var(--im-bg)" }}
               // A single click selects the message it lands on and deselects the rest; a click on the
               // rest of the pane clears. Right-clicking selects first, then opens the menu.
@@ -399,8 +674,17 @@ export function MacMessagesApp({
                 }
                 const row = event.target as HTMLElement;
                 if (!row.matches?.('[data-slot="message-row"][data-message-id]')) return;
-                if (event.key !== "Enter" && event.key !== " " && event.key !== "ContextMenu" && !(event.key === "F10" && event.shiftKey)) return;
                 const id = row.getAttribute("data-message-id");
+                // Space is Quick Look on the Mac — File ▸ Quick Look, which macOS 26 Messages draws
+                // with no ⌘ equivalent — and only on a message that has something to preview, which
+                // is why that menu item reads disabled with nothing selected. Anything else falls
+                // through to the menu, so Enter and the context-menu key still open it.
+                if (event.key === " " && id && messages.find(message => message.id === id)?.images?.length) {
+                  event.preventDefault();
+                  quickLook(id, 0);
+                  return;
+                }
+                if (event.key !== "Enter" && event.key !== " " && event.key !== "ContextMenu" && !(event.key === "F10" && event.shiftKey)) return;
                 if (!id || !onContextMenu || !pane.current) return;
                 event.preventDefault();
                 setKeyboardMenu(true);
@@ -409,27 +693,96 @@ export function MacMessagesApp({
                 onContextMenu(id, at.left + at.width / 2 - rect.left, at.bottom - rect.top);
               }}>
               <div data-slot="pane-content" className="absolute inset-0">
-                <MessageList ref={list} frameRef={pane} messages={messages} typing={typing} group={group} now={now} anchor="bottom" selectedIds={selectedMessageIds}
-                  insetTop={macScreen.listTop} insetBottom={macScreen.listBottom} renderReactions={renderReactions} messageActions={Boolean(onContextMenu)} className="absolute inset-0" />
+                <MessageList ref={list} frameRef={pane} messages={messages} typing={typing} group={isGroup} now={now} anchor="bottom" selectedIds={selectedMessageIds}
+                  insetTop={macScreen.listTop} insetBottom={macScreen.listBottom} renderReactions={renderReactions} messageActions={Boolean(onContextMenu)}
+                  onOpenImage={(id, index) => quickLook(id, index)} className="absolute inset-0" />
               </div>
               {/* The conversation that is leaving, under the header's glass so it is washed like the one
                   arriving. It carries no composer and nothing interactive: it is a picture for 140 ms. */}
               {outgoingPane && (
                 <div data-slot="pane-outgoing" aria-hidden="true" inert className="pointer-events-none absolute inset-0">
-                  <MessageList frameRef={pane} messages={outgoingPane.messages} group={outgoingPane.group} now={now} anchor="bottom"
+                  <MessageList frameRef={pane} messages={outgoingPane.messages} group={outgoingPane.group || (outgoingPane.members?.length ?? 0) > 1} now={now} anchor="bottom"
                     insetTop={macScreen.listTop} insetBottom={macScreen.listBottom} renderReactions={renderReactions} className="absolute inset-0" />
                 </div>
               )}
-              <MacHeader name={contact.name} initials={contact.initials} photo={contact.photo} onCompose={onCompose} onVideoCall={onVideoCall} onOpenDetails={onDetails} className="absolute left-0 top-0 w-full" style={{ height: macHeaderMetrics.height }} />
+              {/* The name pill is the details trigger, and it opens the pane itself when the caller
+                  is not holding that state. ⌥⌘I on the window does the same. */}
+              <MacHeader name={contact.name} initials={contact.initials} photo={contact.photo} members={groupMembers}
+                onCompose={onCompose} onVideoCall={onVideoCall} onOpenDetails={() => { setOwnDetails(true); onDetails?.(); }}
+                className="absolute left-0 top-0 w-full" style={{ height: macHeaderMetrics.height }} />
               {/* The name pill it is leaving, over the live header so the two cross where the real one
                   sits. `macAppStyles` drops this copy's glass and buttons: only the contact is leaving. */}
               {outgoingPane && (
                 <div data-slot="header-outgoing" aria-hidden="true" inert className="pointer-events-none absolute left-0 top-0 w-full">
-                  <MacHeader name={outgoingPane.contact.name} initials={outgoingPane.contact.initials} photo={outgoingPane.contact.photo} style={{ height: macHeaderMetrics.height }} />
+                  <MacHeader name={outgoingPane.contact.name} initials={outgoingPane.contact.initials} photo={outgoingPane.contact.photo}
+                    members={outgoingPane.members} style={{ height: macHeaderMetrics.height }} />
                 </div>
               )}
               <MacComposer className="absolute bottom-0 left-0 w-full" value={composer?.value} disabled={composer?.disabled} onChange={composer?.onChange}
-                onSend={composer?.onSend ?? (() => {})} onAttach={composer?.onAttach} onEmoji={composer?.onEmoji} onAudio={composer?.onAudio} />
+                onSend={composer?.onSend ?? (() => {})} onEmoji={composer?.onEmoji} onAudio={composer?.onAudio}
+                onAttach={() => {
+                  // "+" is a toggle: it closes whatever it opened, and otherwise raises the menu.
+                  if (popoverUp) dismissPopovers();
+                  else if (plusMenu === undefined) setOwnPlusMenu(current => !current);
+                  composer?.onAttach?.();
+                }} />
+              {/* The two popovers a "+" row opens. Both are the iPhone surfaces re-flowed into the
+                  Mac's own popover box — see `macAttachmentPopovers` for what is measured and what is
+                  not. The sticker sheet is laid out in pane coordinates inside a full-pane layer, so
+                  a dragged sticker can travel over the transcript and `onPlace` reports where it
+                  landed in the pane; the photos panel is a plain box. */}
+              {stickerShown && (
+                <div data-slot="mac-attachment-popover" className="pointer-events-none absolute inset-0" style={{ zIndex: 25 }}>
+                  {/* The popover's own box, under the sheet, because the sheet's layer has to stay the
+                      whole pane for a dragged sticker to travel across the transcript. */}
+                  <div aria-hidden="true" className={cn("absolute", popoverChrome)} style={{
+                    left: macAttachmentPopovers.left,
+                    top: macAttachmentPopovers.bottom - macAttachmentPopovers.stickers.height,
+                    width: macAttachmentPopovers.stickers.width, height: macAttachmentPopovers.stickers.height,
+                    borderRadius: macAttachmentPopovers.radius,
+                  }} />
+                  <StickerPicker
+                    open={stickerValue != null}
+                    progress={stickerValue?.progress}
+                    tab={stickerValue?.tab}
+                    scrim={false}
+                    left={macAttachmentPopovers.left}
+                    top={macAttachmentPopovers.bottom - macAttachmentPopovers.stickers.height}
+                    width={macAttachmentPopovers.stickers.width}
+                    height={macAttachmentPopovers.stickers.height}
+                    onTabChange={tabId => { setOwnSticker(current => (current ? { ...current, tab: tabId } : current)); onStickerPickerTab?.(tabId); }}
+                    onDismiss={closeStickerPicker}
+                    onExited={() => setClosingSticker(false)}
+                    onSelect={onStickerSelect}
+                    onPlace={onStickerPlace} />
+                </div>
+              )}
+              {photoPickerShown && (
+                <div data-slot="mac-attachment-popover" className={cn("absolute", popoverChrome)} style={{
+                  left: macAttachmentPopovers.left,
+                  top: macAttachmentPopovers.bottom - macAttachmentPopovers.photos.height,
+                  width: macAttachmentPopovers.photos.width, height: macAttachmentPopovers.photos.height,
+                  borderRadius: macAttachmentPopovers.radius, zIndex: 25,
+                }}>
+                  <PhotoPicker
+                    open={photoValue != null}
+                    progress={photoValue?.progress}
+                    selected={picked}
+                    onSelectionChange={next => {
+                      setOwnPhotoPicker(current => (current ? { ...current, selected: next } : current));
+                      onPhotoPickerSelectionChange?.(next);
+                    }}
+                    detent="collapsed"
+                    // A popover has no sheet to drag, so it has no grabber either. The grid is inset
+                    // by `-[CKUIBehaviorMac popoverPadding]` = 7 so it clears the popover's corners.
+                    grabber={false}
+                    inset={macPopoverPadding}
+                    width={macAttachmentPopovers.photos.width - macPopoverPadding * 2}
+                    height={macAttachmentPopovers.photos.height - macPopoverPadding * 2}
+                    photos={pickerPhotos}
+                    onExited={() => setClosingPhotos(false)} />
+                </div>
+              )}
               {target && menu && (
                 <ContextMenu variant="macos" items={macosMessageMenu} open={!closingMenu} onExited={() => setClosingMenu(null)} autoFocus={keyboardMenu}
                   style={{ position: "absolute", left: Math.min(menu.x, width - macScreen.sidebar - 310), top: Math.min(menu.y, height - 300), zIndex: 30 }}
@@ -438,12 +791,69 @@ export function MacMessagesApp({
               )}
               {overlay}
             </div>
-          } />
+  );
+
+  return (
+    <PlatformProvider platform="macos">
+      <PaletteStyle platform="macos" />
+      <div ref={shell} data-im-platform="macos" data-switching={outgoingPane?.rows ? "true" : undefined} className={cn("relative", className)} style={{ width, height, ...style }}
+        // ⌥⌘I is Conversation ▸ Show Details in macOS 26 Messages, read off the live app's menu bar
+        // (`AXMenuItemCmdChar` "I", `AXMenuItemCmdModifiers` 2). It is bound on the window rather than
+        // on the document so a second app on the same page keeps its own shortcut.
+        onKeyDown={event => {
+          if (!event.metaKey || !event.altKey || event.key.toLowerCase() !== "i") return;
+          event.preventDefault();
+          if (detailsOpen) closeDetails();
+          else { setOwnDetails(true); onDetails?.(); }
+        }}>
+        <style>{macAppStyles}</style>
+        <MacWindow width={width} height={height} active={active} data-slot="macos-messages-app"
+          sidebar={
+            <MacSidebar conversations={sidebarConversations} selectedId={selectedId} onSelect={onSelectConversation} active={active} footer={footer}
+              searchQuery={searchQuery} onSearch={onSearch} className="absolute inset-0" />
+          }
+          content={detailsShown ? (
+            // The inspector takes the whole content area and hands the pane back as its `conversation`,
+            // which it insets by the panel's footprint while it slides in. It paints a window ground
+            // behind that, so it is only in the tree while the panel is there.
+            <MacDetails
+              name={contact.name} initials={contact.initials} photo={contact.photo}
+              participants={detailsContent?.participants ?? detailsParticipants}
+              // A group opens with its members showing: naming who is in the conversation is the
+              // reason the pane is open. A one-to-one has no list to disclose.
+              defaultParticipantsOpen={isGroup}
+              subtitle={detailsContent?.subtitle}
+              // The one quick action this shell can actually perform is the FaceTime call the header
+              // already offers; anything else would be a button that reports nothing.
+              actions={detailsContent?.actions ?? (onVideoCall ? [{ id: "video", label: `FaceTime ${contact.name}`, icon: "video", onPress: onVideoCall }] : undefined)}
+              handles={detailsContent?.handles}
+              photos={detailsContent?.photos}
+              links={detailsContent?.links}
+              attachments={detailsContent?.attachments}
+              hideAlerts={detailsContent?.hideAlerts ?? ownHideAlerts}
+              onHideAlertsChange={next => { setOwnHideAlerts(next); detailsContent?.onHideAlertsChange?.(next); }}
+              readReceipts={detailsContent?.readReceipts ?? ownReadReceipts}
+              onReadReceiptsChange={next => { setOwnReadReceipts(next); detailsContent?.onReadReceiptsChange?.(next); }}
+              sharedWithYou={detailsContent?.sharedWithYou ?? ownSharedWithYou}
+              onSharedWithYouChange={next => { setOwnSharedWithYou(next); detailsContent?.onSharedWithYouChange?.(next); }}
+              // A group offers Leave where a one-to-one offers Block, which is what `MacDetails` keys
+              // off the presence of each handler, so only the one that belongs is passed.
+              onLeave={isGroup ? detailsContent?.onLeave : undefined}
+              onBlock={isGroup ? undefined : detailsContent?.onBlock}
+              onDelete={detailsContent?.onDelete}
+              onClose={closeDetails}
+              tab={detailsValue?.tab} onTabChange={onDetailsTabChange}
+              mode={detailsValue?.mode ?? "push"}
+              width={detailsValue?.width} onWidthChange={onDetailsWidthChange}
+              open={detailsOpen} progress={detailsValue?.progress}
+              onExited={() => setClosingDetails(false)}
+              conversation={paneNode} />
+          ) : paneNode} />
         {/* Kept in the tree while it is leaving: `MacPlusMenu` plays its own dismissal and says when
             it is over. A seeked one never reports, so a scrubbed frame holds. */}
-        {(plusMenu || closingPlusMenu) && (
-          <MacPlusMenu open={plusMenu} progress={menuProgress} onExited={() => setClosingPlusMenu(false)}
-            onSelect={onPlusMenuSelect} onClose={onPlusMenuClose} style={{ position: "absolute", zIndex: 40 }} left={macScreen.sidebar + 9} top={626} />
+        {(plusOpen || closingPlusMenu) && (
+          <MacPlusMenu open={plusOpen} progress={menuProgress} onExited={() => setClosingPlusMenu(false)}
+            onSelect={selectPlusItem} onClose={closePlusMenu} style={{ position: "absolute", zIndex: 40 }} left={macScreen.sidebar + macPlusMenuMetrics.left} top={macPlusMenuMetrics.top} />
         )}
       </div>
     </PlatformProvider>

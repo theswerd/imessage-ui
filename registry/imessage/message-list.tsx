@@ -15,6 +15,8 @@ import { ReplyCount, ReplyStub } from "@/registry/imessage/message-reply";
 import { FailedSendBadge, NotDelivered } from "@/registry/imessage/ios-notices";
 import { TypingIndicator } from "@/registry/imessage/typing-indicator";
 import { useBubbleScreenSpace } from "@/registry/imessage/use-screen-space";
+import { SystemMessage, systemMessageMetrics, type SystemMessageEvent } from "@/registry/imessage/system-message";
+import { SenderAvatar, senderAvatarMetricsForPlatform } from "@/registry/imessage/group-avatar";
 
 /**
  * The scrolling message log: clusters consecutive same-sender messages (60 s window, tail on the last
@@ -22,10 +24,24 @@ import { useBubbleScreenSpace } from "@/registry/imessage/use-screen-space";
  * hour, places the delivery label under the last outgoing message, renders emoji-only messages as big
  * glyphs, link messages as link cards, group-chat sender names, and the typing indicator at the end.
  * Bubble fills are kept in screen space through `useBubbleScreenSpace`.
+ *
+ * A group also spends `senderAvatarMetricsFor`'s gutter on every incoming row and hangs the sender's
+ * face on the last bubble of each run, and a message whose `kind` is "system" draws as one of
+ * `system-message.tsx`'s centred grey lines instead of a balloon.
  */
 export type MessageStatus = "sending" | "sent" | "delivered" | "read" | "failed";
-export type MessageReaction = { type: string; byMe?: boolean; emoji?: string };
-export type MessageKind = "text" | "link" | "attachment" | "image" | "audio" | "typing";
+export type MessageReaction = {
+  type: string;
+  byMe?: boolean;
+  emoji?: string;
+  /**
+   * Who left it. Only a group needs it, and only the Tapback Details platter reads it; a 1:1 falls
+   * back to the contact's name (or "You"). Additive: nothing that existed before this passes it.
+   */
+  by?: string;
+  byInitials?: string;
+};
+export type MessageKind = "text" | "link" | "attachment" | "image" | "audio" | "typing" | "system";
 export type MessageLink = { url: string; title?: string; host?: string; image?: string };
 export type MessageAttachmentInfo = { name: string; size?: string; href?: string };
 
@@ -37,6 +53,8 @@ export type Message = {
   sentAt: Date | number;
   sender?: string;
   senderInitials?: string;
+  /** The sender's photo, for the face beside an incoming cluster in a group. */
+  senderPhoto?: string;
   status?: MessageStatus;
   readAt?: Date | number;
   edited?: boolean;
@@ -48,6 +66,12 @@ export type Message = {
   images?: Array<{ src: string; alt: string; width?: number; height?: number }>;
   /** Voice message, when `kind` is "audio". */
   audio?: { duration: number; peaks?: number[] };
+  /**
+   * One thing that happened *to* the conversation rather than in it, when `kind` is "system": a
+   * rename, a join, a leave, the group photo. It draws as a centred grey line, not a bubble, so it
+   * carries no `data-message-id`, breaks a cluster, and never takes the delivery label.
+   */
+  system?: SystemMessageEvent;
   /** The message this one replies to. */
   replyTo?: { id: string; text: string; direction: Direction; service?: Service; sender?: string };
   /** How many replies hang off this message. */
@@ -195,6 +219,17 @@ export type MessageListProps = Omit<ComponentProps<"div">, "children" | "ref"> &
    * flash rather than playing it, which is what makes a scenario checkpoint reproducible.
    */
   flash?: { id: string; progress?: number } | null;
+  /**
+   * A photo tile was activated: which message it belongs to, which tile, and that tile's viewport
+   * box, so a shell can grow the full-screen viewer out of the tile that was tapped. Without it the
+   * tiles stay named images rather than controls, which is what they were before.
+   */
+  onOpenImage?: (id: string, index: number, rect: DOMRect) => void;
+  /**
+   * A status line arriving: it rises into place instead of appearing. `progress` (0..1) pauses and
+   * seeks that entrance rather than playing it. UNVERIFIED motion — see `systemMessageMotion`.
+   */
+  systemArrival?: { id: string; progress?: number } | null;
   /** Where a short conversation sits: under the header ("top", native iOS) or against the composer ("bottom"). */
   anchor?: "top" | "bottom";
   insetTop?: number;
@@ -207,7 +242,8 @@ export type ThreadOpenSource = "reply-count" | "message";
 
 type Row =
   | { kind: "date"; key: string; date: number; service?: ReactNode; variant: DateSeparatorVariant }
-  | { kind: "message"; key: string; message: Message; tail: boolean; gap: number; showStatus: boolean; showSender: boolean; emoji: boolean }
+  | { kind: "message"; key: string; message: Message; tail: boolean; gap: number; showStatus: boolean; showSender: boolean; showAvatar: boolean; cluster: string; emoji: boolean }
+  | { kind: "system"; key: string; message: Message; gap: number }
   | { kind: "typing"; key: string; gap: number; sender?: string };
 
 const ms = (v: Date | number) => (typeof v === "number" ? v : v.getTime());
@@ -237,22 +273,36 @@ export function buildRows(messages: Message[], options: { platform: Platform; no
   // Measured body bottom to next body top: 3.24 / 2.93 / 3.49 / 2.74 with no tail above, 7.74 / 8.10 /
   // 8.11 / 8.23 with one (conversation-pane-dark.png, -light.png, -dark-2.png, -light-partial.png).
   let previousTail = false;
+  // The id of the message that opened the run this one belongs to. It is what a sender avatar keys
+  // its hand-off on: the same key at a new position means the cluster grew a bubble and the face
+  // slides down to it instead of jumping.
+  let cluster = "";
   // The delivery label lives under the newest outgoing message that has one: a message still sending shows
   // nothing, and the previous bubble keeps its "Delivered" until the new one is delivered.
-  const lastOutgoing = messages.reduce((found, message, index) => (message.direction === "outgoing" && message.kind !== "link" && message.kind !== "typing" && statusLabel(message, options.now) !== undefined ? index : found), -1);
+  // A status line is not a message and must never swallow it.
+  const lastOutgoing = messages.reduce((found, message, index) => (message.direction === "outgoing" && message.kind !== "link" && message.kind !== "typing" && message.kind !== "system" && statusLabel(message, options.now) !== undefined ? index : found), -1);
   for (let i = 0; i < messages.length; i++) {
     const message = messages[i];
     if (message.kind === "typing") continue;
     const previous = i > 0 ? messages[i - 1] : undefined;
     const next = i + 1 < messages.length ? messages[i + 1] : undefined;
-    const emoji = message.kind !== "link" && isEmojiOnly(message.text);
     const t = ms(message.sentAt);
     const needsHeader = previous ? t - ms(previous.sentAt) > dateHeaderGapMs : options.firstDateHeader;
     // Only the header that opens the conversation carries the service name and its tight top gap; every
     // later one is a one-line mid-list header with a gap of its own on both sides.
     if (needsHeader) rows.push({ kind: "date", key: `date-${message.id}`, date: t, service: i === 0 ? options.serviceLabel : undefined, variant: i === 0 ? "first" : "mid" });
+    // A status line is a centred sentence, not a balloon: it takes `systemMessageMetrics.gapAbove`
+    // rather than a cluster gap, ends whatever cluster was running, and never carries a tail. It
+    // leaves before the emoji and tail work below, which have nothing to say about it.
+    if (message.kind === "system" && message.system) {
+      rows.push({ kind: "system", key: message.id, message, gap: message.gapBefore ?? (needsHeader || !previous ? 0 : systemMessageMetrics[options.platform].gapAbove) });
+      previousTail = false;
+      cluster = "";
+      continue;
+    }
+    const emoji = message.kind !== "link" && isEmojiOnly(message.text);
     const continues = (a: Message | undefined, b: Message) =>
-      Boolean(a) && a!.direction === b.direction && (a!.sender ?? "") === (b.sender ?? "") && ms(b.sentAt) - ms(a!.sentAt) <= clusterWindowMs && ms(b.sentAt) - ms(a!.sentAt) >= 0 && !isEmojiOnly(a!.text) && !isEmojiOnly(b.text) && a!.kind !== "typing";
+      Boolean(a) && a!.direction === b.direction && (a!.sender ?? "") === (b.sender ?? "") && ms(b.sentAt) - ms(a!.sentAt) <= clusterWindowMs && ms(b.sentAt) - ms(a!.sentAt) >= 0 && !isEmojiOnly(a!.text) && !isEmojiOnly(b.text) && a!.kind !== "typing" && a!.kind !== "system" && b.kind !== "system";
     const inCluster = !needsHeader && continues(previous, message);
     const nextInCluster = Boolean(next) && next!.kind !== "typing" && continues(message, next!) && ms(next!.sentAt) - t <= dateHeaderGapMs;
     const tail = message.tail ?? (!emoji && message.kind !== "link" && !nextInCluster);
@@ -260,10 +310,14 @@ export function buildRows(messages: Message[], options: { platform: Platform; no
     // `!inCluster` for the row that follows, so the two can never both hold on their own.
     const gap = message.gapBefore ?? (needsHeader || !previous ? 0 : inCluster ? m.gapInGroup + (previousTail ? lm.tailSpace : 0) : m.gapBetweenGroups);
     previousTail = tail;
+    if (!inCluster) cluster = message.id;
     rows.push({
-      kind: "message", key: message.id, message, tail, gap, emoji,
+      kind: "message", key: message.id, message, tail, gap, emoji, cluster,
       showStatus: i === lastOutgoing,
       showSender: options.group && message.direction === "incoming" && Boolean(message.sender) && !inCluster,
+      // One face per incoming cluster, on its last (tailed) bubble, which is what the
+      // `edges: leading|bottom` supplementary anchor produces natively.
+      showAvatar: options.group && message.direction === "incoming" && tail,
     });
   }
   if (options.typing) rows.push({ kind: "typing", key: "typing", gap: rows.length ? m.gapBetweenGroups : 0, sender: options.typing.sender });
@@ -285,7 +339,8 @@ function EmojiMessage({ message, platform }: { message: Message; platform: Platf
 
 export function MessageList({
   messages, typing = false, group = false, now, frameRef, platform: platformProp, serviceLabel, renderReactions, autoScroll = true,
-  firstDateHeader = true, messageActions = false, selectedIds, onOpenThread, onJumpToMessage, openThreadId, flash, anchor = "top", insetTop, insetBottom, ref, className, style, onScroll, onKeyDown, ...props
+  firstDateHeader = true, messageActions = false, selectedIds, onOpenThread, onJumpToMessage, openThreadId, flash, onOpenImage, systemArrival,
+  anchor = "top", insetTop, insetBottom, ref, className, style, onScroll, onKeyDown, ...props
 }: MessageListProps) {
   const contextPlatform = usePlatform();
   const platform = platformProp ?? contextPlatform;
@@ -393,6 +448,13 @@ export function MessageList({
 
   const typingLabel = typingInfo?.sender ? `${typingInfo.sender} is typing` : "Someone is typing";
   const maxWidth = `calc((100% + ${2 * m.edgeInset}px) * ${m.maxWidthRatio})`;
+  /**
+   * What an incoming row in a group gives up on its leading edge to the sender's face:
+   * `transcriptContactImageDiameter + contactPhotoBalloonMargin`, 39 on the phone and 35 on the Mac.
+   * Every incoming row of the cluster spends it, not only the one that draws the face, or the
+   * bubbles above the face would sit further out than the one beside it.
+   */
+  const gutter = group ? senderAvatarMetricsForPlatform(platform).gutter : 0;
 
   /**
    * The log is one tab stop and the arrow keys walk the messages inside it, so a keyboard can reach
@@ -439,16 +501,31 @@ export function MessageList({
         style={{ padding: `${insetTop ?? lm.insetTop}px ${m.edgeInset}px ${insetBottom ?? lm.insetBottom}px`, marginTop: anchor === "bottom" ? "auto" : undefined }}>
         {rows.map(row => {
           if (row.kind === "date") return <DateSeparator key={row.key} date={row.date} now={nowMs} service={row.service} variant={row.variant} platform={platform} />;
-          if (row.kind === "typing") {
+          // `edgeInset={0}` is load-bearing, not tidiness: the content box above already applies the
+          // platform's edge inset, and a second one narrows the iOS column from 370 to 338 and
+          // rewraps the measured sentence. `gapBelow={0}` matches every other row here, which carries
+          // its space above and none below.
+          if (row.kind === "system") {
             return (
-              <div key={row.key} data-slot="message-row" data-typing="true" className="flex items-start" style={{ marginTop: row.gap }}>
+              <SystemMessage key={row.key} event={row.message.system!} platform={platform}
+                gapAbove={row.gap} gapBelow={0} edgeInset={0}
+                animateIn={systemArrival?.id === row.message.id ? { progress: systemArrival.progress } : undefined} />
+            );
+          }
+          if (row.kind === "typing") {
+            const typingFace = group && row.sender;
+            return (
+              <div key={row.key} data-slot="message-row" data-typing="true" className={cn("flex items-start", typingFace && "relative")}
+                style={{ marginTop: row.gap, paddingInlineStart: gutter || undefined }}>
+                {typingFace && <SenderAvatar name={row.sender} platform={platform} variant="typing" />}
                 <TypingIndicator label={row.sender ? `${row.sender} is typing` : typingLabel} platform={platform} />
               </div>
             );
           }
           const { message } = row;
           const outgoing = message.direction === "outgoing";
-          const rowStyle: CSSProperties = { marginTop: row.gap };
+          const incomingInGroup = gutter > 0 && !outgoing;
+          const rowStyle: CSSProperties = { marginTop: row.gap, paddingInlineStart: incomingInGroup ? gutter : undefined };
           let content: ReactNode;
           // MessageBubble hangs its own reactions; every other kind needs them hung below.
           let isTextBubble = false;
@@ -456,7 +533,8 @@ export function MessageList({
             const link = message.link;
             content = <LinkPreview href={link.url} title={link.title} host={link.host} image={link.image} platform={platform} />;
           } else if (message.kind === "image" && message.images?.length) {
-            content = <MessageImages images={message.images} direction={message.direction} tail={row.tail} platform={platform} />;
+            content = <MessageImages images={message.images} direction={message.direction} tail={row.tail} platform={platform}
+              onOpenImage={onOpenImage ? (index, rect) => onOpenImage(message.id, index, rect) : undefined} />;
           } else if (message.kind === "audio" && message.audio) {
             content = <MessageAudio duration={message.audio.duration} peaks={message.audio.peaks} direction={message.direction} tail={row.tail} platform={platform} />;
           } else if (message.kind === "attachment" && message.attachments?.length) {
@@ -523,8 +601,15 @@ export function MessageList({
               aria-haspopup={messageActions ? "menu" : tapOpensThread ? "dialog" : undefined}
               onPointerDown={tapOpensThread ? (event: PointerEvent<HTMLDivElement>) => { press.current = { x: event.clientX, y: event.clientY, at: event.timeStamp }; } : undefined}
               onClick={tapOpensThread ? (event: MouseEvent<HTMLDivElement>) => { if (plainTap(event)) onOpenThread!(message.id, "message"); } : undefined}
-              data-effect={message.effect} className={cn("flex min-w-0 flex-col focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff]", outgoing ? "items-end" : "items-start")}
+              data-effect={message.effect} className={cn("flex min-w-0 flex-col focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff]", incomingInGroup && "relative", outgoing ? "items-end" : "items-start")}
               style={tapOpensThread ? { ...rowStyle, cursor: "pointer" } : rowStyle}>
+              {/* The sender's face, anchored to the row's leading edge and flush with the balloon's
+                  bottom. `cluster` is the run's first message id, so when the run grows a bubble the
+                  same key turns up at a new position and the face slides rather than jumps. */}
+              {row.showAvatar && (
+                <SenderAvatar name={message.sender} initials={message.senderInitials} src={message.senderPhoto}
+                  platform={platform} handoffKey={`${platform}:${row.cluster}`} />
+              )}
               {quote && (canJump ? (
                 // A button with no box of its own: the stub keeps every measured edge, and the whole
                 // quotation is the hit target, the way a quoted stub behaves natively. The copy inside

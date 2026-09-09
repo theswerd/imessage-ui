@@ -338,7 +338,9 @@ test("scenes render without an uncaught page error", async ({ page }, info) => {
     await openScene(page, info, scene, 0);
     await expect(page.getByTestId("device")).toBeVisible();
   }
-  await openScene(page, info, "outgoing", 1200);
+  // 1017 ms (f134) is where the recording moves "Delivered" onto the new bubble, and it is now the
+  // `outgoing` scenario's own duration.
+  await openScene(page, info, "outgoing", 1017);
   await expect(messageRow(page, "new-outgoing")).toContainText("Delivered");
   expect(pageErrors.get(page)).toEqual([]);
 });

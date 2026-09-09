@@ -3,6 +3,7 @@
 import type { ComponentProps, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/registry/imessage/avatar";
+import { GroupAvatar, groupAvatarMetrics } from "@/registry/imessage/group-avatar";
 
 /**
  * macOS 26 Messages conversation header. Measured from `references/macos/captures/conversation-pane-dark.png`
@@ -42,10 +43,17 @@ import { Avatar } from "@/registry/imessage/avatar";
  * judgement: the pill stops 8 short of the video button, whose 48 (right inset 8 plus width 40) is the
  * wider of the two ends, and the name truncates. That keeps the growth symmetric about the centre.
  *
- * **Groups** (`members`). A group's header draws the same stacked photo the sidebar row does, in the
- * same Ø40 box, and the pill carries the group's name. `groupPhotoRecipes` below is the same measured
- * table `macos-sidebar.tsx` carries, copied rather than imported the way the iOS chrome files each keep
- * their own copy of the avatar's numbers.
+ * **Groups** (`members`). A group's header draws `CKAvatarButton._avatarView` handed every
+ * participant, which is `ContactsUICore.SnowglobeUIView`'s stack of circles in the same Ø40 box, and
+ * the pill carries the group's name. That stack lives in `group-avatar.tsx`; this file used to carry
+ * its own copy of the table and no plate at all. The two copies were identical to 0.000 across all
+ * seven rows once both were expressed on the same 44-unit box, so nothing moved when they were
+ * merged — what the shared component adds is the `UIBlurEffect` plate behind the faces, which is
+ * measured (`groupAvatarPlate`) and which the private copy deliberately did not draw.
+ *
+ * The box is `-[CKUIBehaviorMac conversationListContactImageDiameter]` = 40 (Catalyst probe,
+ * ChatKit 26.5), which is `macHeaderMetrics.avatar.size` measured off the captures, so the framework
+ * and the capture agree and `groupAvatarMetrics.mac.conversationList` is used as the assertion.
  */
 export const macHeaderMetrics = {
   height: 55,
@@ -63,22 +71,6 @@ export const macHeaderMetrics = {
   /** Judgement, not measured: how much of each end the pill leaves for the buttons before it truncates. */
   maxWidthInset: 8 + 40 + 8,
 };
-
-/**
- * ChatKit's group photo. `CKAvatarButton._avatarView` is a `CNAvatarView` like the conversation list's,
- * and handed more than one contact it lays the circles out through `ContactsUICore.SnowglobeUIView`.
- * Each row is `[x, y, diameter]` on a 44-unit box, back to front, scaled by `size / 44`; see
- * `macos-sidebar.tsx` for how they were read off the framework and what is deliberately not drawn.
- */
-export const groupPhotoRecipes: readonly (readonly (readonly [number, number, number])[])[] = [
-  [[0, 0, 44]],
-  [[4.75, 4.75, 24], [23.75, 23.75, 14]],
-  [[5.25, 5.25, 21], [24.75, 17.75, 16], [12.5, 27.25, 13]],
-  [[5.25, 5.25, 21], [24.75, 17.75, 16], [12.5, 27.25, 13], [27, 6.75, 10]],
-  [[5.25, 5.25, 21], [24.75, 17.75, 16], [12.5, 27.25, 13], [27, 6.75, 10], [4.75, 25.5, 7]],
-  [[5.25, 5.25, 21], [24.75, 17.75, 16], [12.5, 27.25, 13], [27, 6.75, 10], [4.75, 25.5, 7], [23.25, 3.25, 5]],
-  [[5.25, 5.25, 21], [24.25, 20.25, 15], [27.25, 8.25, 11], [6.5, 26.75, 10], [19.25, 33.25, 7.5], [17.75, 26.75, 5.5], [24, 3.75, 5]],
-];
 
 export type MacHeaderMember = { initials: string; name?: string; photo?: string };
 
@@ -98,23 +90,6 @@ export type MacHeaderProps = Omit<ComponentProps<"header">, "children"> & {
   /** Clicking the name pill opens the conversation details. */
   onOpenDetails?: () => void;
 };
-
-function GroupPhoto({ size, members, name }: { size: number; members: MacHeaderMember[]; name: string }) {
-  const people = members.slice(0, groupPhotoRecipes.length);
-  const recipe = groupPhotoRecipes[people.length - 1] ?? groupPhotoRecipes[0];
-  const unit = size / 44;
-  return (
-    <span data-slot="group-photo" role="img" aria-label={name} className="relative block shrink-0" style={{ width: size, height: size }}>
-      {people.map((person, index) => {
-        const [x, y, diameter] = recipe[index];
-        return (
-          <Avatar key={index} aria-hidden="true" size={diameter * unit} initials={person.initials} src={person.photo} name={person.name}
-            className="absolute" style={{ left: x * unit, top: y * unit }} />
-        );
-      })}
-    </span>
-  );
-}
 
 const glassButton = "absolute block bg-[var(--hd-fill)] p-0 text-[var(--hd-ink)] shadow-[var(--hd-rim)] outline-offset-2 hover:bg-[var(--hd-fill-hover)] focus-visible:outline-2 focus-visible:outline-[#3478f6]";
 
@@ -170,7 +145,8 @@ export function MacHeader({ name, initials, photo, avatar, members, onCompose, o
         <div className="flex flex-col items-center">
           <span className="relative z-10 flex">
             {avatar ?? (group
-              ? <GroupPhoto size={m.avatar.size} members={group} name={name} />
+              ? <GroupAvatar size={groupAvatarMetrics.mac.conversationList} name={name}
+                  participants={group.map(person => ({ name: person.name, initials: person.initials, src: person.photo }))} />
               : <Avatar size={m.avatar.size} initials={fallbackInitials} src={photo} name={name} />)}
           </span>
           {/* The pill sizes to the name: its paddings, the gap and the chevron are fixed, so its width is

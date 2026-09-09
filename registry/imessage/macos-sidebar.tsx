@@ -1,8 +1,9 @@
 "use client";
 
-import type { ComponentProps, CSSProperties } from "react";
+import { useId, useState, type ComponentProps, type CSSProperties } from "react";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/registry/imessage/avatar";
+import { GroupAvatar, groupAvatarPlate } from "@/registry/imessage/group-avatar";
 
 /**
  * macOS 26 Messages conversation list. Every number is measured from a native 960×640 window at 2x
@@ -63,10 +64,27 @@ import { Avatar } from "@/registry/imessage/avatar";
  *   its label does not go white either, so the second term is NO here and the dot always takes
  *   `unreadIndicatorColor`. Give the tile that background and the white branch turns on with it.
  *
+ * **Search** (`onSearch`, `searchQuery`). Typing in the field replaces the list *in place*:
+ * `-[CKUIBehaviorMac searchControllerObscuresConversationList]` is **NO**, where the same selector on
+ * `CKUIBehaviorPhone` is **YES** — which is why iOS covers its whole screen (`ios-search.tsx`) and the
+ * Mac does not. The pinned strip goes with the list, a "Conversations" header takes its place, and
+ * the rows underneath are the sidebar's own measured 80.5 rows, unchanged. Every number in
+ * `macSidebarMetrics.results` is a Catalyst probe reading off `CKUIBehaviorMac` in ChatKit 26.5, with
+ * the Phone value beside it so the two idioms can be told apart; what is **not** measured is where the
+ * header sits horizontally (it takes the rows' own leading edge) and the "No Results" line, because no
+ * capture in `references/macos/captures` holds a search in progress. The kit's own strings are used
+ * verbatim: `SEARCH_CONVERSATIONS_TITLE` "Conversations" and `SEARCH_RESULTS_INDEXING_TITLE`
+ * "No Results".
+ *
  * **Group rows** (`members`). A group conversation's row draws the same `CKAvatarView` the one-to-one
  * row does (`CKConversationListStandardCell._avatarView`), handed every participant instead of one, and
  * `CNAvatarView` lays those out through `ContactsUICore.SnowglobeUIView` as a stack of circles inside
- * the same Ø40 box. See `groupPhotoRecipes` for the measured stack. The preview line is prefixed with
+ * the same Ø40 box — `group-avatar.tsx`'s `snowglobeStack`, which this file used to carry its own copy
+ * of. The two were identical to 0.000 across all seven rows on the same 44-unit box, so the merge moved
+ * nothing; what the shared component adds is the `UIBlurEffect` plate behind the faces. On a **selected**
+ * row that plate is not the generic translucent fill: the material lifts saturation over #3478f6 and a
+ * flat overlay cannot, missing by up to 14/255 in blue (light) and 22/255 (dark), so the measured row of
+ * `groupAvatarPlate` for that background is passed instead. The preview line is prefixed with
  * `sender`, in the same 12 pt type and the same gray as the rest of the preview: ChatKit does not
  * compose that prefix (`-[CKConversation previewText]` is the message's text alone, and the cell has
  * only a from-label and a summary label), so the wording is the caller's and only the metrics it has to
@@ -115,9 +133,39 @@ export type MacSidebarProps = Omit<ComponentProps<"nav">, "onSelect"> & {
   active?: boolean;
   /** Footer line, e.g. "Syncing with iCloud Paused". */
   footer?: string;
+  /**
+   * The search field's text. Controlled; leave it out and the field holds its own, so the field works
+   * with nothing wired. Either way a non-empty query replaces the list with the rows that match.
+   */
+  searchQuery?: string;
+  defaultSearchQuery?: string;
   onSearch?: (query: string) => void;
   onOptions?: () => void;
 };
+
+/** ChatKit's own strings, out of `ChatKit.loctable` (en). */
+export const macSidebarSearchStrings = {
+  /** `SEARCH_CONVERSATIONS_TITLE`. */
+  conversations: "Conversations",
+  /** `SEARCH_RESULTS_INDEXING_TITLE`. */
+  noResults: "No Results",
+  /** `SEARCH`. */
+  placeholder: "Search",
+} as const;
+
+/**
+ * Whether a conversation belongs in the results for `query`. Case- and diacritic-insensitive over the
+ * three strings the row already draws — the name, the group sender prefix and the preview — which is
+ * what a row can honestly claim to match on. It is **not** ChatKit's search: that indexes every
+ * message body through Spotlight and returns five more sections (Messages, Photos, Links, Documents,
+ * Locations), none of which this component holds the data for.
+ */
+export function conversationMatchesQuery(conversation: SidebarConversation, query: string): boolean {
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle) return true;
+  return [conversation.name, conversation.sender, conversation.preview]
+    .some(field => field?.toLocaleLowerCase().includes(needle));
+}
 
 export const macSidebarMetrics = {
   /** The column the window reserves. The panel itself is inset inside it. */
@@ -140,6 +188,23 @@ export const macSidebarMetrics = {
   footer: { height: 49, textTop: 17.75 },
   options: { centerX: 306, centerY: 25.85 },
   /**
+   * Search results, in place of the list. Read out of ChatKit 26.5 with a Catalyst probe that
+   * instantiates `CKUIBehaviorMac` directly (no idiom swizzle needed: the behaviour class *is* the
+   * idiom), with `CKUIBehaviorPhone` read in the same run for contrast.
+   */
+  results: {
+    /** `-[CKUIBehaviorMac searchHeaderHeight]` = 44 [Phone 44]. */
+    headerHeight: 44,
+    /** `-[CKUIBehaviorMac searchHeaderFont]` = SF Semibold 17, line 20.0215 [Phone SF Semibold 20]. */
+    headerFontSize: 17,
+    headerLineHeight: 20.0215,
+    /** `-[CKUIBehaviorMac searchConversationSectionInsets]` = {10, 0, 16, 0} [Phone {20, 0, 20, 0}]. */
+    sectionTop: 10,
+    sectionBottom: 16,
+    /** `-[CKUIBehaviorMac searchResultsTitleHeaderBottomPadding]` = 8 [Phone 12]. */
+    headerBottomPadding: 8,
+  },
+  /**
    * How long a separator takes to cross when the selection moves. **Unverified**: no capture holds a
    * switch. It is the same 140 ms `macos-messages-app.tsx` gives the travelling highlight
    * (`macTransitions.selection.duration`), copied rather than imported because that file imports this
@@ -150,62 +215,31 @@ export const macSidebarMetrics = {
 };
 
 /**
- * ChatKit's group photo, measured. A group row's avatar is the same `CKAvatarView` a one-to-one row
- * uses (`CKConversationListStandardCell._avatarView`), handed the conversation's participants through
- * `-[CNAvatarView setContacts:]` instead of one contact. `CNAvatarView` then builds a
- * `ContactsUICore.SnowglobeUIView` holding one `ContactsUICore.AvatarUIView` per person, and the
- * constraint layout it runs is what these numbers are: a probe that swizzles `-[UIDevice
- * userInterfaceIdiom]` to Mac, dlopens ChatKit, builds `CKAvatarView` over N fixture `CNMutableContact`s
- * and calls `layoutIfNeeded` reports each circle's frame.
- *
- * Each row is `[x, y, diameter]` on a **44-unit** box, back to front, and the layout is a pure ratio:
- * asking for 88 doubles every number exactly and asking for 40 divides them by 1.1 exactly, so a
- * circle's frame is its entry times `size / 44`. Every value lands on a quarter unit at 44, which is
- * what says 44 is the grid the recipes were authored on. **The same layout on both platforms**: the
- * probe run with the idiom left as Phone returns the same frames to the last digit, so this is also the
- * iOS group avatar. One contact is the plain full-box circle; two and three have their own recipes;
- * four, five and six add a slot to the three-person stack; seven re-lays the whole stack out, and an
- * eighth participant changes nothing, so seven is the cap.
- *
- * Not reproduced: `SnowglobeUIView` also puts a `UIVisualEffectView` (`UIBlurEffect material=20`) behind
- * the circles, filling the box. Nothing in `references/` shows a group row, so whether that plate is
- * visible against a sidebar row, and what it does over the blue selection, is unmeasured; this draws the
- * circles alone.
+ * The plate colour a group stack takes on this row. On an unselected row the component's own fitted
+ * translucent fill is right; on a selected one the measured row of `groupAvatarPlate` for #3478f6 is,
+ * because the material lifts saturation over the blue and a flat overlay cannot. An inactive window's
+ * selection is the neutral `--sb-inactive`, which nothing measured covers, so that keeps the fit.
  */
-export const groupPhotoRecipes: readonly (readonly (readonly [number, number, number])[])[] = [
-  [[0, 0, 44]],
-  [[4.75, 4.75, 24], [23.75, 23.75, 14]],
-  [[5.25, 5.25, 21], [24.75, 17.75, 16], [12.5, 27.25, 13]],
-  [[5.25, 5.25, 21], [24.75, 17.75, 16], [12.5, 27.25, 13], [27, 6.75, 10]],
-  [[5.25, 5.25, 21], [24.75, 17.75, 16], [12.5, 27.25, 13], [27, 6.75, 10], [4.75, 25.5, 7]],
-  [[5.25, 5.25, 21], [24.75, 17.75, 16], [12.5, 27.25, 13], [27, 6.75, 10], [4.75, 25.5, 7], [23.25, 3.25, 5]],
-  [[5.25, 5.25, 21], [24.25, 20.25, 15], [27.25, 8.25, 11], [6.5, 26.75, 10], [19.25, 33.25, 7.5], [17.75, 26.75, 5.5], [24, 3.75, 5]],
-];
-
-/** The stack, at any diameter. `macos-header.tsx` carries its own copy, the way the iOS chrome does. */
-export function GroupPhoto({ size, members, name, className, style, ...props }: Omit<ComponentProps<"span">, "children"> & { size: number; members: GroupMember[]; name?: string }) {
-  const people = members.slice(0, groupPhotoRecipes.length);
-  const recipe = groupPhotoRecipes[people.length - 1] ?? groupPhotoRecipes[0];
-  const unit = size / 44;
-  return (
-    <span
-      data-slot="group-photo"
-      role="img"
-      aria-label={name ?? people.map(person => person.name ?? person.initials).join(", ")}
-      className={cn("relative block shrink-0", className)}
-      style={{ width: size, height: size, ...style }}
-      {...props}
-    >
-      {people.map((person, index) => {
-        const [x, y, diameter] = recipe[index];
-        return (
-          <Avatar key={index} aria-hidden="true" size={diameter * unit} initials={person.initials} src={person.photo} name={person.name}
-            className="absolute" style={{ left: x * unit, top: y * unit }} />
-        );
-      })}
-    </span>
-  );
+/** `GroupMember` is this file's shape (`photo`); `GroupAvatar` takes the registry's (`src`). */
+function toParticipants(members: readonly GroupMember[]) {
+  return members.map(member => ({ name: member.name, initials: member.initials, src: member.photo }));
 }
+
+function groupPlateFor(selected: boolean, active: boolean): string | undefined {
+  if (!selected || !active) return undefined;
+  const measured = groupAvatarPlate.find(row => row.background === "#3478f6")!;
+  // One CSS custom property per appearance rather than a media query: the sidebar's dark palette is
+  // driven by the `dark` class, and `light-dark()` answers to `color-scheme`, not to that class.
+  return `var(--sb-group-plate-selected, ${measured.light})`;
+}
+
+/**
+ * ChatKit's group photo now lives in `group-avatar.tsx` as `snowglobeStack` / `GroupAvatar`. This file
+ * used to carry its own probe of the same `ContactsUICore.SnowglobeUIView` layout and its own
+ * `GroupPhoto`; converted to the shared 88-unit box the two tables agreed to 0.000 across all seven
+ * rows and all 28 circles, so the merge changed no geometry. The plate the private copy declined to
+ * draw is measured there, and `groupPlateFor` above supplies the one background it cannot fit.
+ */
 
 /** Sidebar list options: three centred bars, 16.5 / 12.5 / 9.5 wide, 1.25 thick, 4.1 apart. */
 function OptionsIcon() {
@@ -248,11 +282,23 @@ function unreadLabel(unread: boolean | number): string {
   return unread === 1 ? "1 unread message" : `${unread} unread messages`;
 }
 
-export function MacSidebar({ conversations, selectedId, onSelect, active = true, footer, onSearch, onOptions, className, style, ...props }: MacSidebarProps) {
+export function MacSidebar({ conversations, selectedId, onSelect, active = true, footer, searchQuery, defaultSearchQuery = "", onSearch, onOptions, className, style, ...props }: MacSidebarProps) {
   const m = macSidebarMetrics;
-  const pinned = conversations.filter(c => c.pinned);
-  const rows = conversations.filter(c => !c.pinned);
-  const listTop = pinned.length ? m.pinned.top + m.pinned.height : m.pinned.top;
+  const headerId = useId();
+  // The field owns its text unless the caller does, so it works with nothing wired — the same rule
+  // the app shell follows for every surface it can open on its own.
+  const [ownQuery, setOwnQuery] = useState(defaultSearchQuery);
+  const query = searchQuery ?? ownQuery;
+  const searching = query.trim().length > 0;
+  const matches = searching ? conversations.filter(c => conversationMatchesQuery(c, query)) : null;
+  // Results replace the list outright, pinned tiles included: on the Mac the search does not cover the
+  // window (`searchControllerObscuresConversationList` NO), it takes the list's place inside the panel.
+  const pinned = searching ? [] : conversations.filter(c => c.pinned);
+  const rows = matches ?? conversations.filter(c => !c.pinned);
+  const listTop = searching
+    ? m.pinned.top + m.results.sectionTop + m.results.headerHeight + m.results.headerBottomPadding
+    : pinned.length ? m.pinned.top + m.pinned.height : m.pinned.top;
+  const setQuery = (next: string) => { setOwnQuery(next); onSearch?.(next); };
   return (
     <nav
       data-slot="mac-sidebar"
@@ -260,9 +306,9 @@ export function MacSidebar({ conversations, selectedId, onSelect, active = true,
       aria-label="Conversations"
       className={cn(
         "mac-sidebar relative h-full select-none overflow-hidden bg-[#f8f8f8] text-black",
-        "[--sb-fill:#fafafa] [--sb-rim:#ffffff] [--sb-rim-inner:#fefefe] [--sb-inactive:#e2e2e2] [--sb-name:#000000] [--sb-secondary:#6e6e6d] [--sb-muted:#aeaeae] [--sb-glyph:#232323] [--sb-field:#eeeeee] [--sb-placeholder:#777777] [--sb-separator:#e1e1e1] [--sb-footer-line:#d0d2d7] [--sb-footer-top:#e4e6eb] [--sb-footer-bottom:#eff0f2] [--sb-footer-text:#000000] [--sb-unread:#0088ff]",
+        "[--sb-fill:#fafafa] [--sb-rim:#ffffff] [--sb-rim-inner:#fefefe] [--sb-inactive:#e2e2e2] [--sb-name:#000000] [--sb-secondary:#6e6e6d] [--sb-muted:#aeaeae] [--sb-glyph:#232323] [--sb-field:#eeeeee] [--sb-placeholder:#777777] [--sb-separator:#e1e1e1] [--sb-footer-line:#d0d2d7] [--sb-footer-top:#e4e6eb] [--sb-footer-bottom:#eff0f2] [--sb-footer-text:#000000] [--sb-unread:#0088ff] [--sb-group-plate-selected:#a2c7ff]",
         "dark:bg-[#1c1c1c] dark:text-[#f4f4f4]",
-        "dark:[--sb-fill:#1b1b1b] dark:[--sb-rim:#424242] dark:[--sb-rim-inner:#323232] dark:[--sb-inactive:#3a3a3a] dark:[--sb-name:#f4f4f4] dark:[--sb-secondary:#a4a4a4] dark:[--sb-muted:#5b5b5b] dark:[--sb-glyph:#dddddd] dark:[--sb-field:#1e1e1e] dark:[--sb-placeholder:#9a9a9a] dark:[--sb-separator:#3a3a3a] dark:[--sb-footer-line:#43454a] dark:[--sb-footer-top:#27292e] dark:[--sb-footer-bottom:#27272a] dark:[--sb-footer-text:#f5f5f5] dark:[--sb-unread:#0091ff]",
+        "dark:[--sb-fill:#1b1b1b] dark:[--sb-rim:#424242] dark:[--sb-rim-inner:#323232] dark:[--sb-inactive:#3a3a3a] dark:[--sb-name:#f4f4f4] dark:[--sb-secondary:#a4a4a4] dark:[--sb-muted:#5b5b5b] dark:[--sb-glyph:#dddddd] dark:[--sb-field:#1e1e1e] dark:[--sb-placeholder:#9a9a9a] dark:[--sb-separator:#3a3a3a] dark:[--sb-footer-line:#43454a] dark:[--sb-footer-top:#27292e] dark:[--sb-footer-bottom:#27272a] dark:[--sb-footer-text:#f5f5f5] dark:[--sb-unread:#0091ff] dark:[--sb-group-plate-selected:#264a8f]",
         className,
       )}
       style={{ width: m.width, fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif", ...style }}
@@ -301,10 +347,35 @@ export function MacSidebar({ conversations, selectedId, onSelect, active = true,
         style={{ left: m.search.left, top: m.search.top, width: m.search.width, height: m.search.height, borderRadius: m.search.height / 2 }}>
         <span aria-hidden="true" className="absolute" style={{ left: 32.5 - m.search.left, top: 63.5 - m.search.top }}><SearchIcon /></span>
         <span className="sr-only">Search conversations</span>
-        <input type="search" placeholder="Search" onChange={event => onSearch?.(event.target.value)}
+        <input type="search" placeholder={macSidebarSearchStrings.placeholder} value={query}
+          onChange={event => setQuery(event.target.value)}
+          // Escape empties a Mac search field before it does anything else, which is why it stops here
+          // rather than reaching the window's own Escape handling.
+          onKeyDown={event => { if (event.key === "Escape" && query) { event.preventDefault(); event.stopPropagation(); setQuery(""); } }}
           className="absolute bg-transparent text-[13px] leading-[16px] text-[var(--sb-name)] outline-none placeholder:font-medium placeholder:text-[var(--sb-placeholder)] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
           style={{ left: 53 - m.search.left, right: 8, top: 61.75 - m.search.top }} />
       </label>
+
+      {/* The results header. `searchHeaderHeight` and `searchHeaderFont` are the framework's; the
+          leading edge is the rows' own 18, which is a choice — no capture shows this state. */}
+      {searching && (
+        <h2 id={headerId} data-slot="sidebar-results-header"
+          className="absolute m-0 flex items-center font-semibold text-[var(--sb-name)]"
+          style={{ left: m.row.left, top: m.pinned.top + m.results.sectionTop, width: m.row.width,
+            height: m.results.headerHeight, fontSize: m.results.headerFontSize, lineHeight: `${m.results.headerLineHeight}px` }}>
+          {macSidebarSearchStrings.conversations}
+        </h2>
+      )}
+      {/* UNMEASURED: nothing in `references/macos/captures` holds an empty result set, so this line
+          borrows the header's own type and centres it in the space the rows would have taken. */}
+      {searching && rows.length === 0 && (
+        <p data-slot="sidebar-no-results" role="status"
+          className="absolute m-0 text-center font-semibold text-[var(--sb-secondary)]"
+          style={{ left: m.row.left, top: listTop + m.results.sectionBottom, width: m.row.width,
+            fontSize: m.results.headerFontSize, lineHeight: `${m.results.headerLineHeight}px` }}>
+          {macSidebarSearchStrings.noResults}
+        </p>
+      )}
 
       {pinned.length > 0 && (
         <ul data-slot="sidebar-pinned" aria-label="Pinned" className="absolute flex list-none justify-center gap-[24px] p-0"
@@ -318,7 +389,7 @@ export function MacSidebar({ conversations, selectedId, onSelect, active = true,
                   style={{ paddingTop: m.pinned.avatarCenterY - m.pinned.top - m.pinned.avatar / 2 }}>
                   {c.unread ? <span className="sr-only">{unreadLabel(c.unread)}. </span> : null}
                   {c.members && c.members.length > 1
-                    ? <GroupPhoto size={m.pinned.avatar} members={c.members} name={c.name}
+                    ? <GroupAvatar size={m.pinned.avatar} name={c.name} participants={toParticipants(c.members)}
                         style={selected ? { boxShadow: `0 0 0 2px ${active ? "#3478f6" : "#9a9a9a"}`, borderRadius: "50%" } : undefined} />
                     : <Avatar size={m.pinned.avatar} initials={c.initials} src={c.photo} name={c.name}
                         style={selected ? { boxShadow: `0 0 0 2px ${active ? "#3478f6" : "#9a9a9a"}` } : undefined} />}
@@ -338,7 +409,7 @@ export function MacSidebar({ conversations, selectedId, onSelect, active = true,
         </ul>
       )}
 
-      <ul data-slot="sidebar-rows" role="list" className="absolute m-0 list-none p-0" style={{ left: m.row.left, top: listTop, width: m.row.width }}>
+      <ul data-slot="sidebar-rows" role="list" aria-labelledby={searching ? headerId : undefined} className="absolute m-0 list-none p-0" style={{ left: m.row.left, top: listTop, width: m.row.width }}>
         {rows.map((c, index) => {
           const selected = c.id === selectedId;
           const nextSelected = rows[index + 1]?.id === selectedId;
@@ -360,7 +431,8 @@ export function MacSidebar({ conversations, selectedId, onSelect, active = true,
                   </>
                 ) : null}
                 {c.members && c.members.length > 1
-                  ? <GroupPhoto size={m.row.avatar} members={c.members} name={c.name} className="absolute" style={{ left: m.row.avatarLeft, top: (m.row.height - m.row.avatar) / 2 }} />
+                  ? <GroupAvatar size={m.row.avatar} name={c.name} participants={toParticipants(c.members)} plate={groupPlateFor(selected, active)}
+                      className="absolute" style={{ left: m.row.avatarLeft, top: (m.row.height - m.row.avatar) / 2 }} />
                   : <Avatar size={m.row.avatar} initials={c.initials} src={c.photo} name={c.name} className="absolute" style={{ left: m.row.avatarLeft, top: (m.row.height - m.row.avatar) / 2 }} />}
                 <span className="absolute flex items-baseline justify-between gap-2" style={{ left: m.row.textLeft, right: m.row.textRight, top: m.row.nameTop }}>
                   <span data-slot="row-name" className="truncate text-[13px] font-semibold leading-[16px]" style={{ color: highlighted ? "#ffffff" : "var(--sb-name)" }}>{c.name}</span>

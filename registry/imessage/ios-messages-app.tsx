@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { cn } from "@/lib/utils";
 import { PlatformProvider } from "@/registry/imessage/platform";
 import { PaletteStyle } from "@/registry/imessage/palette";
@@ -22,6 +22,17 @@ import { MessageActions, type Rect } from "@/registry/imessage/message-actions";
 import { useArrivalAnimation, type ArrivalAnimation } from "@/registry/imessage/message-motion";
 import { IosEffectsPicker, type EffectsPickerSelection } from "@/registry/imessage/ios-effects-picker";
 import type { TapbackSelection } from "@/registry/imessage/tapback-bar";
+import { ImageViewer, type ImageViewerRect } from "@/registry/imessage/image-viewer";
+import { IosPlusMenu, defaultPlusMenuItems, type PlusMenuItem } from "@/registry/imessage/ios-plus-menu";
+import { PhotoPicker, PhotoPickerAttachments, photoPickerChipMetrics, photoPickerSamples, type PhotoPickerDetent, type PhotoPickerPhoto } from "@/registry/imessage/photo-picker";
+import { StickerPicker, stickerPickerMetrics, type Sticker, type StickerPlacement } from "@/registry/imessage/sticker-picker";
+import { AudioRecorder, audioRecorderMetrics, type AudioRecorderState, type AudioTake } from "@/registry/imessage/audio-recorder";
+import { IosDetails, type IosDetailsItem, type IosDetailsPhoto, type IosDetailsSection } from "@/registry/imessage/ios-details";
+import { GroupDetails } from "@/registry/imessage/group-details";
+import { TapbackDetailsPlatter, tapbackDetailsPlatterMetrics, type TapbackReactor } from "@/registry/imessage/tapback-details";
+import { IosSearch, type IosSearchResult, type IosSearchSection, type IosSearchSectionKind } from "@/registry/imessage/ios-search";
+import { GroupAvatar, groupAvatarMetrics, type GroupParticipant } from "@/registry/imessage/group-avatar";
+import type { SystemMessageEvent } from "@/registry/imessage/system-message";
 
 /**
  * `listTop` puts the first date header's ink at y 172.67 (conv3-light.png). `listBottom` is the composer's
@@ -82,11 +93,17 @@ export type IosMessagesAppProps = {
   conversations?: IosConversation[];
   contact: { name: string; initials?: string };
   group?: boolean;
+  /**
+   * The people in the conversation, when it is a group. Two or more of them turn the nav bar's Ø60
+   * slot into `group-avatar.tsx`'s Snowglobe stack — which is also the shape the details screen's
+   * entrance morphs out of — and mark the conversation as a group without a separate `group` flag.
+   */
+  participants?: readonly GroupParticipant[];
   messages: Message[];
   typing?: boolean | { sender?: string };
   /** Reference time for "Today"/"Yesterday". */
   now?: Date | number;
-  composer?: { value?: string; placeholder?: string; disabled?: boolean; onChange?: (value: string) => void; onSend?: (text: string) => void | Promise<void>; onAttach?: () => void };
+  composer?: { value?: string; placeholder?: string; disabled?: boolean; onChange?: (value: string) => void; onSend?: (text: string) => void | Promise<void>; onAttach?: () => void; onMic?: () => void };
   /**
    * Scrub a screen change instead of playing it: the app is on `screen`, arriving from `from`, and
    * `progress` (0..1) seeks the push, the pop or the sheet. Leave it out and the app runs the
@@ -134,7 +151,108 @@ export type IosMessagesAppProps = {
   onEffectSelect?: (selection: EffectsPickerSelection) => void;
   onSendWithEffect?: (text: string, selection: EffectsPickerSelection) => void;
   onEffectsPickerClose?: () => void;
-  /** Extra overlays (details screen, plus menu, selection toolbar) rendered above everything. */
+  /*
+   * ------------------------------------------------------------------------------------------
+   * The presented surfaces: the plus menu, the Photos picker, the sticker sheet, the voice
+   * recorder, the details screen, the Tapback Details platter, the photo viewer and search.
+   *
+   * Every one of them follows the same two-mode contract, and it is the contract that lets one
+   * component be both an application and a harness fixture:
+   *
+   *   - **Left out entirely** (`undefined`), the shell owns the surface. The gesture that opens it
+   *     natively opens it here: the composer's `+`, its mic, the nav bar's name pill, a tap on a
+   *     photo, a tap on a tapback balloon, the list's search field. Nothing has to be wired for the
+   *     app to behave like Messages.
+   *   - **Passed** (a value or `null`), the caller owns it, and `progress` (0..1) seeks the
+   *     surface's own entrance instead of playing it. A scrubbed checkpoint is then a pure function
+   *     of its props, which is what makes two runs render the same frame.
+   *
+   * Each one stays mounted after its prop clears so its exit has frames to run in, and each is
+   * derived during render rather than in an effect — see the long-press overlay above for why.
+   * ------------------------------------------------------------------------------------------
+   */
+  /** The `+` menu over the composer. */
+  plusMenu?: { progress?: number } | null;
+  /** A row of the plus menu was chosen. "photos", "stickers" and "audio" open their own surfaces. */
+  onPlusMenuSelect?: (id: string) => void;
+  onPlusMenuClose?: () => void;
+  /** Replaces the seven rows of the plus menu. Handlers on a row run before the shell's own. */
+  plusMenuItems?: PlusMenuItem[];
+  /**
+   * The full-screen photo viewer, on the photos of `id` and showing `index`. `dismiss` holds the
+   * drag-to-dismiss pose without a synthesised drag; `chrome` states the bar visibility.
+   */
+  photoViewer?: { id: string; index: number; progress?: number; chrome?: boolean; dismiss?: number } | null;
+  onOpenPhoto?: (id: string, index: number) => void;
+  onPhotoIndexChange?: (index: number) => void;
+  onClosePhoto?: () => void;
+  onSharePhoto?: (id: string, index: number) => void;
+  onSavePhoto?: (id: string, index: number) => void;
+  /** The Photos picker under the composer, which the plus menu's "Photos" row opens. */
+  photoPicker?: { selected?: string[]; detent?: PhotoPickerDetent; progress?: number } | null;
+  /** What the picker shows. Defaults to the registry's own gradient placeholders. */
+  photos?: PhotoPickerPhoto[];
+  onPhotoPickerSelectionChange?: (selected: string[]) => void;
+  onPhotoPickerDetentChange?: (detent: PhotoPickerDetent) => void;
+  onPhotoPickerClose?: () => void;
+  /** The sticker sheet, which the plus menu's "Stickers" row opens. */
+  stickerPicker?: { tab?: string; progress?: number; drag?: { id: string; to: { x: number; y: number }; progress: number } } | null;
+  onStickerPickerTab?: (tabId: string) => void;
+  onStickerPickerClose?: () => void;
+  onStickerSelect?: (sticker: Sticker) => void;
+  /** A sticker let go over the transcript. `placement.size` is ChatKit's landed 48. */
+  onStickerPlace?: (sticker: Sticker, placement: StickerPlacement) => void;
+  onStickerEdit?: () => void;
+  /** The voice recorder in place of the composer, which the composer's mic opens. */
+  audioRecorder?: { state: AudioRecorderState; position?: number; progress?: number; transition?: { from: AudioRecorderState; progress: number }; levels?: number[]; duration?: number } | null;
+  onAudioRecorderClose?: () => void;
+  /** A finished take was sent. `audioTakeToPeaks(take.levels)` is what `MessageAudio` draws. */
+  onAudioSend?: (take: AudioTake) => void;
+  /**
+   * The details screen the nav bar's name pill pushes: `IosDetails` for one person, `GroupDetails`
+   * for a group. `progress` seeks the presentation, `scroll` (points) the header collapse.
+   */
+  details?: { progress?: number; scroll?: number } | null;
+  onCloseDetails?: () => void;
+  /** What that screen shows beyond the name and the participants. */
+  detailsContent?: {
+    phoneLabel?: string;
+    phone?: string;
+    tag?: string;
+    hideAlerts?: boolean;
+    onHideAlertsChange?: (next: boolean) => void;
+    photos?: IosDetailsSection<IosDetailsPhoto>;
+    sharedLinks?: IosDetailsSection<IosDetailsItem>;
+    attachments?: IosDetailsSection<IosDetailsItem>;
+    onAddContact?: () => void;
+    onLeave?: () => void;
+    onBlock?: () => void;
+  };
+  /** The group's name was committed from the details screen. */
+  onGroupNameChange?: (name: string) => void;
+  /**
+   * A group edit the caller should answer by appending a status line. The screen itself never
+   * appends anything: this shell does not own `messages`.
+   */
+  onGroupEvent?: (event: SystemMessageEvent) => void;
+  /** The Tapback Details platter: who reacted to `id`. */
+  tapbackDetails?: { id: string; progress?: number; filter?: string | null } | null;
+  onOpenTapbackDetails?: (id: string) => void;
+  onCloseTapbackDetails?: () => void;
+  onRemoveTapback?: (id: string, reactor: TapbackReactor) => void;
+  /**
+   * Search over the conversation list. `closing` runs the measured close table rather than the open
+   * one played backwards — the two are different animations and the recordings disprove reversing.
+   */
+  search?: { query?: string; sections?: IosSearchSection[]; progress?: number; closing?: boolean } | null;
+  onOpenSearch?: () => void;
+  onCloseSearch?: () => void;
+  onSearchQueryChange?: (query: string) => void;
+  onSearchSelect?: (result: IosSearchResult, kind: IosSearchSectionKind) => void;
+  onSearchSeeAll?: (kind: IosSearchSectionKind) => void;
+  /** A status line arriving in the transcript, its entrance seeked by `progress`. */
+  systemArrival?: { id: string; progress?: number } | null;
+  /** Extra overlays (a call card, a screen effect, a selection toolbar) rendered above everything. */
   overlay?: ReactNode;
   /** Render reactions for a message; defaults to the message's `reactions` as Tapback balloons. */
   renderReactions?: (message: Message) => ReactNode;
@@ -196,17 +314,165 @@ const messageBodyHiddenSlots = ["bubble-frame", "emoji", "message-images", "link
 const insideQuotedStub = (element: HTMLElement) => Boolean(element.closest("[data-stub]"));
 
 /**
- * The whole iOS 26 Messages app in a 402×874 frame: status bar, the conversation list, the conversation
- * screen (nav bar, message log, composer), the New Message sheet, and the long-press overlay.
- * Data and navigation stay with the caller; this component only draws state.
+ * Where the composer sits while the Photos picker is up, measured rather than derived: at this top
+ * the composer's painted white ends on device row 1391 in the render and on device row 1391 in
+ * `references/ios/captures/photo-picker-light.png`, which is `photoPickerMetrics.composer.fieldBottom`
+ * = 463.6667 pt, leaving the measured `photoPickerMetrics.composer.gap` of backdrop above the panel's
+ * own 485. The composer keeps its `+`, its placeholder and its mic; the picker is not the plus menu.
+ */
+const photoPickerComposerTop = 424;
+
+/** The value a surface with no state of its own takes while it is open. One object, so it is stable. */
+const openMarker: { progress?: number; scroll?: number } = {};
+
+/** `CSS.escape` is browser-only and this file renders on the server too. */
+function cssEscape(value: string): string {
+  return typeof CSS !== "undefined" && CSS.escape ? CSS.escape(value) : value.replace(/["\\]/g, "\\$&");
+}
+
+/**
+ * Keeps a presented surface mounted while it plays its exit, and reports when the exit is over.
+ *
+ * `key` is what identifies the thing on screen; when it clears, the last value stays mounted with
+ * `open: false` until the surface calls `exited`. Derived during render, never in an effect: an
+ * effect leaves one committed frame with the surface already unmounted and the exit never runs.
+ * That is the same rule the long-press overlay, the effects screen and the thread overlay follow,
+ * written once so eight more surfaces do not each repeat it.
+ */
+function useExit(key: string | null) {
+  const [seen, setSeen] = useState<string | null>(key);
+  const [leaving, setLeaving] = useState<string | null>(null);
+  if (seen !== key) {
+    setSeen(key);
+    setLeaving(key === null ? seen : null);
+  }
+  const exited = useCallback(() => setLeaving(null), []);
+  // `mounted` is the key of whatever is on screen, open or leaving; `open` is whether it is staying.
+  // A surface that is leaving draws with its state already gone, which is the same thing the effects
+  // screen and the thread overlay above do, and is why their props are all read with `?.`.
+  return { open: key !== null, mounted: key ?? leaving, exited };
+}
+
+/**
+ * Where each of a message's photo tiles sits inside the device frame, in the frame's own
+ * coordinates. Read out of the DOM rather than carried in the open event: only the log knows where
+ * a tile ended up after wrapping and scrolling, and a rect captured at open time is stale the
+ * moment the log moves under it. `rectForIndex` is what stops the fourth photo flying back into the
+ * first photo's thumbnail; a tile that is not in the DOM (past `MAX_TILES`) has no rect, and the
+ * viewer fades for it, which is what native does for an off-screen item.
+ */
+function useTileRects(frame: RefObject<HTMLDivElement | null>, messageId: string | null) {
+  const [measured, setMeasured] = useState<{ id: string; rects: ImageViewerRect[] } | null>(null);
+  useLayoutEffect(() => {
+    if (!messageId) return;
+    const measure = () => {
+      const next = readTileRects(frame.current, messageId);
+      if (next) setMeasured(current => (current?.id === messageId && sameRects(current.rects, next) ? current : { id: messageId, rects: next }));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    const root = frame.current;
+    if (root) observer.observe(root);
+    return () => observer.disconnect();
+  }, [frame, messageId]);
+  // The setter is handed back so the tap that opens the viewer can seed it in the same event, before
+  // the state that mounts the viewer commits: without that seed the viewer's first frame has no
+  // source rect and it opens on the fade path instead of growing out of the tile that was tapped.
+  return [measured?.id === messageId ? measured.rects : [], setMeasured] as const;
+}
+
+/** Every photo tile of one message, in the frame's own coordinates. Null when the row is not drawn. */
+function readTileRects(root: HTMLElement | null, id: string): ImageViewerRect[] | null {
+  const row = root?.querySelector<HTMLElement>(`[data-message-id="${cssEscape(id)}"]`);
+  if (!root || !row) return null;
+  const host = root.getBoundingClientRect();
+  return Array.from(row.querySelectorAll<HTMLElement>('[data-slot="photo-tile"]')).map(tile => {
+    const box = tile.getBoundingClientRect();
+    return { x: box.left - host.left, y: box.top - host.top, width: box.width, height: box.height };
+  });
+}
+
+function sameRects(a: ImageViewerRect[], b: ImageViewerRect[]): boolean {
+  return a.length === b.length && a.every((rect, index) =>
+    Math.abs(rect.x - b[index].x) < 0.5 && Math.abs(rect.y - b[index].y) < 0.5 &&
+    Math.abs(rect.width - b[index].width) < 0.5 && Math.abs(rect.height - b[index].height) < 0.5);
+}
+
+/** The top edge of one element inside the frame, in the frame's own coordinates. */
+function useFrameTop(frame: RefObject<HTMLDivElement | null>, selector: string | null | false) {
+  const [top, setTop] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    if (!selector) { return; }
+    const measure = () => {
+      const root = frame.current;
+      const target = root?.querySelector<HTMLElement>(selector);
+      if (!root || !target) return;
+      const next = target.getBoundingClientRect().top - root.getBoundingClientRect().top;
+      setTop(current => (current !== null && Math.abs(current - next) < 0.5 ? current : next));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    const root = frame.current;
+    if (root) observer.observe(root);
+    return () => observer.disconnect();
+  }, [frame, selector]);
+  return selector ? top : null;
+}
+
+/** Your own reaction on a message, in the shape both the tapback bar and the viewer take. */
+function ownReactionOf(message: Message | undefined): TapbackSelection | null {
+  const mine = message?.reactions?.find(reaction => reaction.byMe);
+  if (!mine) return null;
+  return mine.emoji ? { emoji: mine.emoji } : { type: mine.type as TapbackType };
+}
+
+/**
+ * Who reacted to a message, as the Tapback Details platter wants them. A reaction that names nobody
+ * is yours or the person you are talking to, which is the only pair a one-to-one conversation has;
+ * a group names its own people through `MessageReaction.by`.
+ */
+function reactorsOf(message: Message | undefined, contactName: string): TapbackReactor[] {
+  if (!message?.reactions?.length) return [];
+  return message.reactions.map((reaction, index) => ({
+    id: `${message.id}-r${index}`,
+    name: reaction.by ?? (reaction.byMe ?? true ? "You" : contactName),
+    initials: reaction.byInitials,
+    reaction: reaction.emoji ? undefined : (reaction.type as TapbackType),
+    emoji: reaction.emoji,
+    own: reaction.byMe ?? true,
+  }));
+}
+
+/**
+ * The whole iOS 26 Messages app in a 402×874 frame: status bar, the conversation list, the
+ * conversation screen (nav bar, message log, composer), the New Message sheet, and every surface
+ * those reach — the long-press overlay, the effects screen, a reply thread, the `+` menu and the
+ * Photos picker, sticker sheet and voice recorder it opens, the details screen (`GroupDetails` for
+ * a group, `IosDetails` for one person), the Tapback Details platter, search over the list, and the
+ * full-screen photo viewer.
+ *
+ * Data stays with the caller: this component still only draws state, and it appends nothing to
+ * `messages`. What it does own is *presentation*. Every one of those surfaces is either stated by a
+ * prop — with `progress` to seek its entrance instead of playing it, which is what a harness needs —
+ * or, with that prop left out, held by the shell, so the gesture that opens it natively opens it
+ * here with nothing wired. See the block of surface props on `IosMessagesAppProps` for the contract.
  */
 export function IosMessagesApp({
-  width = iosScreen.width, height = iosScreen.height, time = "9:41", screen = "conversation", conversations = [], contact, group = false,
+  width = iosScreen.width, height = iosScreen.height, time = "9:41", screen = "conversation", conversations = [], contact, group = false, participants,
   messages, typing = false, now, composer, screenTransition, onBack, onSelectConversation, onCompose, onCloseNewMessage, onDetails,
   thread, onOpenThread, onCloseThread,
   sendAnimation, receiveAnimation, onSendAnimationEnd,
   longPress, onLongPress, onLongPressClose, onTapback, onMenuAction,
   effectsPicker, onEffectsPickerOpen, onEffectsTabChange, onEffectSelect, onSendWithEffect, onEffectsPickerClose,
+  plusMenu, onPlusMenuSelect, onPlusMenuClose, plusMenuItems = defaultPlusMenuItems,
+  photoViewer, onOpenPhoto, onPhotoIndexChange, onClosePhoto, onSharePhoto, onSavePhoto,
+  photoPicker, photos, onPhotoPickerSelectionChange, onPhotoPickerDetentChange, onPhotoPickerClose,
+  stickerPicker, onStickerPickerTab, onStickerPickerClose, onStickerSelect, onStickerPlace, onStickerEdit,
+  audioRecorder, onAudioRecorderClose, onAudioSend,
+  details, onCloseDetails, detailsContent, onGroupNameChange, onGroupEvent,
+  tapbackDetails, onOpenTapbackDetails, onCloseTapbackDetails, onRemoveTapback,
+  search, onOpenSearch, onCloseSearch, onSearchQueryChange, onSearchSelect, onSearchSeeAll,
+  systemArrival,
   overlay, renderReactions = defaultReactions, className, style, frameRef,
 }: IosMessagesAppProps) {
   const localFrame = useRef<HTMLDivElement>(null);
@@ -388,6 +654,132 @@ export function IosMessagesApp({
   }, [pressedId, frame, messages]);
   const pressedBody = pressedRect && pressedRect.id === overlayId ? pressedRect : null;
 
+  // ---------------------------------------------------------------------------------------------
+  // The presented surfaces. Each resolves to `the prop, if it was passed, otherwise the shell's own
+  // state`, so leaving a prop out does not disable the surface — it hands it to the shell, and the
+  // gesture that opens it natively opens it here. `useExit` keeps each one mounted for its exit.
+  // ---------------------------------------------------------------------------------------------
+  const isGroup = group || (participants?.length ?? 0) > 1;
+  // The Ø60 slot the details screen's entrance morphs out of, so a group grows out of its own faces.
+  const navAvatar = participants && participants.length > 1
+    ? <GroupAvatar participants={participants} size={groupAvatarMetrics.phone.groupAvatar} name={contact.name} />
+    : undefined;
+
+  const [ownPlusMenu, setOwnPlusMenu] = useState(false);
+  const plusValue = plusMenu === undefined ? (ownPlusMenu ? openMarker : null) : plusMenu;
+  const plusLatch = useExit(plusValue ? "open" : null);
+
+  const [ownViewer, setOwnViewer] = useState<NonNullable<IosMessagesAppProps["photoViewer"]> | null>(null);
+  const viewerValue = photoViewer === undefined ? ownViewer : photoViewer;
+  const viewerLatch = useExit(viewerValue?.id ?? null);
+  const viewerId = viewerLatch.mounted;
+  // The photo that is showing, held by the shell whether or not the caller controls the viewer, so
+  // the exit lands on the tile of the photo the reader paged to rather than the one it opened on.
+  const [viewerIndex, setViewerIndex] = useState(0);
+  const shownIndex = viewerValue?.index ?? viewerIndex;
+  const viewerMessage = viewerId ? messages.find(message => message.id === viewerId) : undefined;
+  const [viewerRects, seedTileRects] = useTileRects(frame, viewerId);
+
+  const [ownPhotoPicker, setOwnPhotoPicker] = useState<NonNullable<IosMessagesAppProps["photoPicker"]> | null>(null);
+  const photoPickerValue = photoPicker === undefined ? ownPhotoPicker : photoPicker;
+  const photoPickerLatch = useExit(photoPickerValue ? "open" : null);
+  const pickerPhotos = photos ?? photoPickerSamples;
+  const picked = photoPickerValue?.selected ?? [];
+
+  const [ownSticker, setOwnSticker] = useState<NonNullable<IosMessagesAppProps["stickerPicker"]> | null>(null);
+  const stickerValue = stickerPicker === undefined ? ownSticker : stickerPicker;
+  const stickerLatch = useExit(stickerValue ? "open" : null);
+  // Where a dropped sticker landed, when nothing above this shell is keeping them. `onPlace` hands
+  // over the settled pose, so drawing it here takes over from the ghost with no jump.
+  const [placed, setPlaced] = useState<Array<{ key: string; sticker: Sticker; placement: StickerPlacement }>>([]);
+
+  const [ownRecorder, setOwnRecorder] = useState<{ state: AudioRecorderState; take?: AudioTake } | null>(null);
+  const recorderValue: NonNullable<IosMessagesAppProps["audioRecorder"]> | null = audioRecorder === undefined
+    ? (ownRecorder ? { state: ownRecorder.state, levels: ownRecorder.take?.levels, duration: ownRecorder.take?.duration } : null)
+    : audioRecorder;
+  const recorderLatch = useExit(recorderValue ? "open" : null);
+
+  const [ownDetails, setOwnDetails] = useState(false);
+  const detailsValue = details === undefined ? (ownDetails ? openMarker : null) : details;
+  const detailsLatch = useExit(detailsValue ? "open" : null);
+
+  const [ownTapbackDetails, setOwnTapbackDetails] = useState<string | null>(null);
+  const tapbackDetailsValue = tapbackDetails === undefined ? (ownTapbackDetails ? { id: ownTapbackDetails } : null) : tapbackDetails;
+  const tapbackDetailsLatch = useExit(tapbackDetailsValue?.id ?? null);
+  const reactedId = tapbackDetailsLatch.mounted;
+  const reactedMessage = reactedId ? messages.find(message => message.id === reactedId) : undefined;
+  const reactors = useMemo(() => reactorsOf(reactedMessage, contact.name), [reactedMessage, contact.name]);
+  // ChatKit's `votingViewTargetFrame`: y = max(minPadding, the tapback's own frame origin). The
+  // balloon is the thing the platter is about, so its own top is what anchors it.
+  const platterTop = useFrameTop(frame, reactedId && `[data-message-id="${cssEscape(reactedId)}"] [data-slot="tapback"]`);
+
+  const [ownSearch, setOwnSearch] = useState<NonNullable<IosMessagesAppProps["search"]> | null>(null);
+  const searchValue = search === undefined ? ownSearch : search;
+  const searchLatch = useExit(searchValue ? "open" : null);
+  const searchShown = searchLatch.mounted !== null && showList;
+  const searchListLayer = useRef<HTMLDivElement>(null);
+
+  const closePlusMenu = () => { setOwnPlusMenu(false); onPlusMenuClose?.(); };
+  const openPhoto = (id: string, index: number) => {
+    // Read the tiles in the same event that mounts the viewer, so its very first frame already has
+    // the box it grows out of; both writes batch into one commit.
+    const rects = readTileRects(frame.current, id);
+    if (rects) seedTileRects({ id, rects });
+    setViewerIndex(index);
+    setOwnViewer({ id, index });
+    onOpenPhoto?.(id, index);
+  };
+  const openTapbackDetails = (id: string) => { setOwnTapbackDetails(id); onOpenTapbackDetails?.(id); };
+  const changePhotoSelection = (next: string[]) => {
+    setOwnPhotoPicker(current => (current ? { ...current, selected: next } : current));
+    onPhotoPickerSelectionChange?.(next);
+  };
+  /**
+   * A row of the plus menu. The three that have a surface in this registry open it; the rest only
+   * report, because there is nothing measured to open. The menu folds back into the `+` either way,
+   * which is what it does natively once a row has been chosen.
+   */
+  const selectPlusItem = (id: string) => {
+    closePlusMenu();
+    if (id === "photos") setOwnPhotoPicker({ selected: [], detent: "collapsed" });
+    if (id === "stickers") setOwnSticker({});
+    if (id === "audio") setOwnRecorder({ state: "recording" });
+    onPlusMenuSelect?.(id);
+  };
+  const menuItems = plusMenuItems.map(item => ({ ...item, onSelect: () => { item.onSelect?.(); selectPlusItem(item.id); } }));
+
+  const recorderUp = recorderLatch.mounted !== null;
+  const pickerUp = photoPickerLatch.mounted !== null;
+  /**
+   * The composer's own band is 68 tall and the recorder's root is
+   * `composer.bottom + rowHeight` = 80, so the log gives up another 12 while a take is being made.
+   *
+   * The picker's number is a derivation, not a reading: the composer's measured top plus the 28 the
+   * band already keeps clear. Nothing in `references/` shows the transcript with the picker up, so
+   * how far the log is really pushed is UNMEASURED.
+   */
+  const listBottom = recorderUp
+    ? iosScreen.listBottom + (audioRecorderMetrics.ios.composer.bottom + audioRecorderMetrics.ios.rowHeight - iosScreen.composer)
+    : pickerUp
+      ? iosScreen.height - photoPickerComposerTop + (iosScreen.listBottom - iosScreen.composer)
+      : iosScreen.listBottom;
+
+  /**
+   * The conversation drawn again for the details screen to blur and push back. A second copy rather
+   * than the layer itself because the screen owns that filter and its scale; it is `inert`, so the
+   * duplicate carries no tab stops, and it comes after the live layer in the document, so every
+   * `[data-message-id]` lookup in this file still finds the real row first.
+   */
+  const detailsBackdrop = () => (
+    <div inert className="absolute inset-0" style={{ background: "var(--im-bg)" }}>
+      <MessageList messages={messages} typing={typing} group={isGroup} now={now} anchor="top"
+        insetTop={iosScreen.listTop} insetBottom={iosScreen.listBottom} renderReactions={renderReactions}
+        className="absolute inset-0" />
+      <IosNavBar name={contact.name} initials={contact.initials} avatar={navAvatar} className="absolute left-0" style={{ top: iosScreen.statusBar }} />
+      <IosComposer className="absolute bottom-0 left-0" value={composer?.value} placeholder={composer?.placeholder} disabled />
+    </div>
+  );
+
   return (
     <PlatformProvider platform="ios">
       <PaletteStyle platform="ios" />
@@ -399,19 +791,122 @@ export function IosMessagesApp({
             which would move text by a fraction of a point against the captures. */}
         {showList && (
           <div ref={listLayer} data-slot="screen-list" className="absolute inset-0" style={{ pointerEvents: screen === "conversation" ? "none" : undefined }}>
-            <IosConversationList conversations={conversations} onSelect={onSelectConversation} onCompose={onCompose} topInset={iosScreen.statusBar} className="absolute inset-0" />
+            {/* The layer search rises and falls: the list itself, without its bottom bar, because
+                `IosSearch` draws that bar. Leaving both would paint the glass fill and its
+                `0 6px 36px spread 4` shadow twice, which measures 1.04% against `list-light.png`
+                with a -2.24 uniform darkening; hidden, the same band diffs 0.02%. */}
+            <div ref={searchListLayer} className="absolute inset-0">
+              <IosConversationList conversations={conversations} onSelect={onSelectConversation} onCompose={onCompose}
+                onSearch={() => { setOwnSearch({ query: "" }); onOpenSearch?.(); }}
+                topInset={iosScreen.statusBar} className={cn("absolute inset-0", searchShown && "[&_[data-slot=bottom-bar]]:hidden")} />
+            </div>
             {(kind === "push" || kind === "pop") && <div ref={screenDim} aria-hidden="true" data-slot="screen-dim" className="pointer-events-none absolute inset-0" style={{ background: "#000000", opacity: 0 }} />}
           </div>
         )}
+        {/* Search is an overlay on the list, not a fifth screen: the list stays mounted underneath
+            and the two measured tables move it. `closing` picks the close table rather than playing
+            the open one backwards — the recordings show they are different animations. */}
+        {searchShown && (
+          <IosSearch
+            query={searchValue?.query}
+            onQueryChange={query => { setOwnSearch({ query }); onSearchQueryChange?.(query); }}
+            sections={searchValue?.sections ?? []}
+            onSelect={onSearchSelect}
+            onSeeAll={onSearchSeeAll}
+            onCancel={() => { setOwnSearch(null); onCloseSearch?.(); }}
+            open={searchLatch.open && !search?.closing}
+            onExited={searchLatch.exited}
+            progress={searchValue?.progress}
+            topInset={iosScreen.statusBar}
+            listRef={searchListLayer} />
+        )}
         {showConversation && (
           <div ref={conversationLayer} data-slot="screen-conversation" className="absolute inset-0" style={{ pointerEvents: screen === "conversation" ? undefined : "none" }}>
-            <MessageList ref={list} frameRef={frame} messages={messages} typing={typing} group={group} now={now} anchor="top"
-              insetTop={iosScreen.listTop} insetBottom={iosScreen.listBottom} renderReactions={renderReactions} messageActions={Boolean(onLongPress)}
-              onOpenThread={onOpenThread} className="absolute inset-0" />
-            <IosNavBar name={contact.name} initials={contact.initials} onBack={onBack} onDetails={onDetails} className="absolute left-0" style={{ top: iosScreen.statusBar }} />
-            <IosComposer className="absolute bottom-0 left-0" value={composer?.value} placeholder={composer?.placeholder} disabled={composer?.disabled}
-              onChange={composer?.onChange} onSend={composer?.onSend} onAttach={composer?.onAttach} />
+            <MessageList ref={list} frameRef={frame} messages={messages} typing={typing} group={isGroup} now={now} anchor="top"
+              insetTop={iosScreen.listTop} insetBottom={listBottom} renderReactions={renderReactions} messageActions={Boolean(onLongPress)}
+              onOpenThread={onOpenThread} onOpenImage={openPhoto} systemArrival={systemArrival} className="absolute inset-0" />
+            {/* Stickers that were let go over the transcript, at the pose `onPlace` settled on: root
+                coordinates, ChatKit's landed Ø48 and the angle the drop finished at, so the ghost
+                unmounting is invisible. They sit over the log rather than inside a bubble, because
+                nothing in `references/` measures where a landed sticker attaches. */}
+            {placed.length > 0 && (
+              <div aria-hidden="true" data-slot="placed-stickers" className="pointer-events-none absolute inset-0">
+                {placed.map(({ key, sticker, placement }) => (
+                  // `placement.x/y` is the sticker's centre, and the two font ratios are the ones
+                  // `StickerArt` draws a cell with, so the landed sticker is the same artwork at the
+                  // same proportions the sheet showed.
+                  <span key={key} data-slot="placed-sticker" className="absolute flex items-center justify-center"
+                    style={{ left: placement.x - placement.size / 2, top: placement.y - placement.size / 2, width: placement.size, height: placement.size,
+                      transform: `rotate(${placement.rotation}deg)`, fontFamily: emojiFontStack,
+                      fontSize: placement.size * (sticker.kind === "emoji" ? 0.78 : 0.68), lineHeight: 1,
+                      background: sticker.fill, borderRadius: sticker.fill ? stickerPickerMetrics.grid.tileRadius : undefined }}>
+                    {sticker.glyph}
+                  </span>
+                ))}
+              </div>
+            )}
+            <IosNavBar name={contact.name} initials={contact.initials} avatar={navAvatar} onBack={onBack}
+              onDetails={() => { setOwnDetails(true); onDetails?.(); }} className="absolute left-0" style={{ top: iosScreen.statusBar }} />
+            {/* The recorder replaces the field rather than sitting beside it: the two boxes overlap,
+                and native swaps them. While the Photos picker is up the composer moves to its
+                measured top instead, keeping its `+`, its placeholder and its mic. */}
+            {recorderUp ? (
+              <AudioRecorder platform="ios"
+                state={recorderValue?.state ?? "recording"}
+                levels={recorderValue?.levels}
+                duration={recorderValue?.duration}
+                position={recorderValue?.position}
+                progress={recorderValue?.progress}
+                transition={recorderValue?.transition}
+                open={recorderLatch.open}
+                onExited={recorderLatch.exited}
+                onCancel={() => { setOwnRecorder(null); onAudioRecorderClose?.(); }}
+                onStop={take => setOwnRecorder({ state: "stopped", take })}
+                onAppend={() => setOwnRecorder(current => ({ state: "recording", take: current?.take }))}
+                onPlayChange={playing => setOwnRecorder(current => (current ? { ...current, state: playing ? "playing" : "stopped" } : current))}
+                onSend={take => { onAudioSend?.(take); setOwnRecorder(null); onAudioRecorderClose?.(); }} />
+            ) : (
+              <IosComposer className={cn("absolute left-0", !pickerUp && "bottom-0")} style={pickerUp ? { top: photoPickerComposerTop } : undefined}
+                value={composer?.value} placeholder={composer?.placeholder} disabled={composer?.disabled}
+                onChange={composer?.onChange} onSend={composer?.onSend}
+                attachExpanded={plusLatch.open}
+                // The picker and the sticker sheet have no dismissal of their own in the capture, so
+                // the control that opened them is the way back out; otherwise the `+` opens the menu.
+                onAttach={() => {
+                  composer?.onAttach?.();
+                  if (pickerUp) { setOwnPhotoPicker(null); return; }
+                  if (stickerLatch.open) { setOwnSticker(null); onStickerPickerClose?.(); return; }
+                  setOwnPlusMenu(true);
+                }}
+                onMic={() => { composer?.onMic?.(); setOwnRecorder({ state: "recording" }); }} />
+            )}
+            {/* The picker's own chips over the composer. `IosComposer` has no attachment slot, so the
+                shell places them; their geometry is `photoPickerChipMetrics`, which is invented. */}
+            {pickerUp && picked.length > 0 && (
+              // UNMEASURED: the capture that pins the panel and the composer has no chips in it, so
+              // the row's own 8 pt of air above the composer is invented, as is every number in
+              // `photoPickerChipMetrics` it sits on.
+              <div className="absolute" style={{ left: photoPickerChipMetrics.rowInset, top: photoPickerComposerTop - photoPickerChipMetrics.size - 8 }}>
+                <PhotoPickerAttachments photos={pickerPhotos.filter((photo, index) => picked.includes(photo.id ?? String(index)))}
+                  onRemove={id => changePhotoSelection(picked.filter(entry => entry !== id))} />
+              </div>
+            )}
+            {pickerUp && (
+              <PhotoPicker
+                photos={pickerPhotos}
+                selected={picked}
+                onSelectionChange={next => changePhotoSelection(next)}
+                detent={photoPickerValue?.detent}
+                onDetentChange={detent => { setOwnPhotoPicker(current => (current ? { ...current, detent } : current)); onPhotoPickerDetentChange?.(detent); }}
+                open={photoPickerLatch.open}
+                progress={photoPickerValue?.progress}
+                onExited={() => { photoPickerLatch.exited(); onPhotoPickerClose?.(); }} />
+            )}
             {onLongPress && <LongPressLayer frame={frame} onLongPress={onLongPress} />}
+            {/* `-[CKUIBehavior canTapAssociatedAcknowledgment]` is 1: the balloon is a tap target, and
+                the tap opens the platter. Delegated on the log, in the bubble phase, so it lands
+                before React's own root listener and the same click cannot also open a thread. */}
+            <TapbackTapLayer frame={frame} onOpen={openTapbackDetails} />
             {onEffectsPickerOpen && (
               <SendHoldLayer
                 frame={frame}
@@ -422,6 +917,30 @@ export function IosMessagesApp({
               />
             )}
           </div>
+        )}
+        {/* The attachments sheet, over the composer it grows out of. It draws no composer of its own
+            here: the shell already has one, and the menu's own rule fades that `+` out. */}
+        {plusLatch.mounted && (
+          <IosPlusMenu items={menuItems} open={plusLatch.open} progress={plusValue?.progress}
+            onExited={plusLatch.exited} onDismiss={closePlusMenu} />
+        )}
+        {/* The sticker sheet sits in the frame's own coordinate space rather than inside `overlay`,
+            because the drag ghost has to travel over the transcript in the space the transcript is in. */}
+        {stickerLatch.mounted && (
+          <StickerPicker
+            open={stickerLatch.open}
+            progress={stickerValue?.progress}
+            tab={stickerValue?.tab}
+            dragPreview={stickerValue?.drag ?? null}
+            onTabChange={tabId => { setOwnSticker(current => (current ? { ...current, tab: tabId } : current)); onStickerPickerTab?.(tabId); }}
+            onDismiss={() => { setOwnSticker(null); onStickerPickerClose?.(); }}
+            onExited={stickerLatch.exited}
+            onSelect={onStickerSelect}
+            onPlace={(sticker, placement) => {
+              onStickerPlace?.(sticker, placement);
+              if (!onStickerPlace) setPlaced(current => [...current, { key: `${sticker.id}-${current.length}`, sticker, placement }]);
+            }}
+            onEdit={onStickerEdit} />
         )}
         {(pickerOpen || pickerClosing) && (
           <IosEffectsPicker
@@ -450,6 +969,41 @@ export function IosMessagesApp({
             ))}
           </ReplyThread>
         )}
+        {/* The details screen the name pill pushes. A group gets `GroupDetails`, one person gets
+            `IosDetails`; the two take the same `progress` / `scroll` / `open` / `onExited` contract,
+            so the branch is the only difference. `onBack` covers all three ways out — the Ø44 back
+            circle, Escape and a committed drag-down — and the screen stays mounted until `onExited`,
+            because unmounting on the back would leave its dismissal no frames to run in. */}
+        {detailsLatch.mounted && (isGroup ? (
+          <GroupDetails className="absolute inset-0 z-30"
+            name={contact.name}
+            onNameChange={onGroupNameChange && (next => { onGroupNameChange(next); onGroupEvent?.({ type: "conversationNamed", name: next }); })}
+            participants={(participants ?? []).map((person, index) => ({
+              id: person.name ?? person.initials ?? String(index),
+              name: person.name ?? person.initials ?? "",
+              initials: person.initials,
+              src: person.src,
+            }))}
+            onAddContact={detailsContent?.onAddContact}
+            hideAlerts={detailsContent?.hideAlerts} onHideAlertsChange={detailsContent?.onHideAlertsChange}
+            photos={detailsContent?.photos} sharedLinks={detailsContent?.sharedLinks} attachments={detailsContent?.attachments}
+            onLeave={detailsContent?.onLeave && (() => { detailsContent.onLeave!(); onGroupEvent?.({ type: "participantLeft" }); })}
+            onBack={() => { setOwnDetails(false); onCloseDetails?.(); }}
+            open={detailsLatch.open} progress={detailsValue?.progress} scroll={detailsValue?.scroll}
+            onExited={detailsLatch.exited}
+            backdrop={detailsBackdrop()} />
+        ) : (
+          <IosDetails className="absolute inset-0 z-30"
+            name={contact.name} initials={contact.initials}
+            phone={detailsContent?.phone} phoneLabel={detailsContent?.phoneLabel} tag={detailsContent?.tag}
+            hideAlerts={detailsContent?.hideAlerts} onHideAlertsChange={detailsContent?.onHideAlertsChange}
+            photos={detailsContent?.photos} sharedLinks={detailsContent?.sharedLinks} attachments={detailsContent?.attachments}
+            onBlock={detailsContent?.onBlock}
+            onBack={() => { setOwnDetails(false); onCloseDetails?.(); }}
+            open={detailsLatch.open} progress={detailsValue?.progress} scroll={detailsValue?.scroll}
+            onExited={detailsLatch.exited}
+            backdrop={detailsBackdrop()} />
+        ))}
         {/* The status bar stays crisp above the effects screen, the way it does natively. */}
         <IosStatusBar time={time} className="absolute left-0 top-0" />
         {showSheet && (
@@ -471,6 +1025,45 @@ export function IosMessagesApp({
             <LiftedMessage message={overlayMessage} tail={pressedBody.tail} screenBottom={pressedBody.rect.y + pressedBody.rect.height} />
           </MessageActions>
         )}
+        {/* Who reacted. It paints its own `--im-dim` scrim over the whole frame and traps Tab, so it
+            goes after the log and after the long-press overlay. `top` is the balloon's own top, which
+            is `votingViewTargetFrame`'s rule; with nothing measured yet it falls back to `minPadding`. */}
+        {reactedId && reactors.length > 0 && (
+          <TapbackDetailsPlatter
+            reactors={reactors}
+            platform="ios"
+            top={platterTop === null ? undefined : Math.max(tapbackDetailsPlatterMetrics.ios.minPadding, platterTop)}
+            filter={tapbackDetailsValue?.filter}
+            open={tapbackDetailsLatch.open}
+            progress={tapbackDetailsValue?.progress}
+            autoFocus={tapbackDetailsValue?.progress === undefined}
+            onRemove={reactor => { onRemoveTapback?.(reactedId, reactor); setOwnTapbackDetails(null); onCloseTapbackDetails?.(); }}
+            onClose={() => { setOwnTapbackDetails(null); onCloseTapbackDetails?.(); }}
+            onExited={tapbackDetailsLatch.exited} />
+        )}
+        {/* The photo viewer is last: it fills the frame, draws its own status bar (`allowStatusBar`
+            is 1) and covers everything, including the shell's. `rectForIndex` is what lands the exit
+            on the photo that is showing rather than on the tile the entrance grew out of. */}
+        {viewerId && viewerMessage?.images?.length ? (
+          <ImageViewer
+            photos={viewerMessage.images}
+            index={shownIndex}
+            onIndexChange={index => { setViewerIndex(index); setOwnViewer(current => (current ? { ...current, index } : current)); onPhotoIndexChange?.(index); }}
+            open={viewerLatch.open}
+            progress={viewerValue?.progress}
+            chrome={viewerValue?.chrome}
+            dismissProgress={viewerValue?.dismiss}
+            sourceRect={viewerRects[shownIndex] ?? null}
+            rectForIndex={index => viewerRects[index] ?? null}
+            time={time}
+            onClose={() => { setOwnViewer(null); onClosePhoto?.(); }}
+            onExited={viewerLatch.exited}
+            onShare={onSharePhoto && (() => onSharePhoto(viewerId, shownIndex))}
+            onSave={onSavePhoto && (() => onSavePhoto(viewerId, shownIndex))}
+            onReply={onOpenThread && (() => onOpenThread(viewerId))}
+            reaction={ownReactionOf(viewerMessage)}
+            onReact={onTapback && (selection => onTapback(viewerId, selection))} />
+        ) : null}
         {overlay}
       </div>
     </PlatformProvider>
@@ -600,6 +1193,36 @@ function SendHoldLayer({ frame, onHold }: { frame: RefObject<HTMLDivElement | nu
       composer.removeEventListener("click", onClick, true);
       composer.removeEventListener("contextmenu", onContextMenu);
     };
+  }, [frame]);
+  return null;
+}
+
+/**
+ * Turns a tap on a tapback balloon into `onOpen(messageId)`, which is what
+ * `-[CKUIBehavior canTapAssociatedAcknowledgment]` = 1 makes the balloon: a control.
+ *
+ * Delegated on the log rather than handed to `renderReactions`, so it works for whatever balloons a
+ * caller's own renderer draws, and so it can stop the click. React attaches its handlers at the app
+ * root, above this element, so a native listener here runs first: stopping the click is what keeps
+ * the same tap from also opening the message's thread or running a click-to-select.
+ */
+function TapbackTapLayer({ frame, onOpen }: { frame: RefObject<HTMLDivElement | null>; onOpen: (id: string) => void }) {
+  const latest = useRef(onOpen);
+  useEffect(() => { latest.current = onOpen; }, [onOpen]);
+  useEffect(() => {
+    const log = frame.current?.querySelector<HTMLElement>('[data-slot="message-list"]');
+    if (!log) return;
+    const onClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest?.('[data-slot="tapback"]')) return;
+      const id = target.closest("[data-message-id]")?.getAttribute("data-message-id");
+      if (!id) return;
+      event.preventDefault();
+      event.stopPropagation();
+      latest.current(id);
+    };
+    log.addEventListener("click", onClick);
+    return () => log.removeEventListener("click", onClick);
   }, [frame]);
   return null;
 }
