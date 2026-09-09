@@ -53,11 +53,27 @@ export const macosBalloonRim = 0.5;
  * next to `paletteVars`. Glass fills were solved from the captures: the pill over the dimmed white
  * list is #ededef and over the dimmed green bubble ≈#b4efc6 (brighter than the dimmed content, hence
  * the brightness term); over the dimmed black list it is #1f1e21. The dim itself is rgba(22,18,44,0.21).
+ *
+ * `--im-menu-glass` was refitted against the captures rather than guessed. Because the tint, the
+ * alpha and the brightness term all trade off against each other, only two things are actually
+ * determined by a capture: the constant the material contributes, and how much of the backdrop
+ * survives it. Both were solved by rendering the menu twice at a fixed alpha and filter, once with a
+ * black tint and once with a white one, which makes the output linear in the tint, and then solving
+ * for the tint that lands on the capture. rgba(241,243,244,0.8) is what
+ * `longpress-ok-light.png` and `longpress-incoming-light.png` agree on, over two very different
+ * backdrops - a green bubble and a grey one. It takes the menu's interior from 11.9 levels of mean
+ * absolute error to 3.6, and the region from 1.16% mismatched to 1.02%.
+ *
+ * The dark value is NOT fitted, because the two dark long-press labs do not reconstruct their
+ * captures: `longpress-dark` has a bubble at x 370 y 480 that the capture does not, and
+ * `longpress-last` renders its pressed bubble somewhere the capture does not. Any fit over those is
+ * a fit to the wrong backdrop. Same for `longpress-two-line-light`, which disagrees with the other
+ * two light captures by 7 levels. Fix the scenes first, then refit.
  */
 export function tapbackVars(theme: "light" | "dark", platform: Platform = "ios"): Record<string, string> {
   const ios: Record<string, string> = theme === "light" ? {
     "--im-dim": "rgba(22,18,44,0.21)", "--im-glass": "rgba(229,229,231,0.69)", "--im-glass-filter": "blur(9px) brightness(1.32) saturate(1.35)", "--im-glass-solid": "#ededef", "--im-glass-rim": "rgba(255,255,255,0.55)",
-    "--im-glass-shadow": "0 6px 24px rgba(0,0,0,0.10)", "--im-picker-icon": "#aeaeb2", "--im-menu-glass": "rgba(229,229,231,0.69)", "--im-menu-glass-filter": "blur(9px) brightness(1.32) saturate(1.35)", "--im-menu-bg": "#edeff1", "--im-menu-text": "#000000",
+    "--im-glass-shadow": "0 6px 24px rgba(0,0,0,0.10)", "--im-picker-icon": "#aeaeb2", "--im-menu-glass": "rgba(241,243,244,0.8)", "--im-menu-glass-filter": "blur(9px) brightness(1.32) saturate(1.35)", "--im-menu-bg": "#edeff1", "--im-menu-text": "#000000",
     "--im-menu-separator": "rgba(0,0,0,0.12)", "--im-menu-destructive": "#ff3b30", "--im-tapback-own": tapbackColors.own, "--im-tapback-ring": tapbackColors.selectedRing,
   } : {
     "--im-dim": "rgba(22,18,44,0.21)", "--im-glass": "rgba(38,37,39,0.8)", "--im-glass-filter": "blur(9px) saturate(1.6)", "--im-glass-solid": "#1f1e21", "--im-glass-rim": "rgba(255,255,255,0.10)",
