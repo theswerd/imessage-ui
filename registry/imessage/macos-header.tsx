@@ -1,6 +1,6 @@
 "use client";
 
-import type { ComponentProps, ReactNode } from "react";
+import { useId, type ComponentProps, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/registry/imessage/avatar";
 import { GroupAvatar, groupAvatarMetrics } from "@/registry/imessage/group-avatar";
@@ -51,6 +51,13 @@ import { GroupAvatar, groupAvatarMetrics } from "@/registry/imessage/group-avata
  * merged — what the shared component adds is the `UIBlurEffect` plate behind the faces, which is
  * measured (`groupAvatarPlate`) and which the private copy deliberately did not draw.
  *
+ * **Composing** (`compose`). On the Mac a new message is not a sheet and not a screen: the window it
+ * is already in becomes the compose window, and this bar becomes the recipient field. The avatar, the
+ * name pill and the FaceTime button go; the measured compose button stays where it is; a "To:" field
+ * and a ⊕ take the rest of the bar. Nothing about that state is measured — see `macHeaderMetrics.toField`
+ * for what came off `CKUIBehaviorMac` and what is a rule — and in particular **none** of it comes from
+ * `references/ios/captures/newmsg-light.png`, which is the iPhone's modal sheet and a different surface.
+ *
  * The box is `-[CKUIBehaviorMac conversationListContactImageDiameter]` = 40 (Catalyst probe,
  * ChatKit 26.5), which is `macHeaderMetrics.avatar.size` measured off the captures, so the framework
  * and the capture agree and `groupAvatarMetrics.mac.conversationList` is used as the assertion.
@@ -70,7 +77,57 @@ export const macHeaderMetrics = {
   video: { right: 8, top: 8, width: 40, height: 36 },
   /** Judgement, not measured: how much of each end the pill leaves for the buttons before it truncates. */
   maxWidthInset: 8 + 40 + 8,
+  /**
+   * The "To:" field this bar becomes while a new message is being composed (`compose`).
+   *
+   * **No capture holds it.** `references/macos/captures` has no frame of a macOS window in compose, and
+   * `references/ios/captures/newmsg-light.png` is the iPhone's *sheet* — a different surface on a
+   * different platform, so none of its numbers are used here. What is sourced below is sourced from
+   * ChatKit 26.5 through a Catalyst probe that swizzles `-[UIDevice userInterfaceIdiom]` to 5 before
+   * ChatKit loads and then reads `+[CKUIBehaviorMac sharedBehaviors]`. **`CKUIBehaviorMac` and
+   * `CKUIBehaviorPhone` disagree on almost every one of these**, which is the whole reason they were
+   * read on the Mac rather than inherited; the Phone reading is quoted beside each so the swap is
+   * visible:
+   * - `toFieldPreferredHeight` = **44** [Phone 44] — the field's own height.
+   * - `toFieldYOffset` = **4** [Phone 0] and `toFieldXOffset` = **4.5** [Phone 0].
+   * - `toFieldInternalMarginInsets` = **{0, 12, 0, 14}** [Phone {0, 14, 0, 9}] — what the field keeps
+   *   clear inside itself, leading then trailing.
+   * - `toFieldInterItemSpacing` = **5** [Phone 0] between the label and the first recipient, and
+   *   `toFieldInterlineSpacing` = **6** [Phone 6] between wrapped rows of recipients.
+   * - `shouldShowDisclosureChevronInRecipientAtoms` = **0** [Phone **1**]: a recipient token on the Mac
+   *   carries no disclosure chevron. `shouldAlignRecipientGlyphsWithMargins` = **1** [Phone 0].
+   *
+   * `top` is **4**, and that is `toFieldYOffset` and this bar's own measured geometry agreeing rather
+   * than a number chosen to fit: the measured compose and video buttons are 36 tall at top 8, so the
+   * bar's content is centred on y 26, and a 44 tall field centred on 26 starts at 4 — which is exactly
+   * `toFieldYOffset`. `left` is the measured compose button's right edge (6 + 36) plus `toFieldXOffset`.
+   *
+   * **What is a rule and not a reading.** Where the field *stops* on the right: nothing in the
+   * framework or a capture bounds it, so it clears a Ø36 add-recipient button which mirrors the
+   * measured compose button's own box to the other end (`addRecipient`). `macNavbarRightMargin` = 20
+   * was rejected for that edge, because its partner `macNavbarLeftMargin` = 20 contradicts this bar's
+   * *measured* compose button at left 6 — the framework's nav-bar margins are not what macOS 26 draws
+   * here, so neither end takes them. The field is drawn flat on the bar's own glass, with no platter
+   * and no hairline under it: `recipientSelectionBackgroundPlatterCornerRadius` (10, the same on both
+   * idioms) and `recipientSelectionBackgroundPlatterVerticalInset` (4) are recorded here because they
+   * were read, but nothing here draws a platter, so they are unused.
+   */
+  toField: { height: 44, top: 4, xOffset: 4.5, marginLeft: 12, marginRight: 14, itemGap: 5, lineGap: 6, fontSize: 13 },
+  /**
+   * The add-recipient button at the trailing end of the "To:" field. **Unmeasured**: it mirrors the
+   * measured compose button — the same Ø36 glass circle at the same 6 from its own end of the bar and
+   * the same top 8 — because that is the only round glass button in this bar a capture does hold.
+   */
+  addRecipient: { right: 6, top: 8, size: 36 },
+  /** Read but not drawn: see `toField`. Kept so a caller that wants the platter has the numbers. */
+  recipientPlatter: { radius: 10, verticalInset: 4 },
 };
+
+/** ChatKit's own strings, out of `ChatKit.loctable` (en). */
+export const macHeaderStrings = {
+  /** `TO`. The label at the head of the compose bar's recipient field. */
+  to: "To:",
+} as const;
 
 export type MacHeaderMember = { initials: string; name?: string; photo?: string };
 
@@ -89,12 +146,25 @@ export type MacHeaderProps = Omit<ComponentProps<"header">, "children"> & {
   onVideoCall?: () => void;
   /** Clicking the name pill opens the conversation details. */
   onOpenDetails?: () => void;
+  /**
+   * A new message is being composed: the avatar, the name pill and the FaceTime button give way to the
+   * "To:" field, and the compose button stays where it is. This is the macOS shape of New Message —
+   * the window's own transcript is replaced, there is no sheet and no screen to present. See
+   * `macHeaderMetrics.toField` for what is sourced and what is a rule.
+   */
+  compose?: boolean;
+  /** What is typed in the "To:" field. Controlled; leave it out and the field holds its own text. */
+  recipient?: string;
+  onRecipientChange?: (value: string) => void;
+  /** The ⊕ at the trailing end of the field: on the Mac it opens the system contact picker. */
+  onAddRecipient?: () => void;
 };
 
 const glassButton = "absolute block bg-[var(--hd-fill)] p-0 text-[var(--hd-ink)] shadow-[var(--hd-rim)] outline-offset-2 hover:bg-[var(--hd-fill-hover)] focus-visible:outline-2 focus-visible:outline-[#3478f6]";
 
-export function MacHeader({ name, initials, photo, avatar, members, onCompose, onVideoCall, onOpenDetails, className, style, ...props }: MacHeaderProps) {
+export function MacHeader({ name, initials, photo, avatar, members, onCompose, onVideoCall, onOpenDetails, compose = false, recipient, onRecipientChange, onAddRecipient, className, style, ...props }: MacHeaderProps) {
   const m = macHeaderMetrics;
+  const id = useId();
   const fallbackInitials = initials ?? name.trim().split(/\s+/).slice(0, 2).map(part => part[0] ?? "").join("");
   const group = members && members.length > 1 ? members : null;
   return (
@@ -104,6 +174,10 @@ export function MacHeader({ name, initials, photo, avatar, members, onCompose, o
         "absolute inset-x-0 top-0 z-10 select-none",
         // Light glass over the white pane (derived from the light composer: white discs with a soft shadow).
         // Light glass, measured: #fcfcfc discs with a white rim and a soft downward shadow; pure black text.
+        // `--hd-label` is the "To:" label of the compose bar. **Not measured here**: no macOS capture
+        // holds a compose window, so it borrows the one secondary label colour on this window that *is*
+        // measured — the sidebar search field's placeholder, #777777 light / #9a9a9a dark.
+        "[--hd-label:#777777] dark:[--hd-label:#9a9a9a]",
         "[--hd-chevron:#b1b1b1] [--hd-fill-hover:#ffffff] [--hd-fill:#fcfcfc] [--hd-ink:#262626] [--hd-name:#000000] [--hd-pill-rim:inset_0_0_0_1px_#ffffff,0_9px_28px_rgba(0,0,0,0.09)] [--hd-pill:#fdfdfd] [--hd-rim:inset_0_0_0_1px_#ffffff,0_9px_28px_rgba(0,0,0,0.09)] [--hd-tint-40:rgba(251,251,251,0.35)] [--hd-tint-60:rgba(251,251,251,0.53)] [--hd-tint:rgba(251,251,251,0.88)]",
         // Dark glass, measured: fill #1b1c1c over #1e1e1e, rim #373739 fading to #2c2c2c. The pill's rim is
         // lit on one diagonal, the same way the composer's is, and it is **not** brighter at the top.
@@ -141,6 +215,38 @@ export function MacHeader({ name, initials, photo, avatar, members, onCompose, o
         </svg>
       </button>
 
+      {/* Composing: the "To:" field takes the whole bar between the compose button and the ⊕, and the
+          avatar, the name pill and the FaceTime button are simply not there — a message with no
+          recipient has no face to draw, no name to disclose and nobody to call. */}
+      {compose ? (
+        <>
+          <div data-slot="to-field" className="absolute flex items-center"
+            style={{
+              left: m.compose.left + m.compose.size + m.toField.xOffset,
+              right: m.addRecipient.right + m.addRecipient.size + m.toField.xOffset,
+              top: m.toField.top, height: m.toField.height,
+              paddingLeft: m.toField.marginLeft, paddingRight: m.toField.marginRight, gap: m.toField.itemGap,
+            }}>
+            <label htmlFor={`${id}-to`} data-slot="to-label" className="shrink-0"
+              style={{ fontSize: m.toField.fontSize, lineHeight: "16px", color: "var(--hd-label)" }}>{macHeaderStrings.to}</label>
+            {/* `autoFocus`: New Message puts the caret in this field, which is the whole point of the
+                command — the only thing the window is waiting for is a recipient. */}
+            <input id={`${id}-to`} data-slot="to-input" type="text" autoComplete="off" autoFocus
+              value={recipient} onChange={event => onRecipientChange?.(event.target.value)}
+              className="min-w-0 flex-1 border-0 bg-transparent p-0 outline-none"
+              style={{ fontSize: m.toField.fontSize, lineHeight: "16px", color: "var(--hd-name)", caretColor: "#3478f6", fontFamily: "inherit" }} />
+          </div>
+          <button type="button" data-slot="add-recipient-button" aria-label="Add recipient" onClick={onAddRecipient}
+            className={cn(glassButton, "rounded-full")} style={{ right: m.addRecipient.right, top: m.addRecipient.top, width: m.addRecipient.size, height: m.addRecipient.size }}>
+            {/* plus.circle: the ⊕ that opens the contact picker, drawn in button coordinates on the
+                compose button's own Ø36 box so the two ends of the bar match. Unmeasured. */}
+            <svg aria-hidden="true" viewBox="0 0 36 36" width="36" height="36" className="block" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="18" cy="18" r="7.7" />
+              <path d="M13.9 18h8.2M18 13.9v8.2" />
+            </svg>
+          </button>
+        </>
+      ) : (
       <div data-slot="header-contact" className="absolute left-1/2 -translate-x-1/2" style={{ top: m.avatar.top, maxWidth: `calc(100% - ${m.maxWidthInset * 2}px)` }}>
         <div className="flex flex-col items-center">
           <span className="relative z-10 flex">
@@ -175,7 +281,9 @@ export function MacHeader({ name, initials, photo, avatar, members, onCompose, o
           </button>
         </div>
       </div>
+      )}
 
+      {!compose && (
       <button type="button" data-slot="video-button" aria-label={`FaceTime ${name}`} onClick={onVideoCall}
         className={glassButton} style={{ right: m.video.right, top: m.video.top, width: m.video.width, height: m.video.height, borderRadius: m.video.height / 2 }}>
         {/* video: the body's stroke centres measure x 11.05–24.8 and y 11.65–23.95 in button coordinates
@@ -190,6 +298,7 @@ export function MacHeader({ name, initials, photo, avatar, members, onCompose, o
           <path d="M24.8 16.4 28.43 13.35c.77-.45 1.67 0 1.67.9v7.1c0 .9-.9 1.35-1.67.9L24.8 19.2" />
         </svg>
       </button>
+      )}
     </header>
   );
 }

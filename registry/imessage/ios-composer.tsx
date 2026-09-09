@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useLayoutEffect, useRef, useState, type ComponentProps, type KeyboardEvent } from "react";
+import { useId, useLayoutEffect, useRef, useState, type ComponentProps, type KeyboardEvent, type PointerEvent } from "react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -37,6 +37,9 @@ import { cn } from "@/lib/utils";
  * - Glass: 90% white with a backdrop blur and a soft shadow (light), #191919 with a 1pt rim (dark);
  *   shadows are painted on a layer beneath both surfaces and clipped at the midpoint of the 12pt
  *   gap, so the field never shades the `+` button.
+ *
+ * All four buttons respond to a finger - they dim and shrink. Neither number is in the captures; see
+ * `iosComposerPress` for where they come from and what is borrowed.
  *
  * Not measured: `maxLines` (no capture holds a field taller than four lines) and the gray send pill
  * a composer with no recipient shows (#ededee with a #b8b8bb arrow in
@@ -93,6 +96,90 @@ const vars =
  */
 const composerLift = "[--ios-cmp-glass:rgba(253,253,253,0.9)]";
 
+/**
+ * What a finger does to the four buttons on this row.
+ *
+ * **Borrowed, not measured.** No capture in this repo holds a pressed control, so the two numbers
+ * come from ChatKit, and they are the only two it has: grepping the framework's whole selector table
+ * for `touchAlpha|touchScale|pressedAlpha|pressedScale|highlightAlpha|highlightScale|dimAlpha|
+ * touchDownAlpha|touchDownScale` returns `replyButtonTouchAlpha` = 0.4 and `replyButtonTouchScale`
+ * = 0.85 and nothing else. Read at both idioms with the swizzle in place, `CKUIBehaviorPhone`
+ * (idiom 0) and `CKUIBehaviorMac` (idiom 5) agree on both.
+ *
+ * They belong to a different button, but to the nearest one ChatKit records: the reply button is
+ * itself a blurred glass pill (`replyButtonBackgroundBlurRadius` 5, `replyButtonBorderWidth` 0.5),
+ * and ChatKit applies both to the whole view on `_buttonTouchDown`, which is what the `+` circle here
+ * is. iOS 26 renders the pressed state of a `glassButtonConfiguration` button in UIKit, not in
+ * ChatKit, so there is no closer number to find.
+ *
+ * The dim rides on the button's own opacity, so it comes off the **measured glass already on the
+ * element** - `--ios-cmp-glass` and its shadow and rim fade together - rather than off a second
+ * pressed fill that no capture pins. What ChatKit does record about this row corroborates the rest:
+ * `_entryViewButtonTintColor` reads #B4B8BF light, the mic colour measured from `conv3-light.png`.
+ *
+ * `release` is **unmeasured** - nothing in this repo records a control in motion. Press-down is
+ * instant, which is what a direct-manipulation highlight is; only the release eases back.
+ */
+export const iosComposerPress = { alpha: 0.4, scale: 0.85, release: 100 };
+
+/**
+ * Press state that a finger, a mouse and the keyboard all reach.
+ *
+ * Pointer events rather than `:active`: Chrome holds `:active` back on a touch until the gesture has
+ * resolved into a tap rather than a scroll, so a finger that is still down is not reliably styled and
+ * a driven `Input.dispatchTouchEvent` hold cannot be proved. The pointer is captured so the release
+ * always lands back here, and while it is held the press follows the pointer out of the button's own
+ * box, which is what iOS does when a finger slides off a control.
+ *
+ * A finger that slides off does not come back, and that is Chromium rather than this hook: driving a
+ * real touch 60 px off the `+` logs `pointerdown -> pointermove(outside) -> touchmove ->
+ * pointercancel -> lostpointercapture`, i.e. gesture arbitration takes the pointer away the moment
+ * the finger pans, and the touchmove back onto the control delivers no pointer event at all. A mouse
+ * keeps its pointer, so dragging off a held button drops the press and dragging back on takes it up
+ * again.
+ *
+ * Nothing here moves focus, deliberately: both engines match `:focus-visible` on a programmatic focus
+ * taken while a pointer is still down, so a press opened by a finger would draw a ring iOS never
+ * draws (`tapback-bar.tsx` and `audio-recorder.tsx` carry the two fixes for the places that do have
+ * to move focus). `send()` still returns the caret to the field afterwards, but that runs a frame
+ * after the finger has already lifted.
+ */
+function usePress() {
+  const [pressed, setPressed] = useState(false);
+  const held = useRef(false);
+  const release = () => { held.current = false; setPressed(false); };
+  return {
+    pressed,
+    handlers: {
+      onPointerDown(event: PointerEvent<HTMLElement>) {
+        if (event.pointerType === "mouse" && event.button !== 0) return;
+        held.current = true;
+        try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* the pointer ended before this handler ran */ }
+        setPressed(true);
+      },
+      onPointerMove(event: PointerEvent<HTMLElement>) {
+        if (!held.current) return;
+        const box = event.currentTarget.getBoundingClientRect();
+        setPressed(event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom);
+      },
+      onPointerUp: release,
+      onPointerCancel: release,
+      onLostPointerCapture: release,
+      onKeyDown(event: KeyboardEvent<HTMLElement>) { if (event.key === " " || event.key === "Enter") setPressed(true); },
+      onKeyUp: release,
+      onBlur: release,
+    },
+  };
+}
+
+/** Instant down, eased back up; `data-pressed` turns the transition off so the dim lands on the frame the finger does. */
+const pressTransition = "transition-[opacity,transform] ease-out data-pressed:transition-none motion-reduce:transition-none";
+
+/** The pressed pose, or nothing at all at rest so a settled composer renders byte for byte as before. */
+function pressStyle(pressed: boolean) {
+  return { transitionDuration: `${iosComposerPress.release}ms`, opacity: pressed ? iosComposerPress.alpha : undefined, transform: pressed ? `scale(${iosComposerPress.scale})` : undefined };
+}
+
 /** `clip` stops the shadow at the midpoint of the 12pt gap toward a neighboring glass element, so the two shadows read as one (they never add up on the device). */
 function GlassLayers({ round = false, clip }: { round?: boolean; clip?: "left" | "right" }) {
   return (
@@ -146,6 +233,9 @@ export function IosComposer({
   const sending = useRef(false);
   const id = useId();
   const hasText = text.trim().length > 0;
+  const attach = usePress();
+  const mic = usePress();
+  const sendPress = usePress();
 
   function update(next: string) {
     if (value === undefined) setDraft(next);
@@ -187,8 +277,9 @@ export function IosComposer({
     <form data-slot="ios-composer" data-raised={raised || undefined} aria-label="Send a message" className={cn("relative isolate flex w-full items-end select-none", vars, raised && composerLift, className)}
       style={{ padding: "0 28px 28px 28px", fontFamily: font, ...style }} onSubmit={event => { event.preventDefault(); void send(); }} {...props}>
       <button type="button" data-slot="attach" aria-label="Add attachment" aria-haspopup="menu" aria-expanded={attachExpanded} disabled={disabled} onClick={onAttach}
-        className="relative flex shrink-0 items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-blue-500 disabled:opacity-50"
-        style={{ width: 40, height: 40 }}>
+        data-pressed={attach.pressed || undefined} {...attach.handlers}
+        className={cn("relative flex shrink-0 items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-blue-500 disabled:opacity-50", pressTransition)}
+        style={{ width: 40, height: 40, ...pressStyle(attach.pressed) }}>
         <GlassLayers round clip="right" />
         <svg aria-hidden="true" className="relative" width="40" height="40" viewBox="0 0 40 40" fill="none" stroke="var(--ios-cmp-glyph)" strokeWidth="1.6" strokeLinecap="round">
           <path d="M13.1 20H26.9M20 13.1V26.9" />
@@ -204,17 +295,19 @@ export function IosComposer({
           style={{ padding: `${PAD_Y}px 48px ${PAD_Y}px 16px`, fontFamily: font, fontSize: 17, lineHeight: `${LINE}px`, letterSpacing: 0, color: "var(--ios-cmp-text)", caretColor: "var(--ios-cmp-caret)", boxSizing: "border-box", margin: 0 }} />
         {hasText ? (
           <button type="submit" data-slot="send" aria-label="Send message" disabled={disabled}
-            className="absolute flex items-center justify-center rounded-full bg-[#0088ff] text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
-            style={{ right: 6.3333, bottom: 6, width: 38, height: 28 }}>
+            data-pressed={sendPress.pressed || undefined} {...sendPress.handlers}
+            className={cn("absolute flex items-center justify-center rounded-full bg-[#0088ff] text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500", pressTransition)}
+            style={{ right: 6.3333, bottom: 6, width: 38, height: 28, ...pressStyle(sendPress.pressed) }}>
             <svg aria-hidden="true" width="38" height="28" viewBox="0 0 38 28" fill="none" stroke="#ffffff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12.6333 12.6667 18.5 7.3333 24.3667 12.6667M18.5 7.3333V20.7" />
             </svg>
           </button>
         ) : (
           <button type="button" data-slot="mic" aria-label="Record audio message" disabled={disabled} onClick={onMic}
-            className="absolute flex items-center justify-center focus-visible:outline-2 focus-visible:outline-blue-500"
+            data-pressed={mic.pressed || undefined} {...mic.handlers}
+            className={cn("absolute flex items-center justify-center focus-visible:outline-2 focus-visible:outline-blue-500", pressTransition)}
             /* 20×26 hit box; the insets centre the 11.87×17.85 glyph on its measured ink, x 346.85–358.72 and y 816.95–834.8 in a one-line field. */
-            style={{ right: 11.22, bottom: 7.13, width: 20, height: 26, color: "var(--ios-cmp-mic)" }}>
+            style={{ right: 11.22, bottom: 7.13, width: 20, height: 26, color: "var(--ios-cmp-mic)", ...pressStyle(mic.pressed) }}>
             <ComposerMicIcon />
           </button>
         )}

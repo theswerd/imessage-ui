@@ -11,7 +11,7 @@ import { useBubbleEffectOnMessage } from "@/registry/imessage/message-effects";
 import type { EffectsPickerSelection } from "@/registry/imessage/ios-effects-picker";
 import { ScreenEffect } from "@/registry/imessage/screen-effects";
 import type { IosSearchSection } from "@/registry/imessage/ios-search";
-import { contact, conversationList, frameAt, now, platforms, type FixtureMessage, type Platform, type Reaction, type ScenarioId, type SceneFrame } from "./scenarios";
+import { contact, frameAt, iosConversations, macConversations, now, platforms, type FixtureMessage, type Platform, type Reaction, type ScenarioId, type SceneFrame } from "./scenarios";
 import { cn } from "@/lib/utils";
 
 function toMessage(fixture: FixtureMessage): Message {
@@ -200,7 +200,7 @@ export function HarnessPreview({ platform, scenario, time, interactive = true, o
   const systemArrival = frame.systemArrival ?? null;
   // The switch states which conversation the pane is on; the group flag already picks the same row,
   // so the two agree and a group frame and a switched-to-group frame are the same frame.
-  const selectedConversation = frame.conversationSwitch?.to ?? (frame.group ? "design" : "alex");
+  const selectedConversation = frame.conversationSwitch?.to ?? frame.selectedConversation ?? (frame.group ? "design" : "alex");
   useBubbleEffectOnMessage(deviceFrame, bubbleEffect);
   // The press-and-hold scenario scrubs the hold itself: grow the bubble the way use-long-press does
   // while the finger is down, so the checkpoint before the menu opens is inspectable.
@@ -283,7 +283,7 @@ export function HarnessPreview({ platform, scenario, time, interactive = true, o
       style={{ width: width ?? size.width, height: size.height, boxShadow: "0 20px 70px -25px #00000040" }}>
       {platform === "ios" ? (
         <IosMessagesApp {...shared} width={width ?? iosScreen.width} height={iosScreen.height} time="9:41" screen={activeScreen}
-          conversations={conversationList.map(item => ({ id: item.id, name: item.name, initials: item.initials, preview: item.preview, time: item.time }))}
+          conversations={iosConversations(frame.conversations)}
           composer={{ value: composerValue, onChange: setDraft, onSend: send, onAttach: () => onEvent?.("attachment.picker"), onMic: () => onEvent?.("audio.record") }}
           screenTransition={screenTransition}
           thread={thread}
@@ -360,7 +360,7 @@ export function HarnessPreview({ platform, scenario, time, interactive = true, o
           overlay={<>{callCard}{effectOverlay}</>} />
       ) : (
         <MacMessagesApp {...shared} width={width ?? size.width} height={size.height} active
-          conversations={conversationList.map(item => ({ id: item.id, name: item.name, initials: item.initials, preview: item.preview, time: item.time, pinned: item.pinned, muted: "muted" in item ? item.muted : undefined }))}
+          conversations={macConversations(frame.conversations)}
           selectedId={selectedConversation} onSelectConversation={id => onEvent?.(`navigation.open ${id}`)}
           composer={{ value: composerValue, onChange: setDraft, onSend: send, onAttach: () => { setPlusMenu(current => !(current ?? frame.menu === "plus")); onEvent?.("menu.plus"); }, onAudio: () => onEvent?.("audio.record") }}
           plusMenu={plusMenu ?? frame.menu === "plus"} onPlusMenuSelect={id => { setPlusMenu(false); onEvent?.(`menu.plus.${id}`); }} onPlusMenuClose={() => setPlusMenu(false)}

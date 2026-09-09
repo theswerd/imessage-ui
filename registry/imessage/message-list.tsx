@@ -11,6 +11,7 @@ import { MessageAttachment } from "@/registry/imessage/message-attachment";
 import { MessageImages } from "@/registry/imessage/message-image";
 import { MessageAudio } from "@/registry/imessage/message-audio";
 import { InvisibleInk } from "@/registry/imessage/message-effects";
+import { SwipeTimes, useSwipeToRevealTimes } from "@/registry/imessage/ios-swipe-times";
 import { ReplyCount, ReplyStub } from "@/registry/imessage/message-reply";
 import { FailedSendBadge, NotDelivered } from "@/registry/imessage/ios-notices";
 import { TypingIndicator } from "@/registry/imessage/typing-indicator";
@@ -230,6 +231,18 @@ export type MessageListProps = Omit<ComponentProps<"div">, "children" | "ref"> &
    * seeks that entrance rather than playing it. UNVERIFIED motion — see `systemMessageMotion`.
    */
   systemArrival?: { id: string; progress?: number } | null;
+  /**
+   * The transcript drawer: drag the log left (or swipe two fingers on a trackpad) and every message
+   * slides over to show the time it was sent, springing back on release. `ios-swipe-times.tsx` owns
+   * the geometry and the gesture; this only binds it to the log and hangs a time on each message.
+   * On by default on iOS, which is where native has it, and off on macOS, which has no such
+   * gesture. A drag that is mostly vertical stays the log's scroll.
+   *
+   * `{ progress }` states the drawer instead of letting a finger drive it: 0..1, gestures inert,
+   * which is what a scrubbed scenario checkpoint needs. `null` is off, the way every other stated
+   * surface here spells it.
+   */
+  swipeTimes?: boolean | { progress?: number } | null;
   /** Where a short conversation sits: under the header ("top", native iOS) or against the composer ("bottom"). */
   anchor?: "top" | "bottom";
   insetTop?: number;
@@ -340,7 +353,7 @@ function EmojiMessage({ message, platform }: { message: Message; platform: Platf
 export function MessageList({
   messages, typing = false, group = false, now, frameRef, platform: platformProp, serviceLabel, renderReactions, autoScroll = true,
   firstDateHeader = true, messageActions = false, selectedIds, onOpenThread, onJumpToMessage, openThreadId, flash, onOpenImage, systemArrival,
-  anchor = "top", insetTop, insetBottom, ref, className, style, onScroll, onKeyDown, ...props
+  swipeTimes, anchor = "top", insetTop, insetBottom, ref, className, style, onScroll, onKeyDown, ...props
 }: MessageListProps) {
   const contextPlatform = usePlatform();
   const platform = platformProp ?? contextPlatform;
@@ -360,6 +373,22 @@ export function MessageList({
   const selection = useMemo(() => new Set(selectedIds ?? []), [selectedIds]);
 
   useBubbleScreenSpace(scroller, frameRef);
+
+  // The drawer. Handing the hook a `progress` locks every gesture out and pins the drawer where the
+  // number says, which is both how "off" is spelled (pinned at 0) and how a scrubbed checkpoint is.
+  // The hook itself always runs, so the rules of hooks hold whichever platform this is.
+  const swipeOn = swipeTimes === undefined ? platform === "ios" : Boolean(swipeTimes);
+  const swipeSeek = swipeTimes && typeof swipeTimes === "object" ? swipeTimes.progress : undefined;
+  const swipe = useSwipeToRevealTimes({ progress: swipeOn ? swipeSeek : 0 });
+  // The log already owns its element's ref and its style, so those two come off the gesture bundle
+  // and the rest is spread onto it as it is.
+  const { ref: swipeRef, style: swipeStyle, ...swipePointer } = swipe.gestures;
+  // One ref for two owners: the log's own element, and the non-passive wheel listener the drawer
+  // binds. Turning the drawer off changes this callback's identity, so React detaches the listener.
+  const setScroller = useCallback((node: HTMLDivElement | null) => {
+    scroller.current = node;
+    if (swipeOn) swipeRef(node);
+  }, [swipeOn, swipeRef]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
     const el = scroller.current;
@@ -464,6 +493,9 @@ export function MessageList({
   function onListKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     onKeyDown?.(event);
     if (event.defaultPrevented) return;
+    // The drawer's keys, and only those: Enter and Space belong to a message's thread or its
+    // actions here, so the hook's toggle never gets them.
+    if (swipeOn && (event.key === "ArrowLeft" || event.key === "ArrowRight")) { swipe.handlers.onKeyDown(event); return; }
     // Enter or Space on a focused message opens its thread. A shell that binds those keys to the
     // actions menu says so with `messageActions`, and then they stay with the menu: the reply count
     // under the message is its own tab stop, so the thread is still reachable without a pointer.
@@ -488,10 +520,17 @@ export function MessageList({
   }
 
   return (
-    <div ref={scroller} role="log" aria-live="polite" aria-relevant="additions text" aria-label="Messages" tabIndex={0}
+    <div ref={setScroller} role="log" aria-live="polite" aria-relevant="additions text" aria-label="Messages" tabIndex={0}
       data-slot="message-list" data-platform={platform} onKeyDown={onListKeyDown}
-      className={cn("relative min-h-0 overflow-y-auto overscroll-contain focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#0088ff]", anchor === "bottom" && "flex flex-col", className)}
-      style={{ fontFamily: fontStack, background: "var(--im-bg)", ...style }}
+      {...(swipeOn ? swipePointer : null)}
+      // The drawer's keyboard route, advertised without touching the log's accessible name (which
+      // stays "Messages" — `tests/e2e/helpers.ts` finds the log by it).
+      aria-keyshortcuts={swipeOn ? "ArrowLeft ArrowRight" : undefined}
+      data-swiping={swipe.dragging ? "true" : undefined}
+      // The time column rests one full `distance` off the trailing edge, so the log has to clip
+      // sideways or it would gain a horizontal scrollbar over something nobody can reach.
+      className={cn("relative min-h-0 overflow-y-auto overscroll-contain focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#0088ff]", swipeOn && "overflow-x-hidden", anchor === "bottom" && "flex flex-col", className)}
+      style={{ fontFamily: fontStack, background: "var(--im-bg)", ...(swipeOn ? swipeStyle : null), ...style }}
       onScroll={event => {
         const el = event.currentTarget;
         nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < lm.nearBottom;
@@ -588,7 +627,7 @@ export function MessageList({
           const canJump = Boolean(quote) && (Boolean(onJumpToMessage) || messageIds.has(quote!.id));
           // Rule 3 of `threadGesture`: a plain tap opens the thread, but not while a click selects.
           const tapOpensThread = Boolean(onOpenThread) && Boolean(message.replyCount) && !selectable;
-          return (
+          const rowNode = (
             // `tabIndex -1`: the row is not its own tab stop, the log's arrow keys focus it. That is
             // what lets a keyboard open a message's actions, or its thread, without a pointer.
             <div key={row.key} data-slot="message-row" data-message-id={message.id} data-direction={message.direction} data-kind={message.kind ?? "text"}
@@ -634,6 +673,15 @@ export function MessageList({
                 </span>
               ) : <ReplyCount count={message.replyCount} platform={platform} />) : null}
             </div>
+          );
+          if (!swipeOn) return rowNode;
+          // `timeInset={0}`, not the metric's 16: that 16 is measured from the *screen's* trailing
+          // edge, and the content box above has already spent it as its edge inset. Passing it
+          // again would set the times 16 further in than the capture's x 385.
+          return (
+            <SwipeTimes key={row.key} time={formatClockTime(ms(message.sentAt))} progress={swipe.progress} timeInset={0}>
+              {rowNode}
+            </SwipeTimes>
           );
         })}
       </div>

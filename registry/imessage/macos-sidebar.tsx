@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, type ComponentProps, type CSSProperties, type ReactNode } from "react";
+import { useId, useState, type ComponentProps, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/registry/imessage/avatar";
 import { GroupAvatar, groupAvatarPlate } from "@/registry/imessage/group-avatar";
@@ -63,6 +63,45 @@ import { GroupAvatar, groupAvatarPlate } from "@/registry/imessage/group-avatar"
  *   background view native draws (`conversationListPinnedCellSelectedBackgroundCornerRadius` 8), and
  *   its label does not go white either, so the second term is NO here and the dot always takes
  *   `unreadIndicatorColor`. Give the tile that background and the white branch turns on with it.
+ *
+ * **The row's four states: rest, hover, pressed, selected.**
+ *
+ * *Selected* is the measured one: fill **#3478f6** on the key window, **`--sb-inactive`** when it is
+ * not, with the labels, the muted bell and the unread dot going white only in the first case (see
+ * `active` below). Both come from the full-window frames "macOS Chrome" is measured from.
+ *
+ * *Hover draws nothing, and that is the reading, not a gap.* Four independent sources say so:
+ * - `references/SPEC.md`, from the live session the sidebar numbers come from: "**No hover state**
+ *   on sidebar rows or bubbles."
+ * - `CKUIThemeMac` has no conversation-list hover, pressed or cell colour at all. Dumping every
+ *   zero-argument `UIColor` getter on it (86 of them) turns up `conversationListCellSelectedText/
+ *   Summary/DateColor` and nothing that could fill a row; `conversationListCellColor` and
+ *   `conversationListSelectedCellColor` are both **null** on the Mac theme, where the phone theme
+ *   answers #dcdcdc / #464646 and the Pad theme #0088ff / #0091ff.
+ * - `+[UIBackgroundConfiguration listSidebarCellConfiguration]` and `listPlainCellConfiguration`,
+ *   resolved for every combination of `highlighted` and `selected` at idiom 5, change **only** for
+ *   `selected`. `highlighted` alone is byte-identical to rest in both appearances.
+ * - ChatKit does implement hover — `appMenuCollectionViewCell:didHoverWithState:`,
+ *   `contactsCell:didHoverWithState:` — for the app drawer and the contacts list, and for no cell in
+ *   the conversation list. It is absent here on purpose, not by omission.
+ *
+ * So the hover fill is `--sb-row-hover`, and it is **`transparent`**. It is a seam rather than a
+ * value: a product that wants a web-idiomatic hover sets that one custom property and gets it on
+ * unselected, unpressed rows only. Nothing in this kit sets it, because native does not.
+ *
+ * *Pressed* is the selected look, arriving a beat early. `CKConversationListCell` is a
+ * **`UITableViewCell`** (not a collection-view cell) whose `selectionStyle` is `Default`, and a
+ * `UITableViewCell` paints the same `selectedBackgroundView` for `highlighted` as for `selected` —
+ * so a row under a held mouse wears the row's own selected fill, and no second colour is invented.
+ * The click still commits on release, and a press that wanders off the row before then puts the
+ * fill out again.
+ *
+ * **UNMEASURED, and the one place this departs from the framework's own answer**: the *labels* go
+ * white under the press too. `-[CKUIBehaviorMac useSelectedAppearanceForConversationCellState:
+ * traitCollection:]` is `(state.isSelected || state.cellDropState == 2) && …isMainWindowForeground
+ * Active` — it never reads `isHighlighted`, so on ChatKit's reading a held row would keep its dark
+ * labels over the blue. No capture holds a pressed row to settle it, and dark-on-#3478f6 is not
+ * something any macOS list draws, so the whole selected appearance travels together here.
  *
  * **Search** (`onSearch`, `searchQuery`). Typing in the field replaces the list *in place*:
  * `-[CKUIBehaviorMac searchControllerObscuresConversationList]` is **NO**, where the same selector on
@@ -168,6 +207,12 @@ export type MacSidebarProps = Omit<ComponentProps<"nav">, "onSelect"> & {
   onSelect?: (id: string) => void;
   /** Key window: blue selection. Otherwise the neutral inactive selection. */
   active?: boolean;
+  /**
+   * The row drawn as though the mouse were held down on it. Controlled; leave it out and the list
+   * follows the real pointer. It exists so a scenario can hold the pressed state still for a
+   * screenshot, the same way `searchQuery` lets one hold a filtered list still. `null` forces no row.
+   */
+  pressedId?: string | null;
   /** Footer line, e.g. "Syncing with iCloud Paused". */
   footer?: string;
   /**
@@ -316,8 +361,8 @@ function toParticipants(members: readonly GroupMember[]) {
   return members.map(member => ({ name: member.name, initials: member.initials, src: member.photo }));
 }
 
-function groupPlateFor(selected: boolean, active: boolean): string | undefined {
-  if (!selected || !active) return undefined;
+function groupPlateFor(filled: boolean, active: boolean): string | undefined {
+  if (!filled || !active) return undefined;
   const measured = groupAvatarPlate.find(row => row.background === "#3478f6")!;
   // One CSS custom property per appearance rather than a media query: the sidebar's dark palette is
   // driven by the `dark` class, and `light-dark()` answers to `color-scheme`, not to that class.
@@ -387,12 +432,24 @@ function unreadLabel(unread: boolean | number): string {
   return unread === 1 ? "1 unread message" : `${unread} unread messages`;
 }
 
-export function MacSidebar({ conversations, selectedId, onSelect, active = true, footer, searchQuery, defaultSearchQuery = "", onSearch, onOptions, className, style, ...props }: MacSidebarProps) {
+export function MacSidebar({ conversations, selectedId, onSelect, active = true, pressedId, footer, searchQuery, defaultSearchQuery = "", onSearch, onOptions, className, style, ...props }: MacSidebarProps) {
   const m = macSidebarMetrics;
   const headerId = useId();
   // The field owns its text unless the caller does, so it works with nothing wired — the same rule
   // the app shell follows for every surface it can open on its own.
   const [ownQuery, setOwnQuery] = useState(defaultSearchQuery);
+  /**
+   * The row the mouse is holding down. One id, not a flag per row, so a second button or a lost
+   * pointer cannot leave a stale fill behind. It clears on release, on a cancel and on leaving the
+   * row, so a press that wanders off commits nothing and paints nothing.
+   */
+  const [ownPressed, setOwnPressed] = useState<string | null>(null);
+  const pressed = pressedId !== undefined ? pressedId : ownPressed;
+  const release = () => setOwnPressed(current => (current === null ? current : null));
+  const press = (event: ReactPointerEvent<HTMLButtonElement>, id: string) => {
+    // Primary button only: a right click opens a menu, it does not light the row.
+    if (event.button === 0) setOwnPressed(id);
+  };
   const query = searchQuery ?? ownQuery;
   const searching = query.trim().length > 0;
   const matches = searching ? conversations.filter(c => conversationMatchesQuery(c, query)) : null;
@@ -411,7 +468,10 @@ export function MacSidebar({ conversations, selectedId, onSelect, active = true,
       aria-label="Conversations"
       className={cn(
         "mac-sidebar relative h-full select-none overflow-hidden bg-[#f8f8f8] text-black",
-        "[--sb-fill:#fafafa] [--sb-rim:#ffffff] [--sb-rim-inner:#fefefe] [--sb-inactive:#e2e2e2] [--sb-name:#000000] [--sb-secondary:#6e6e6d] [--sb-muted:#aeaeae] [--sb-glyph:#232323] [--sb-field:#eeeeee] [--sb-placeholder:#777777] [--sb-separator:#e1e1e1] [--sb-footer-line:#d0d2d7] [--sb-footer-top:#e4e6eb] [--sb-footer-bottom:#eff0f2] [--sb-footer-text:#000000] [--sb-unread:#0088ff] [--sb-group-plate-selected:#a2c7ff]",
+        // `--sb-row-hover` is transparent on purpose: macOS Messages draws no hover fill on a
+        // conversation row (four sources in this file's note). It is here as the one seam a product
+        // can set if it wants one.
+        "[--sb-row-hover:transparent] [--sb-fill:#fafafa] [--sb-rim:#ffffff] [--sb-rim-inner:#fefefe] [--sb-inactive:#e2e2e2] [--sb-name:#000000] [--sb-secondary:#6e6e6d] [--sb-muted:#aeaeae] [--sb-glyph:#232323] [--sb-field:#eeeeee] [--sb-placeholder:#777777] [--sb-separator:#e1e1e1] [--sb-footer-line:#d0d2d7] [--sb-footer-top:#e4e6eb] [--sb-footer-bottom:#eff0f2] [--sb-footer-text:#000000] [--sb-unread:#0088ff] [--sb-group-plate-selected:#a2c7ff]",
         "dark:bg-[#1c1c1c] dark:text-[#f4f4f4]",
         "dark:[--sb-fill:#1b1b1b] dark:[--sb-rim:#424242] dark:[--sb-rim-inner:#323232] dark:[--sb-inactive:#3a3a3a] dark:[--sb-name:#f4f4f4] dark:[--sb-secondary:#a4a4a4] dark:[--sb-muted:#5b5b5b] dark:[--sb-glyph:#dddddd] dark:[--sb-field:#1e1e1e] dark:[--sb-placeholder:#9a9a9a] dark:[--sb-separator:#3a3a3a] dark:[--sb-footer-line:#43454a] dark:[--sb-footer-top:#27292e] dark:[--sb-footer-bottom:#27272a] dark:[--sb-footer-text:#f5f5f5] dark:[--sb-unread:#0091ff] dark:[--sb-group-plate-selected:#264a8f]",
         className,
@@ -432,6 +492,12 @@ export function MacSidebar({ conversations, selectedId, onSelect, active = true,
         }
         .mac-sidebar-separator { transition: opacity ${m.selectionFade}ms linear; }
         @media (prefers-reduced-motion: reduce) { .mac-sidebar-separator { transition: none; } }
+        /* The hover fill is a child layer rather than the button's own background, because the
+           button's background carries the selected and pressed fills inline and an inline value
+           cannot be reached by a :hover rule. Only a row that is neither selected nor held takes it,
+           and --sb-row-hover is transparent unless a product sets it. */
+        .mac-sidebar-hover { background: var(--sb-row-hover); opacity: 0; }
+        [data-slot="sidebar-row"][data-selected="false"]:not([data-pressed="true"]) .mac-sidebar-row:hover > .mac-sidebar-hover { opacity: 1; }
       `}</style>
       <div
         aria-hidden="true"
@@ -537,18 +603,27 @@ export function MacSidebar({ conversations, selectedId, onSelect, active = true,
       <ul data-slot="sidebar-rows" role="list" aria-labelledby={searching ? headerId : undefined} className="absolute m-0 list-none p-0" style={{ left: m.row.left, top: listTop, width: m.row.width }}>
         {rows.map((c, index) => {
           const selected = c.id === selectedId;
-          const nextSelected = rows[index + 1]?.id === selectedId;
+          // A held row wears the selected fill: `CKConversationListCell` is a `UITableViewCell`, and
+          // a table cell paints one `selectedBackgroundView` for `highlighted` and `selected` alike.
+          const held = c.id === pressed;
+          const filled = selected || held;
+          const nextRow = rows[index + 1];
+          const nextFilled = nextRow !== undefined && (nextRow.id === selectedId || nextRow.id === pressed);
+          const fill = active ? "#3478f6" : "var(--sb-inactive)";
           // Inactive windows keep the neutral text colors on the gray selection.
-          const highlighted = selected && active;
+          const highlighted = filled && active;
           const secondary = highlighted ? "#d6e4fd" : "var(--sb-secondary)";
           // The annotated run takes `conversationListSenderColor`, which is the colour the name label
           // takes on this row; on a selected row both go to the white the name goes to.
           const matched = highlighted ? "#ffffff" : "var(--sb-name)";
           return (
-            <li key={c.id} data-slot="sidebar-row" data-selected={selected ? "true" : "false"} className="relative" style={{ height: m.row.height }}>
+            <li key={c.id} data-slot="sidebar-row" data-selected={selected ? "true" : "false"} data-pressed={held ? "true" : undefined} className="relative" style={{ height: m.row.height }}>
               <button type="button" aria-current={selected ? "true" : undefined} onClick={() => onSelect?.(c.id)}
+                onPointerDown={event => press(event, c.id)} onPointerUp={release} onPointerCancel={release} onPointerLeave={release}
                 className="mac-sidebar-row absolute inset-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-[#3478f6]/60"
-                style={{ background: selected ? (active ? "#3478f6" : "var(--sb-inactive)") : "transparent" } as CSSProperties}>
+                style={{ background: filled ? fill : "transparent" } as CSSProperties}>
+                {/* First child, so every avatar and label still paints over it. */}
+                <span aria-hidden="true" data-slot="row-hover" className="mac-sidebar-hover pointer-events-none absolute inset-0 rounded-[inherit] [corner-shape:inherit]" />
                 {c.unread ? (
                   <>
                     {/* First in the row so the announcement leads: "Unread, Alex Morgan, Yesterday, ...". */}
@@ -559,7 +634,7 @@ export function MacSidebar({ conversations, selectedId, onSelect, active = true,
                   </>
                 ) : null}
                 {c.members && c.members.length > 1
-                  ? <GroupAvatar size={m.row.avatar} name={c.name} participants={toParticipants(c.members)} plate={groupPlateFor(selected, active)}
+                  ? <GroupAvatar size={m.row.avatar} name={c.name} participants={toParticipants(c.members)} plate={groupPlateFor(filled, active)}
                       className="absolute" style={{ left: m.row.avatarLeft, top: (m.row.height - m.row.avatar) / 2 }} />
                   : <Avatar size={m.row.avatar} initials={c.initials} src={c.photo} name={c.name} className="absolute" style={{ left: m.row.avatarLeft, top: (m.row.height - m.row.avatar) / 2 }} />}
                 <span className="absolute flex items-baseline justify-between gap-2" style={{ left: m.row.textLeft, right: m.row.textRight, top: m.row.nameTop }}>
@@ -579,7 +654,7 @@ export function MacSidebar({ conversations, selectedId, onSelect, active = true,
                 </span>
                 {c.muted && (
                   <span className="absolute" style={{ right: m.row.separatorRight, top: m.row.mutedTop }}>
-                    <MutedIcon size={m.row.muted} color={highlighted ? "#d6e4fd" : "var(--sb-muted)"} halo={selected ? (active ? "#3478f6" : "var(--sb-inactive)") : "var(--sb-fill)"} />
+                    <MutedIcon size={m.row.muted} color={highlighted ? "#d6e4fd" : "var(--sb-muted)"} halo={filled ? fill : "var(--sb-fill)"} />
                   </span>
                 )}
               </button>
@@ -592,7 +667,7 @@ export function MacSidebar({ conversations, selectedId, onSelect, active = true,
                   and `document.getAnimations()` still reaches the live one. */}
               {index < rows.length - 1 && (
                 <span aria-hidden="true" data-slot="row-separator" className="mac-sidebar-separator absolute bottom-0 h-px bg-[var(--sb-separator)]"
-                  style={{ left: m.row.textLeft, right: m.row.separatorRight, opacity: selected || nextSelected ? 0 : 1 }} />
+                  style={{ left: m.row.textLeft, right: m.row.separatorRight, opacity: filled || nextFilled ? 0 : 1 }} />
               )}
             </li>
           );

@@ -100,6 +100,13 @@ const macPopoverPadding = 7;
  * rather than bound to something that only reports.
  */
 export const macShortcuts = {
+  /**
+   * **File ▸ New Message**, "N" / 0. Read the same way as the other three, off the live macOS 26
+   * Messages menu bar: the first item of the File menu, `AXMenuItemCmdChar` "N" and
+   * `AXMenuItemCmdModifiers` 0 (a bare ⌘). On the Mac it opens no sheet and no window — the window
+   * you are in becomes the compose window.
+   */
+  newMessage: "n",
   /** **Edit ▸ Find ▸ Find…**, "F" / 0. On the Mac that is the sidebar's search field, not an overlay. */
   find: "f",
   /** **Edit ▸ Select All**, "A" / 0. Selects every message in the transcript. */
@@ -107,6 +114,33 @@ export const macShortcuts = {
   /** **Conversation ▸ Show Details**, "I" / 2. */
   details: "i",
 } as const;
+
+/**
+ * New Message, the macOS way.
+ *
+ * **The Mac does not present anything.** iOS pushes a modal sheet over the list
+ * (`ios-new-message-sheet.tsx`, measured off `newmsg-light.png`); the Mac has no sheet, no screen and
+ * no second window. Composing replaces this window's *transcript* with a "To:" field
+ * (`macos-header.tsx`, `compose`) over an empty log, and adds one row to the conversation list which
+ * is the one selected. Nothing else about the window moves: the sidebar, the composer, the traffic
+ * lights and the window's own chrome are exactly where they were, which is why this is a state of the
+ * window rather than a surface presented over it.
+ *
+ * **No capture holds it**, so the two strings are ChatKit's own, out of `ChatKit.loctable` (en), and
+ * the row's shape is this window's own measured row: the draft has no participant yet, so its avatar
+ * is the `CKAvatarView` placeholder (`Avatar`'s silhouette) and it carries no preview and no time,
+ * because a draft has neither. The row's id is a sentinel that cannot collide with a caller's:
+ * `selectedId` while composing is this, not the conversation the pane was showing.
+ */
+export const macCompose = {
+  /** `NEW_MESSAGE`. What the draft's row in the conversation list reads. */
+  title: "New Message",
+  /** The sentinel id the draft row takes in the sidebar. */
+  rowId: "__com.apple.messages.new-message",
+} as const;
+
+/** An empty transcript, hoisted so a composing frame hands `MessageList` the same array every render. */
+const noMessages: Message[] = [];
 
 /**
  * Whether the keystroke belongs to a text field rather than to the window. ⌘A inside the composer or
@@ -142,7 +176,7 @@ const macAppStyles = `
 [data-im-platform="macos"][data-switching="true"] [data-slot="sidebar-row"][data-selected="true"] > button{background-color:transparent!important}
 [data-slot="header-outgoing"] [data-slot="header-glass"],[data-slot="header-outgoing"] [data-slot="compose-button"],[data-slot="header-outgoing"] [data-slot="video-button"]{display:none}
 :where(.dark,.dark *) [data-slot="macos-messages-app"][data-active="false"] [data-slot="mac-sidebar"]:not(:where([data-preview-theme="light"] *)){--sb-fill:#292929}
-[data-slot="macos-messages-app"][data-active="false"] :is([data-slot="compose-button"],[data-slot="video-button"],[data-slot="attach-button"],[data-slot="emoji-button"],[data-slot="sidebar-options"]){opacity:0.5}
+[data-slot="macos-messages-app"][data-active="false"] :is([data-slot="compose-button"],[data-slot="video-button"],[data-slot="add-recipient-button"],[data-slot="attach-button"],[data-slot="emoji-button"],[data-slot="sidebar-options"]){opacity:0.5}
 [data-slot="mac-attachment-popover"] [data-slot="sheet"]{border-radius:${macAttachmentPopovers.radius}px!important;background:transparent!important;box-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
 [data-slot="mac-attachment-popover"] [data-slot="photo-picker"]{clip-path:inset(0 round ${macAttachmentPopovers.radius}px)!important;background:transparent!important}
 `;
@@ -192,7 +226,22 @@ export type MacMessagesAppProps = {
   typing?: boolean | { sender?: string };
   now?: Date | number;
   composer?: { value?: string; disabled?: boolean; onChange?: (value: string) => void; onSend?: (text: string) => void | Promise<void>; onAttach?: () => void; onEmoji?: () => void; onAudio?: () => void };
+  /**
+   * A new message is being composed. Same `prop ?? shell-held` contract as every other surface here:
+   * leave it out and the header's compose button and ⌘N open it themselves, so New Message works with
+   * nothing wired; pass it (even `null`) to own that state. `recipient` is the text in the "To:" field.
+   *
+   * See `macCompose` for why this is a state of the window rather than something presented over it.
+   */
+  compose?: { recipient?: string } | null;
+  /** The compose button, ⌘N, or a caller's own New Message. Fires as compose opens. */
   onCompose?: () => void;
+  /** Typing in the "To:" field. */
+  onComposeRecipientChange?: (value: string) => void;
+  /** The ⊕ at the end of the "To:" field: on the Mac this is the system contact picker, which this kit cannot own. */
+  onAddRecipient?: () => void;
+  /** Compose was left — by choosing a conversation in the sidebar, which is what ends it natively. */
+  onComposeClose?: () => void;
   onVideoCall?: () => void;
   onDetails?: () => void;
   /**
@@ -333,7 +382,8 @@ type OutgoingPane = {
  */
 export function MacMessagesApp({
   width = macScreen.width, height = macScreen.height, active = true, conversations = [], selectedId, onSelectConversation, contact, group = false, participants,
-  messages, typing = false, now, composer, onCompose, onVideoCall, onDetails, sendAnimation, receiveAnimation, onSendAnimationEnd,
+  messages, typing = false, now, composer, compose, onCompose, onComposeRecipientChange, onAddRecipient, onComposeClose,
+  onVideoCall, onDetails, sendAnimation, receiveAnimation, onSendAnimationEnd,
   selectedMessageIds, onSelectMessage, contextMenu, onContextMenu, onContextMenuClose, onTapback, onMenuAction,
   plusMenu, onPlusMenuSelect, onPlusMenuClose, conversationTransition, menuTransition,
   searchQuery, onSearch,
@@ -399,6 +449,21 @@ export function MacMessagesApp({
   // during render, never in an effect: an effect leaves one committed frame with the surface already
   // unmounted, and its dismissal never runs. That is the same rule the two menus above follow.
   // ---------------------------------------------------------------------------------------------
+  /**
+   * New Message. There is no entrance to seek and nothing leaves the screen, so unlike the surfaces
+   * below it this needs no "is it closing" flag: the window simply is composing or is not.
+   */
+  const [ownCompose, setOwnCompose] = useState<{ recipient?: string } | null>(null);
+  const composeValue = compose === undefined ? ownCompose : compose;
+  const composing = composeValue != null;
+  const closeCompose = () => { setOwnCompose(null); if (composing) onComposeClose?.(); };
+  const setRecipient = (value: string) => {
+    setOwnCompose(current => (current ? { ...current, recipient: value } : current));
+    onComposeRecipientChange?.(value);
+  };
+  /** What the log draws. A draft has no transcript, and its own composer is the only thing to type in. */
+  const transcript = composing ? noMessages : messages;
+
   const [ownDetails, setOwnDetails] = useState(false);
   const detailsValue = details === undefined ? (ownDetails ? { open: true } : null) : details;
   const detailsOpen = detailsValue?.open ?? false;
@@ -410,6 +475,12 @@ export function MacMessagesApp({
   }
   const detailsShown = detailsOpen || closingDetails;
   const closeDetails = () => { setOwnDetails(false); onDetailsClose?.(); };
+  /** New Message. The inspector inspects a conversation and a draft has none, so it closes with the transcript. */
+  const openCompose = () => {
+    if (detailsOpen) closeDetails();
+    if (compose === undefined) setOwnCompose(current => current ?? {});
+    onCompose?.();
+  };
   // The inspector's three switch rows. `MacDetails` draws each one only when it has a handler, so a
   // caller that owns them passes both halves and a caller that owns nothing still gets working rows
   // rather than an empty panel. These starting values are this component's, not a measurement: no
@@ -494,7 +565,7 @@ export function MacMessagesApp({
   }
   function select(id: string | null, modifiers: { shiftKey: boolean; metaKey: boolean }) {
     if (id === null) { anchorId.current = null; commitSelection([], { id: null, ...modifiers }); return; }
-    const next = nextMessageSelection(messages.map(message => message.id), selection, id, modifiers, anchorId.current);
+    const next = nextMessageSelection(transcript.map(message => message.id), selection, id, modifiers, anchorId.current);
     if (!modifiers.shiftKey) anchorId.current = id;
     commitSelection(next, { id, ...modifiers });
   }
@@ -505,7 +576,7 @@ export function MacMessagesApp({
    * way clearing does.
    */
   function selectAllMessages() {
-    commitSelection(messages.map(message => message.id), { id: null, shiftKey: false, metaKey: true });
+    commitSelection(transcript.map(message => message.id), { id: null, shiftKey: false, metaKey: true });
   }
   const mine = target?.reactions?.find(reaction => reaction.byMe);
   const selected: TapbackSelection | undefined = mine ? (mine.emoji ? { emoji: mine.emoji } : { type: mine.type as never }) : undefined;
@@ -519,18 +590,25 @@ export function MacMessagesApp({
    * arriving conversation is alone in the pane is never shown. A passive effect would lose exactly
    * that frame, which is why nothing here uses one.
    */
-  const committed = useRef({ id: selectedId, messages, contact, group, members: groupMembers });
+  const committed = useRef({ id: selectedId, messages: transcript, contact, group, members: groupMembers, composing });
   const [outgoingPane, setOutgoingPane] = useState<OutgoingPane | null>(null);
   useLayoutEffect(() => {
     const before = committed.current;
-    committed.current = { id: selectedId, messages, contact, group, members: groupMembers };
+    committed.current = { id: selectedId, messages: transcript, contact, group, members: groupMembers, composing };
     // Opening the first conversation is an arrival, not a switch: there is nothing to cross with.
     if (before.id === selectedId || before.id === undefined || selectedId === undefined) return;
+    // Leaving a draft is an arrival, not a switch, for the same reason opening the first conversation
+    // is: there is nothing to cross with. The pane behind the draft was empty and its header carried a
+    // "To:" field rather than a name, and the conversation the caller was still handing us all along
+    // was never on screen — crossing that in would flash a conversation nobody had been looking at.
+    // The sidebar has nothing to travel from either: the highlight was on the draft's row, and that
+    // row leaves the list in this same commit.
+    if (before.composing) return;
     const rows = conversations.filter(conversation => !conversation.pinned);
     const from = rows.findIndex(row => row.id === before.id);
     const to = rows.findIndex(row => row.id === selectedId);
     setOutgoingPane({ messages: before.messages, contact: before.contact, group: before.group, members: before.members, rows: from >= 0 && to >= 0 && from !== to ? { from, to } : null });
-  }, [selectedId, messages, contact, group, groupMembers, conversations]);
+  }, [selectedId, transcript, contact, group, groupMembers, conversations, composing]);
 
   const switchProgress = conversationTransition?.progress;
   useLayoutEffect(() => {
@@ -627,6 +705,23 @@ export function MacMessagesApp({
       ? conversations.map(item => (item.id === selectedId && !item.members ? { ...item, members: groupMembers } : item))
       : conversations
   ), [conversations, selectedId, groupMembers]);
+
+  /**
+   * The list the sidebar draws while composing: the draft's row first, then everything the caller
+   * passed. First among the *unpinned* rows is where a new conversation lands — the pinned strip is a
+   * separate collection above the list and a draft is not pinned — and `MacSidebar` splits the two on
+   * `pinned`, so prepending is enough to put it at the top of the rows without touching the tiles.
+   *
+   * The draft carries no `initials`, `preview` or `time`: `Avatar` draws its silhouette for a contact
+   * with neither initials nor a photo, which is what `CKAvatarView` shows for a conversation with no
+   * participants, and a draft has no last message to preview and no date to stamp.
+   */
+  const composeRows = useMemo(() => {
+    if (!composing) return sidebarConversations;
+    const draft: SidebarConversation = { id: macCompose.rowId, name: macCompose.title, initials: "", preview: "", time: "" };
+    const pinned = sidebarConversations.filter(item => item.pinned);
+    return [...pinned, draft, ...sidebarConversations.filter(item => !item.pinned)];
+  }, [composing, sidebarConversations]);
 
   const closePlusMenu = () => { setOwnPlusMenu(false); onPlusMenuClose?.(); };
   /**
@@ -726,7 +821,7 @@ export function MacMessagesApp({
                 // with no ⌘ equivalent — and only on a message that has something to preview, which
                 // is why that menu item reads disabled with nothing selected. Anything else falls
                 // through to the menu, so Enter and the context-menu key still open it.
-                if (event.key === " " && id && messages.find(message => message.id === id)?.images?.length) {
+                if (event.key === " " && id && transcript.find(message => message.id === id)?.images?.length) {
                   event.preventDefault();
                   quickLook(id, 0);
                   return;
@@ -740,7 +835,7 @@ export function MacMessagesApp({
                 onContextMenu(id, at.left + at.width / 2 - rect.left, at.bottom - rect.top);
               }}>
               <div data-slot="pane-content" className="absolute inset-0">
-                <MessageList ref={list} frameRef={pane} messages={messages} typing={typing} group={isGroup} now={now} anchor="bottom" selectedIds={selection}
+                <MessageList ref={list} frameRef={pane} messages={transcript} typing={composing ? false : typing} group={isGroup} now={now} anchor="bottom" selectedIds={selection}
                   insetTop={macScreen.listTop} insetBottom={macScreen.listBottom} renderReactions={renderReactions} messageActions={Boolean(onContextMenu)}
                   onOpenImage={(id, index) => quickLook(id, index)} className="absolute inset-0" />
               </div>
@@ -755,7 +850,8 @@ export function MacMessagesApp({
               {/* The name pill is the details trigger, and it opens the pane itself when the caller
                   is not holding that state. ⌥⌘I on the window does the same. */}
               <MacHeader name={contact.name} initials={contact.initials} photo={contact.photo} members={groupMembers}
-                onCompose={onCompose} onVideoCall={onVideoCall} onOpenDetails={() => { setOwnDetails(true); onDetails?.(); }}
+                compose={composing} recipient={composeValue?.recipient ?? ""} onRecipientChange={setRecipient} onAddRecipient={onAddRecipient}
+                onCompose={openCompose} onVideoCall={onVideoCall} onOpenDetails={() => { setOwnDetails(true); onDetails?.(); }}
                 className="absolute left-0 top-0 w-full" style={{ height: macHeaderMetrics.height }} />
               {/* The name pill it is leaving, over the live header so the two cross where the real one
                   sits. `macAppStyles` drops this copy's glass and buttons: only the contact is leaving. */}
@@ -859,12 +955,20 @@ export function MacMessagesApp({
           }
           if (!event.metaKey || event.ctrlKey) return;
           const key = event.key.toLowerCase();
-          // Conversation ▸ Show Details, ⌥⌘I.
+          // Conversation ▸ Show Details, ⌥⌘I. A draft has no conversation to show details for, so the
+          // item is inert while composing — the same reason the name pill is not drawn there.
           if (event.altKey) {
-            if (key !== macShortcuts.details) return;
+            if (key !== macShortcuts.details || composing) return;
             event.preventDefault();
             if (detailsOpen) closeDetails();
             else { setOwnDetails(true); onDetails?.(); }
+            return;
+          }
+          // File ▸ New Message, ⌘N. Idempotent: pressing it again in a draft keeps the draft, which is
+          // what the Mac does — there is only ever one New Message row in the list.
+          if (key === macShortcuts.newMessage) {
+            event.preventDefault();
+            openCompose();
             return;
           }
           // Edit ▸ Find ▸ Find…, ⌘F. On the Mac the search field *is* the results
@@ -880,7 +984,7 @@ export function MacMessagesApp({
           }
           // Edit ▸ Select All, ⌘A. Not while a text field has it: there the platform's own ⌘A wins.
           if (key === macShortcuts.selectAll) {
-            if (isTextEntry(document.activeElement) || !messages.length) return;
+            if (isTextEntry(document.activeElement) || !transcript.length) return;
             event.preventDefault();
             selectAllMessages();
           }
@@ -888,7 +992,11 @@ export function MacMessagesApp({
         <style>{macAppStyles}</style>
         <MacWindow width={width} height={height} active={active} data-slot="macos-messages-app"
           sidebar={
-            <MacSidebar conversations={sidebarConversations} selectedId={selectedId} onSelect={onSelectConversation} active={active} footer={footer}
+            // While composing, the draft's row is the selected one and the conversation the pane was
+            // showing gives up its highlight. Choosing any row leaves compose, which is what ends it
+            // natively — there is no other way out of a Mac draft than going somewhere else.
+            <MacSidebar conversations={composeRows} selectedId={composing ? macCompose.rowId : selectedId}
+              onSelect={id => { if (id === macCompose.rowId) return; closeCompose(); onSelectConversation?.(id); }} active={active} footer={footer}
               searchQuery={searchQuery} onSearch={onSearch} className="absolute inset-0" />
           }
           content={detailsShown ? (

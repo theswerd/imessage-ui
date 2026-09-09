@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { conversationList } from "../../harness/scenarios";
+import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
+import { conversationList, unreadConversationList } from "../../harness/scenarios";
 import {
   actionsMenu, bubbleBody, composerField, composerForm, defaultGesture, effectsScreen, messageLog, messageRow, messageRows,
   openEffectsScreen, openScene, openTapbackMenu, openWorkbench, platformFor, tapbackMenu, watchPageErrors,
@@ -9,6 +9,15 @@ import {
  * User journeys through the two app shells, driven from the harness. Every assertion goes through an
  * accessible role, name or state; nothing here knows about class names or pixel geometry. No test
  * sleeps: waits are either expect polling or a real gesture the page itself times (the 500 ms hold).
+ *
+ * The one deliberate exception is the block at the bottom of this file. A press, a hover and a drag
+ * have no accessible state to poll: the row a finger is on is a *paint*, so proving it exists means
+ * reading the computed style before, during and after the gesture — and, crucially, driving a real
+ * gesture rather than dispatching an event. On 2026-09-09 a measurement of this kit found a list row
+ * held under a finger at `rgba(0, 0, 0, 0)` before and after, a sidebar row identical at rest, hover
+ * and press, a Hide Alerts switch that answered `aria-checked="false"` to a click, no timestamps
+ * under a leftward drag and not one unread dot in either list. Every one of those shipped because a
+ * screenshot suite renders states and never drives them. These tests drive them.
  */
 
 const pageErrors = new WeakMap<Page, string[]>();
@@ -393,4 +402,432 @@ test("the effects screen switches tabs and cancels without sending", async ({ pa
   await expect(screen).toHaveCount(0);
   await expect(messageRows(page)).toHaveCount(before);
   await expect(composerField(page)).toHaveValue("Every detail, down to the last bubble.");
+});
+
+/* ───────────────────────────── Pressed, held and dragged ─────────────────────────────
+ *
+ * Everything below drives a gesture and reads what the page paints while it is in flight. Nothing
+ * here is a screenshot and nothing here dispatches a synthetic event: a pressed row, a hovered row,
+ * a dimmed button and a revealed timestamp only exist while a pointer is down, so a suite that
+ * navigates and screenshots cannot reach any of them — which is why every one of these states was
+ * shipped inert.
+ */
+
+/**
+ * The pointer these tests drive with.
+ *
+ * On iOS under Chromium it is a REAL touch, dispatched through CDP's `Input.dispatchTouchEvent`.
+ * That matters twice over: a synthesised `pointerdown` proves nothing about a gesture the browser
+ * would take over for panning, and `:active` never latches under a CDP touch at all — so an
+ * `:active`-based assertion passes on a screen that does nothing, which is exactly the class of
+ * defect this block exists to catch. WebKit exposes no CDP, so it drives the mouse, which raises the
+ * same pointer events these components listen for; the macOS shell is a mouse target either way.
+ *
+ * Each `touchPoints` entry MUST carry an `id`. Chromium accepts a point without one and then
+ * dispatches no `pointerdown` at all, so the test reads a resting row and reports a bug that is its
+ * own — measured 2026-09-09, and the reason this helper exists rather than an inline `cdp.send`.
+ */
+async function beginGesture(page: Page, info: TestInfo) {
+  const touch = platformFor(info) === "ios" && info.project.name.endsWith("chromium");
+  const cdp = touch ? await page.context().newCDPSession(page) : null;
+  let at = { x: 0, y: 0 };
+  const points = () => [{ x: at.x, y: at.y, id: 0, radiusX: 5, radiusY: 5, force: 1 }];
+  const centre = async (target: Locator) => {
+    const box = (await target.boundingBox())!;
+    at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    return at;
+  };
+  return {
+    /** A touch has no hover; only a mouse gesture may assert one. */
+    hovers: cdp === null,
+    async hover(target: Locator) { const { x, y } = await centre(target); await page.mouse.move(x, y); },
+    /** Puts the pointer down at a stated point rather than at a control's centre. */
+    async downAt(x: number, y: number) {
+      at = { x, y };
+      if (cdp) await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: points() });
+      else { await page.mouse.move(at.x, at.y); await page.mouse.down(); }
+    },
+    async down(target: Locator) {
+      await centre(target);
+      if (cdp) await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: points() });
+      else { await page.mouse.move(at.x, at.y); await page.mouse.down(); }
+    },
+    async moveTo(x: number, y: number) {
+      at = { x, y };
+      if (cdp) await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: points() });
+      else await page.mouse.move(x, y);
+    },
+    /** A real lift, which also activates whatever is under it. */
+    async up() {
+      if (cdp) await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      else await page.mouse.up();
+    },
+    /**
+     * Ends the hold WITHOUT the activation a lift fires, so a press state can be watched going out
+     * on a control whose click would navigate away from the thing being measured. A cancelled touch
+     * is what the browser itself sends when a gesture is taken over for panning, and it is the path
+     * `UITableView` treats as "a touch that became a scroll never highlights".
+     */
+    async abort() {
+      if (cdp) { await cdp.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] }); return; }
+      await page.mouse.move(2, 2);
+      await page.mouse.up();
+    },
+  };
+}
+
+/** What the element paints right now, plus whether it is drawing a keyboard focus ring. */
+function styleOf(target: Locator) {
+  return target.evaluate(element => {
+    const style = getComputedStyle(element);
+    return { background: style.backgroundColor, opacity: style.opacity, transform: style.transform, focusVisible: element.matches(":focus-visible") };
+  });
+}
+const TRANSPARENT = "rgba(0, 0, 0, 0)";
+
+/**
+ * Everything the element and its subtree paint, as one string to compare before against during.
+ *
+ * The subtree is the point. A pressed control does not always change its own box: the iOS details
+ * rows put the highlight on a layer of their own, the composer's glass buttons dim the glass rather
+ * than the button, and a row that delegates its fill to a child would look untouched from the
+ * outside. Comparing the whole subtree asks the only question worth asking — did anything change on
+ * screen — without pinning a colour this file has no measurement for.
+ */
+/**
+ * The paint of the element AND its parent's subtree. A pressed row does not always paint on itself:
+ * `ios-details.tsx` puts the highlight on a `row-press` layer that is a SIBLING of the button inside
+ * the cell's clip, so a subtree query rooted at the button sees a screen that never changes. The
+ * parent is the smallest box that contains both.
+ */
+function paintAround(target: Locator) {
+  return paintFrom(target.locator("xpath=.."));
+}
+
+/**
+ * The settled paint. A press release is a 100 ms eased transition, and reading the next control's
+ * rest pose while the last one is still easing back reads a pressed button and calls it rest —
+ * measured 2026-09-09, on the composer's send arrow, which React reuses as the DOM node the mic had.
+ * Two identical reads in a row means nothing is in flight.
+ */
+async function settled(page: Page, read: () => Promise<string>): Promise<string> {
+  let previous = await read();
+  for (let attempt = 0; attempt < 40; attempt++) {
+    // A frame apart, deliberately: `getComputedStyle` samples a transition once per frame, so two
+    // round trips inside one frame return the same value and a still-easing control reads settled.
+    await nextFrame(page);
+    const next = await read();
+    if (next === previous) return next;
+    previous = next;
+  }
+  return previous;
+}
+
+/** Waits for the page to paint, so the next computed style is a new sample and not a cached one. */
+function nextFrame(page: Page) {
+  return page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+}
+
+function paintOf(target: Locator) {
+  return paintFrom(target);
+}
+
+function paintFrom(target: Locator) {
+  return target.evaluate(root => [root, ...root.querySelectorAll("*")].map(element => {
+    const style = getComputedStyle(element);
+    // `backgroundImage` is in here because the macOS inspector's glass buttons press by swapping a
+    // gradient over an unchanged `background-color`; a signature of colours alone reads them inert.
+    return `${style.backgroundColor}|${style.backgroundImage}|${style.opacity}|${style.transform}|${style.color}|${style.boxShadow}`;
+  }).join("\n"));
+}
+
+test("a finger on a conversation row lights it, and letting go puts it out", async ({ page }, info) => {
+  test.skip(platformFor(info) === "macos", "the iOS list is the touch surface; the sidebar's own press is the test below");
+  // Light and dark are two different colours out of ChatKit, and only one of them can be wrong at a
+  // time, so both are driven. The row is the THIRD: the row above a pressed one drops its separator
+  // as well, and picking the first would leave that half of the behaviour unobserved.
+  for (const [theme, fill] of [["light", "rgb(220, 220, 220)"], ["dark", "rgb(70, 70, 70)"]] as const) {
+    await openScene(page, info, "list", 0, theme);
+    const row = page.locator('[data-slot="row"]').nth(2);
+    const button = row.locator("button");
+    const separators = page.locator('[data-slot="separator"]');
+    const restSeparators = await separators.count();
+
+    expect((await styleOf(button)).background, `${theme}: a row at rest paints nothing`).toBe(TRANSPARENT);
+    await expect(row).not.toHaveAttribute("data-pressed");
+
+    const gesture = await beginGesture(page, info);
+    await gesture.down(row);
+    await expect(row).toHaveAttribute("data-pressed");
+    const held = await styleOf(button);
+    // `-[CKUITheme conversationListSelectedCellColor]` read at idiom 0, not a guess and not from a
+    // capture: scanning both list captures returns one flat run each, so neither holds a pressed row.
+    expect(held.background, `${theme}: the held row`).toBe(fill);
+    // A press opened by a finger must never draw a focus ring. Both engines match `:focus-visible`
+    // on a programmatic focus while a pointer is still down, which is the trap `tapback-bar.tsx` and
+    // `audio-recorder.tsx` had to work around; the list avoids it by focusing nothing at all.
+    expect(held.focusVisible, `${theme}: a finger must not raise a focus ring`).toBe(false);
+    // The highlight is one unbroken band: the pressed row's separator and the one above it go too.
+    await expect(separators).toHaveCount(restSeparators - 2);
+
+    await gesture.abort();
+    await expect(row).not.toHaveAttribute("data-pressed");
+    await expect.poll(async () => (await styleOf(button)).background, { message: `${theme}: the highlight goes out` }).toBe(TRANSPARENT);
+    await expect(separators).toHaveCount(restSeparators);
+  }
+});
+
+test("a sidebar row answers hover and press with two different fills", async ({ page }, info) => {
+  test.skip(platformFor(info) === "ios", "the sidebar is a macOS surface");
+  await openScene(page, info, "list");
+  // An UNSELECTED row: the selected one is already filled, so it could not tell a working press from
+  // a broken one. Row 1 is Design Crit; row 0, Alex Morgan, is the scene's selection.
+  const row = page.locator('[data-slot="sidebar-row"]').nth(1);
+  const button = row.locator("button");
+  const hoverLayer = row.locator('[data-slot="row-hover"]');
+
+  expect((await styleOf(button)).background).toBe(TRANSPARENT);
+  expect((await styleOf(hoverLayer)).opacity, "nothing is hovered before the mouse arrives").toBe("0");
+
+  const gesture = await beginGesture(page, info);
+  await gesture.hover(row);
+  // Hover is the wash, drawn by a layer of its own rather than by the row's background: on 2026-09-09
+  // rest, hover and press all measured `rgba(0, 0, 0, 0)` here, which is the whole reason for this.
+  await expect.poll(async () => (await styleOf(hoverLayer)).opacity, { message: "hover raises the wash" }).toBe("1");
+  expect((await styleOf(button)).background, "hover is not the press fill").toBe(TRANSPARENT);
+
+  await gesture.down(row);
+  await expect(row).toHaveAttribute("data-pressed");
+  const held = await styleOf(button);
+  // #3478f6, the key window's selection: `CKConversationListCell` is a `UITableViewCell` and a table
+  // cell paints one `selectedBackgroundView` for `highlighted` and `selected` alike.
+  expect(held.background, "a held row wears the selection fill").toBe("rgb(52, 120, 246)");
+  expect(held.focusVisible, "a mouse press must not raise a focus ring").toBe(false);
+
+  await gesture.abort();
+  await expect(row).not.toHaveAttribute("data-pressed");
+  await expect.poll(async () => (await styleOf(button)).background, { message: "the fill goes out on release" }).toBe(TRANSPARENT);
+});
+
+/**
+ * Every button in the two shells' chrome, with the pose it takes. The iOS ones dim and shrink
+ * (`iosNavPress` / `iosComposerPress`: alpha 0.4, scale 0.85 — the name pill takes the alpha alone,
+ * because 0.85 on a 187 pt capsule reads as a different control rather than a pressed one); the
+ * macOS glass buttons darken their fill and the waveform, which has no fill, dims instead.
+ *
+ * `after` is left unasserted on macOS: those fills ease back over `macComposerMetrics.press.release`
+ * and the pointer is still inside the button, so what they settle to is the hover fill, not the rest
+ * one. The invariant worth pinning is that the pressed marker goes, and that is asserted everywhere.
+ */
+const chromeButtons = {
+  ios: [
+    { slot: "back", scene: "conversation", draft: false },
+    { slot: "title", scene: "conversation", draft: false },
+    { slot: "attach", scene: "conversation", draft: false },
+    { slot: "mic", scene: "conversation", draft: false },
+    { slot: "send", scene: "conversation", draft: true },
+  ],
+  macos: [
+    { slot: "attach-button", scene: "conversation", draft: false },
+    { slot: "emoji-button", scene: "conversation", draft: false },
+    { slot: "audio-button", scene: "conversation", draft: false },
+  ],
+} as const;
+
+test("every chrome button takes a press, changes what it paints, and raises no focus ring", async ({ page }, info) => {
+  // One load per button, not one for the file. Back, the name pill and "+" all present something on
+  // release, and WebKit delivers the compatibility click to a captured button even when the pointer
+  // ends elsewhere — so a shared page would put the next button behind a pushed screen or a popover.
+  // A fresh load is also what makes `rest` a rest pose: on a shared page the send arrow inherits the
+  // DOM node the mic just released, and its 100 ms ease back reads as a pressed button.
+  test.slow();
+  for (const button of chromeButtons[platformFor(info)]) {
+    await openScene(page, info, "conversation");
+    // The send arrow only exists while there is a draft; the mic and the waveform only while there
+    // is not. So the field is set per button rather than once.
+    if (button.draft) await composerField(page).fill("Blue for iMessage.");
+    const target = page.locator(`[data-slot="${button.slot}"]`).first();
+    await expect(target, `${button.slot} is on screen`).toBeVisible();
+    const rest = await settled(page, () => paintOf(target));
+    await expect(target).not.toHaveAttribute("data-pressed");
+
+    const gesture = await beginGesture(page, info);
+    await gesture.down(target);
+    await expect(target, `${button.slot} takes a press`).toHaveAttribute("data-pressed");
+    // The marker alone would pass on a button that draws nothing, so the paint has to move too.
+    expect(await paintOf(target), `${button.slot} must look pressed, not merely be marked pressed`).not.toBe(rest);
+    expect((await styleOf(target)).focusVisible, `${button.slot} must not raise a focus ring under a pointer`).toBe(false);
+
+    // A press that wanders off the control commits nothing and paints nothing: `usePress` tracks the
+    // pointer against the button's own box, so dragging away is the release path that does not also
+    // activate the button. That is the native rule, and it is what makes this assertion safe here.
+    await gesture.moveTo(2, 2);
+    await expect(target, `${button.slot} drops the press when the pointer leaves it`).not.toHaveAttribute("data-pressed");
+    await gesture.abort();
+  }
+});
+
+/**
+ * The Hide Alerts switch, on all three details surfaces. It is driven UNCONTROLLED — the harness
+ * passes neither a value nor a handler, which is the case the shells themselves hit when their
+ * caller hands over no details content, and the only case in which the switch was ever broken: both
+ * controls used to be fully controlled with a `false` default, so a consumer that wired nothing got
+ * `aria-checked="false"` before the tap and `aria-checked="false"` after it. Every lab route wires
+ * both props, which is why nothing caught it.
+ */
+const detailsScreens = { ios: ["details", "group-details"], macos: ["details"] } as const;
+
+test("the Hide Alerts switch toggles with nothing controlling it", async ({ page }, info) => {
+  for (const scene of detailsScreens[platformFor(info)]) {
+    await openScene(page, info, scene);
+    const control = page.getByRole("switch", { name: "Hide Alerts" }).or(page.getByRole("checkbox", { name: "Hide Alerts" }));
+    await expect(control, `${scene}: the switch is on screen`).toHaveCount(1);
+    await expect(control, `${scene}: off to start with`).toHaveAttribute("aria-checked", "false");
+
+    await control.click();
+    await expect(control, `${scene}: a click turns it on`).toHaveAttribute("aria-checked", "true");
+
+    await control.click();
+    await expect(control, `${scene}: and back off`).toHaveAttribute("aria-checked", "false");
+
+    // It is a real switch, so the keyboard reaches it too.
+    await control.press("Space");
+    await expect(control, `${scene}: Space toggles it`).toHaveAttribute("aria-checked", "true");
+  }
+});
+
+/** The rows and buttons each details screen makes pressable, by the slot each one carries. */
+const detailsPressables = {
+  ios: { details: ["action", "block"], "group-details": ["action", "participant", "leave"] },
+  macos: { details: ["details-close", "details-tab", "details-action", "details-handle"] },
+} as const;
+
+test("the details screens answer a press on every row that has one", async ({ page }, info) => {
+  const platform = platformFor(info);
+  for (const [scene, slots] of Object.entries(detailsPressables[platform]) as [string, readonly string[]][]) {
+    await openScene(page, info, scene);
+    for (const slot of slots) {
+      const target = page.locator(`[data-slot="${slot}"]`).first();
+      await expect(target, `${scene}: ${slot} is on screen`).toBeVisible();
+      await target.scrollIntoViewIfNeeded();
+      const rest = await settled(page, () => paintAround(target));
+      await expect(target).not.toHaveAttribute("data-pressed");
+
+      const gesture = await beginGesture(page, info);
+      await gesture.down(target);
+      // `data-pressed` rather than `:active`: the state is pointer-driven, and `:active` never
+      // latches under a CDP touch, so an `:active` assertion would pass on a screen that does
+      // nothing — which is what these screens did.
+      await expect(target, `${scene}: ${slot} takes a press`).toHaveAttribute("data-pressed");
+      expect(await paintAround(target), `${scene}: ${slot} must paint its press, not merely be marked`).not.toBe(rest);
+      expect((await styleOf(target)).focusVisible, `${scene}: ${slot} must not raise a focus ring under a pointer`).toBe(false);
+
+      await gesture.abort();
+      await expect(target, `${scene}: ${slot} lets go`).not.toHaveAttribute("data-pressed");
+    }
+  }
+});
+
+test("dragging the transcript left reveals the times, and they spring back", async ({ page }, info) => {
+  test.skip(platformFor(info) === "macos", "the drawer is an iOS gesture; the Mac has no such thing");
+  await openScene(page, info, "conversation");
+  const rows = page.locator('[data-slot="swipe-times"]');
+  const content = page.locator('[data-slot="swipe-content"]').first();
+  const time = rows.first().locator('[data-slot="time"]');
+  await expect(rows.first()).toBeVisible();
+
+  // At rest the row carries no transform at all — not `translateX(0)`, none — because a transform
+  // node layerises the row and a composited layer loses subpixel text antialiasing.
+  expect((await styleOf(content)).transform, "a resting row has no transform").toBe("none");
+  expect((await styleOf(time)).opacity, "and no time showing").toBe("0");
+  await expect(time, "the time is out of the accessibility tree while it is off screen").toHaveAttribute("aria-hidden", "true");
+
+  const log = page.locator('[data-slot="message-list"]');
+  const box = (await log.boundingBox())!;
+  const startX = box.x + box.width - 40;
+  const y = box.y + box.height / 2;
+  const gesture = await beginGesture(page, info);
+  // Down where the drag starts, not at the log's centre: the gesture measures its travel from the
+  // point the finger LANDED, so a hop to the start line would be the first move and count as travel.
+  await gesture.downAt(startX, y);
+  // Twelve steps over 70 px: past the 8 px slop that decides the axis, then tracking one to one,
+  // which is ChatKit's `transcriptDrawerGestureAcceleration` = 1 read off `CKUIBehaviorPhone`.
+  for (let step = 1; step <= 12; step++) await gesture.moveTo(startX - (70 * step) / 12, y);
+
+  // `matrix(1, 0, 0, 1, tx, ty)`: the fifth number is the travel. Parsed here rather than with
+  // `DOMMatrix`, which is a browser API and does not exist in the test runner.
+  const shift = Number((await styleOf(content)).transform.split(/[(),]/)[5]);
+  expect(shift, "the messages have travelled left").toBeLessThan(-50);
+  await expect.poll(async () => (await styleOf(time)).opacity, { message: "the time is fully in" }).toBe("1");
+  await expect(time, "and back in the accessibility tree").not.toHaveAttribute("aria-hidden", "true");
+  // Every row moves together: it is one drawer, not a per-message reveal.
+  const progresses = await rows.evaluateAll(elements => elements.map(element => element.getAttribute("data-progress")));
+  expect(new Set(progresses).size, "every row is at the same progress").toBe(1);
+
+  await gesture.up();
+  await expect.poll(async () => (await styleOf(content)).transform, { message: "the drawer springs shut", timeout: 3000 }).toBe("none");
+  expect((await styleOf(time)).opacity, "and the times go with it").toBe("0");
+});
+
+test("a mostly vertical drag scrolls the transcript instead of opening the drawer", async ({ page }, info) => {
+  test.skip(platformFor(info) === "macos", "the drawer is an iOS gesture");
+  // `photos` is the scene with somewhere to scroll: the log overflows by 125 pt there.
+  await openScene(page, info, "photos");
+  // The log is its own scroller: `[data-slot="message-list"]` carries `overflow-y-auto`.
+  const log = page.locator('[data-slot="message-list"]');
+  const scrollTop = () => log.evaluate(element => element.scrollTop);
+  const before = await scrollTop();
+  expect(before, "the log opens scrolled to the newest message").toBeGreaterThan(0);
+
+  const box = (await log.boundingBox())!;
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  const gesture = await beginGesture(page, info);
+  await gesture.downAt(x, y);
+  // Mostly down, a little left: the axis lock has to drop the finger whole and let the log scroll.
+  for (let step = 1; step <= 10; step++) await gesture.moveTo(x - 4, y + 8 * step);
+  const progress = await page.locator('[data-slot="swipe-times"]').first().getAttribute("data-progress");
+  await gesture.up();
+
+  expect(progress, "a vertical drag opens no drawer at all").toBe("0.000");
+  await expect.poll(scrollTop, { message: "the log scrolled instead" }).toBeLessThan(before);
+});
+
+test("unread conversations draw a dot, announce themselves, and go white on the selection", async ({ page }, info) => {
+  const platform = platformFor(info);
+  await openScene(page, info, "list-unread");
+  const unread = unreadConversationList.filter(item => item.unread);
+  const read = unreadConversationList.filter(item => !item.unread);
+  expect(unread.length, "the fixture has unread rows to find").toBeGreaterThan(0);
+  expect(read.length, "and a read one to read them against").toBeGreaterThan(0);
+
+  if (platform === "ios") {
+    // Every unread row, pinned or not: iOS has no pinned collection, so all six are in one list.
+    await expect(page.locator('[data-slot="unread"]')).toHaveCount(unread.length);
+    // #0088ff, `-[CKUIThemePhone unreadIndicatorColor]`. A count is a dot here: nothing in the
+    // phone's cell draws a number.
+    const dot = page.locator('[data-slot="unread"]').first();
+    expect((await styleOf(dot)).background).toBe("rgb(0, 136, 255)");
+    // The announcement leads, so a screen reader says "Unread" before the name.
+    await expect(page.getByRole("button", { name: /^Unread\. Jamie Chen,/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Alex Morgan,/ }), "a read row announces no such thing").toBeVisible();
+    return;
+  }
+
+  // macOS splits the same six: the pinned one is a tile with its dot hung off the label's leading
+  // edge, the rest are rows with theirs in the 18 pt gutter.
+  const pinnedUnread = unread.filter(item => item.pinned);
+  await expect(page.locator('[data-slot="row-unread"]')).toHaveCount(unread.length - pinnedUnread.length);
+  await expect(page.locator('[data-slot="pinned-unread"]')).toHaveCount(pinnedUnread.length);
+  // A count is announced and never painted — macOS Messages draws no number on a row.
+  await expect(page.getByRole("button", { name: /^3 unread messages\./ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Unread\..*Jamie Chen/ })).toBeVisible();
+
+  // The one behaviour the two platforms do not share: on the selected row the dot takes the white
+  // the labels take (`unreadIndicatorSelectedImage`), while every other row keeps the blue.
+  const selectedRow = page.locator('[data-slot="sidebar-row"][data-selected="true"]');
+  await expect(selectedRow.locator('[data-slot="row-unread"]'), "the scene selects an unread row").toHaveCount(1);
+  expect((await styleOf(selectedRow.locator('[data-slot="row-unread"]'))).background).toBe("rgb(255, 255, 255)");
+  const unselected = page.locator('[data-slot="sidebar-row"][data-selected="false"] [data-slot="row-unread"]').first();
+  expect((await styleOf(unselected)).background).toBe("rgb(0, 136, 255)");
 });

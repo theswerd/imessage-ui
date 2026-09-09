@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties } from "react";
+import { useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -95,6 +95,32 @@ import { cn } from "@/lib/utils";
  * window stops being key are invented. The caret is the browser's own: 1 CSS px wide against native's
  * 1.5, as tall as the line box (14.70 here, against a measured 15), and headless Chromium paints no
  * caret at all, so it is the one part of the focused field a screenshot in this repo cannot check.
+ *
+ * ## Hover and press
+ *
+ * **Unverified, all of it.** Every macOS capture in this repo holds these buttons at rest with no
+ * pointer over them - `composer-empty-and-typed-dark.png`, `conversation-pane-dark.png`,
+ * `conversation-pane-dark-2.png`, `conversation-pane-light.png`, `conversation-pane-light-partial.png`
+ * - so neither the hover fill this file already carried nor the pressed one below is measured, and
+ * ChatKit has nothing either: its whole selector table holds exactly two touch-state numbers
+ * (`replyButtonTouchAlpha` 0.4, `replyButtonTouchScale` 0.85, identical at idiom 0 and idiom 5) and
+ * no hover or pressed *fill* for a Mac control at all.
+ *
+ * What is not invented is the shape of it: the pressed fill continues the rest -> hover step by the
+ * same amount again, in the same direction, rather than picking a third colour out of the air.
+ * Light #ffffff -> #f4f4f4 -> #e9e9e9 (-11 a step); dark #232323 -> #2c2c2c -> #353535 (+9 a step).
+ * A pointer that leaves a held button drops the press, and one that comes back picks it up again,
+ * which is what AppKit does. It falls back to the *hover* fill rather than the rest one while it is
+ * away, because Chrome keeps `:hover` on the element that captured the pointer; that is the browser's
+ * retarget, not a decision here.
+ *
+ * The waveform button inside the field has no fill to change, so it dims instead, and that one number
+ * *is* ChatKit's: `replyButtonTouchAlpha` = 0.4, read off `CKUIBehaviorMac` at idiom 5 (where it
+ * agrees with the phone). Borrowed from a different button - it is the only touch alpha the framework
+ * records.
+ *
+ * `press` is **unmeasured**: nothing in this repo records one of these buttons in motion. The fill
+ * lands on the frame the mouse goes down and eases back over 100 ms, which is a hover-length fade.
  */
 export const macComposerMetrics = {
   bottom: 11,
@@ -104,7 +130,54 @@ export const macComposerMetrics = {
   emoji: { left: 589, size: 30 },
   /** Height change. Unverified: borrowed from `macPlusMenuMetrics.motion`, see the note above. */
   motion: { grow: 160, growEase: "cubic-bezier(0.32, 0.72, 0, 1)" },
+  /** Hover and press. Unverified except `touchAlpha`, which is ChatKit's; see "Hover and press" above. */
+  press: { release: 100, touchAlpha: 0.4 },
 };
+
+/**
+ * Press state that a mouse, a finger and the keyboard all reach.
+ *
+ * Pointer events rather than `:active`, because `:active` is a browser heuristic this component
+ * cannot drive or prove: Chrome holds it back on a touch until the gesture has resolved into a tap
+ * rather than a scroll. The pointer is captured so the release always lands back here, and while it
+ * is held the press follows the pointer in and out of the button's own box, which is what AppKit does
+ * when the mouse slides off a held button and back onto it. Driven with a real `page.mouse`, holding
+ * the "+" and dragging 80 px away steps its fill #f4f4f4 -> #e9e9e9 -> #f4f4f4 -> #e9e9e9 on the way
+ * back out and in. (On a touchscreen it is one-way: Chromium fires `pointercancel` as soon as the
+ * finger pans, so a touch that leaves a control never returns to it.)
+ *
+ * Nothing here moves focus, deliberately: both engines match `:focus-visible` on a programmatic focus
+ * taken while a pointer is still down, so a press opened by a pointer would draw the accent ring that
+ * `composer-empty-and-typed-dark.png` shows the native composer does not draw
+ * (`tapback-bar.tsx` and `audio-recorder.tsx` carry the two fixes for the places that must move focus).
+ */
+function usePress() {
+  const [pressed, setPressed] = useState(false);
+  const held = useRef(false);
+  const release = () => { held.current = false; setPressed(false); };
+  return {
+    pressed,
+    handlers: {
+      onPointerDown(event: PointerEvent<HTMLElement>) {
+        if (event.pointerType === "mouse" && event.button !== 0) return;
+        held.current = true;
+        try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* the pointer ended before this handler ran */ }
+        setPressed(true);
+      },
+      onPointerMove(event: PointerEvent<HTMLElement>) {
+        if (!held.current) return;
+        const box = event.currentTarget.getBoundingClientRect();
+        setPressed(event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom);
+      },
+      onPointerUp: release,
+      onPointerCancel: release,
+      onLostPointerCapture: release,
+      onKeyDown(event: KeyboardEvent<HTMLElement>) { if (event.key === " " || event.key === "Enter") setPressed(true); },
+      onKeyUp: release,
+      onBlur: release,
+    },
+  };
+}
 
 /** The field's height with `lines` lines of text: the measured 31 for one, plus the 14.70 line pitch. */
 export function macComposerFieldHeight(lines: number) {
@@ -176,6 +249,9 @@ export function MacComposer({ onSend, onChange, value, defaultValue = "", placeh
   /** Height a height change was interrupted at, so a second one carries on from it instead of jumping back. */
   const interrupted = useRef<number | null>(null);
   const reduced = usePrefersReducedMotion();
+  const attachPress = usePress();
+  const emojiPress = usePress();
+  const audioPress = usePress();
   const id = useId();
   const text = value ?? draft;
   const width = fieldWidth ?? m.field.width;
@@ -253,7 +329,14 @@ export function MacComposer({ onSend, onChange, value, defaultValue = "", placeh
     requestAnimationFrame(() => textarea.current?.focus());
   }
 
-  const glass = "absolute block rounded-full bg-[var(--cp-button)] p-0 text-[var(--cp-ink)] shadow-[var(--cp-shadow)] outline-offset-2 hover:bg-[var(--cp-button-hover)] focus-visible:outline-2 focus-visible:outline-[#3478f6] disabled:opacity-50";
+  /**
+   * Hover is a class, press is an inline `backgroundColor`. Not a style choice: `hover:` and a
+   * `data-pressed:` variant carry the same specificity, so which one won a held pointer that is also
+   * over the button would come down to the order Tailwind happened to emit them in. An inline
+   * declaration beats both, every build.
+   */
+  const glass = "absolute block rounded-full bg-[var(--cp-button)] p-0 text-[var(--cp-ink)] shadow-[var(--cp-shadow)] outline-offset-2 transition-colors ease-out hover:bg-[var(--cp-button-hover)] focus-visible:outline-2 focus-visible:outline-[#3478f6] disabled:opacity-50 motion-reduce:transition-none";
+  const pressFill = (pressed: boolean) => ({ transitionDuration: `${m.press.release}ms`, backgroundColor: pressed ? "var(--cp-button-pressed)" : undefined });
 
   return (
     <form
@@ -262,15 +345,16 @@ export function MacComposer({ onSend, onChange, value, defaultValue = "", placeh
       onSubmit={event => { event.preventDefault(); void send(); }}
       className={cn(
         "absolute inset-x-0 bottom-0 select-none",
-        "[--cp-button-hover:#f4f4f4] [--cp-button:#ffffff] [--cp-caret:#3b86f7] [--cp-face-fill:transparent] [--cp-face-ink:#000000] [--cp-face-stroke:#000000] [--cp-field:#ffffff] [--cp-ink:#000000] [--cp-placeholder:#bdbdbd] [--cp-shadow:0_5px_25px_rgba(0,0,0,0.07)] [--cp-text:#262626] [--cp-wave:#999999]",
-        "dark:[--cp-button-hover:#2c2c2c] dark:[--cp-button:#232323] dark:[--cp-caret:#3f8ff7] dark:[--cp-face-fill:#f4f4f4] dark:[--cp-face-ink:#232323] dark:[--cp-face-stroke:#f4f4f4] dark:[--cp-field:#232323] dark:[--cp-ink:#f1f1f1] dark:[--cp-placeholder:#626262] dark:[--cp-shadow:inset_0.774px_0.774px_0_0_#424242,inset_-0.774px_-0.774px_0_0_#424242,0_5px_25px_rgba(0,0,0,0.05)] dark:[--cp-text:#dddddd] dark:[--cp-wave:#858585]",
+        "[--cp-button-hover:#f4f4f4] [--cp-button-pressed:#e9e9e9] [--cp-button:#ffffff] [--cp-caret:#3b86f7] [--cp-face-fill:transparent] [--cp-face-ink:#000000] [--cp-face-stroke:#000000] [--cp-field:#ffffff] [--cp-ink:#000000] [--cp-placeholder:#bdbdbd] [--cp-shadow:0_5px_25px_rgba(0,0,0,0.07)] [--cp-text:#262626] [--cp-wave:#999999]",
+        "dark:[--cp-button-hover:#2c2c2c] dark:[--cp-button-pressed:#353535] dark:[--cp-button:#232323] dark:[--cp-caret:#3f8ff7] dark:[--cp-face-fill:#f4f4f4] dark:[--cp-face-ink:#232323] dark:[--cp-face-stroke:#f4f4f4] dark:[--cp-field:#232323] dark:[--cp-ink:#f1f1f1] dark:[--cp-placeholder:#626262] dark:[--cp-shadow:inset_0.774px_0.774px_0_0_#424242,inset_-0.774px_-0.774px_0_0_#424242,0_5px_25px_rgba(0,0,0,0.05)] dark:[--cp-text:#dddddd] dark:[--cp-wave:#858585]",
         className,
       )}
       style={{ height: m.bottom + (height ?? m.field.height) + 10, fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif", ...style }}
       {...props}
     >
       <button type="button" data-slot="attach-button" aria-label="Add attachment" aria-haspopup="menu" aria-expanded={attachExpanded} disabled={disabled} onClick={onAttach}
-        className={glass} style={{ left: m.plus.left, bottom: m.bottom, width: m.plus.size, height: m.plus.size }}>
+        data-pressed={attachPress.pressed || undefined} {...attachPress.handlers}
+        className={glass} style={{ left: m.plus.left, bottom: m.bottom, width: m.plus.size, height: m.plus.size, ...pressFill(attachPress.pressed) }}>
         <svg aria-hidden="true" viewBox="0 0 30 30" width="30" height="30" className="block" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round">
           {/* 12.58 of ink including the 0.85 cap radius at each end, so each arm is 10.88 of path.
               Measured on the stroke axis: a row even 0.8 px off centre reads 12.3 because the caps taper. */}
@@ -309,12 +393,14 @@ export function MacComposer({ onSend, onChange, value, defaultValue = "", placeh
         />
         {!text && (
           <button type="button" data-slot="audio-button" aria-label="Record audio message" disabled={disabled} onClick={onAudio}
-            className="absolute block rounded-[6px] p-0 text-[var(--cp-wave)] outline-offset-2 focus-visible:outline-2 focus-visible:outline-[#3478f6]"
+            data-pressed={audioPress.pressed || undefined} {...audioPress.handlers}
+            className="absolute block rounded-[6px] p-0 text-[var(--cp-wave)] outline-offset-2 transition-opacity ease-out focus-visible:outline-2 focus-visible:outline-[#3478f6] data-pressed:transition-none motion-reduce:transition-none"
             // Chrome snaps a positioned box to whole px but honours a transform exactly, so the offsets stay
             // integers (right 8, bottom 4) and the transform carries the half-pixel that lands the measured
             // centre. It hangs off the bottom, not the top, so it stays on the field's last line when the
             // field is taller than one (it is hidden while text exists, so that only shows during a shrink).
-            style={{ right: m.waveform.centerFromRight - m.waveform.hit / 2 + m.waveform.nudge, bottom: m.field.height - m.waveform.centerY - m.waveform.hit / 2 + m.waveform.nudge, width: m.waveform.hit, height: m.waveform.hit, transform: `translate(${m.waveform.nudge}px, ${m.waveform.nudge}px)` }}>
+            // It has no fill to change, so it dims: ChatKit's `replyButtonTouchAlpha`, borrowed (see "Hover and press").
+            style={{ right: m.waveform.centerFromRight - m.waveform.hit / 2 + m.waveform.nudge, bottom: m.field.height - m.waveform.centerY - m.waveform.hit / 2 + m.waveform.nudge, width: m.waveform.hit, height: m.waveform.hit, transform: `translate(${m.waveform.nudge}px, ${m.waveform.nudge}px)`, transitionDuration: `${m.press.release}ms`, opacity: audioPress.pressed ? m.press.touchAlpha : undefined }}>
             {/* Five stadium bars, widths and heights measured one by one; the outer pair sits 7.305 out, the
                 inner pair 3.595. They ink 0.09–0.13 short of native and a taller box cannot fix it: Chrome
                 snaps an SVG extent to the half device pixel (see the note at the top of this file). */}
@@ -330,7 +416,8 @@ export function MacComposer({ onSend, onChange, value, defaultValue = "", placeh
       </div>
 
       <button type="button" data-slot="emoji-button" aria-label="Emoji" disabled={disabled} onClick={onEmoji}
-        className={glass} style={{ left: m.emoji.left, bottom: m.bottom, width: m.emoji.size, height: m.emoji.size }}>
+        data-pressed={emojiPress.pressed || undefined} {...emojiPress.handlers}
+        className={glass} style={{ left: m.emoji.left, bottom: m.bottom, width: m.emoji.size, height: m.emoji.size, ...pressFill(emojiPress.pressed) }}>
         {/* The glyph sits 0.2 left of and 0.2 below the button's centre, the same offset the "+" carries. */}
         <svg aria-hidden="true" viewBox="0 0 30 30" width="30" height="30" className="block">
           <circle cx="14.79" cy="15.2" r="7.11" fill="var(--cp-face-fill)" stroke="var(--cp-face-stroke)" strokeWidth="1.35" />

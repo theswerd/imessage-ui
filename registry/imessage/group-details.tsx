@@ -4,7 +4,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type ComponentProp
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/registry/imessage/avatar";
 import { GroupAvatar } from "@/registry/imessage/group-avatar";
-import { IosSwitch, iosDetailsCollapse, iosDetailsMorph, iosDetailsMotion, subpixel } from "@/registry/imessage/ios-details";
+import { IosSwitch, iosDetailsCollapse, iosDetailsMorph, iosDetailsMotion, iosDetailsPress, subpixel, usePressed } from "@/registry/imessage/ios-details";
 
 /**
  * iOS 26 **group** conversation details, the screen a group's name pill opens.
@@ -78,12 +78,12 @@ const font = "-apple-system, BlinkMacSystemFont, sans-serif";
 const vars =
   "[--ios-dt-label:#000000] [--ios-dt-secondary:#848488] [--ios-dt-blue:#0088ff] [--ios-dt-red:#ff383c] " +
   "[--ios-dt-fill:rgba(0,0,0,0.06)] [--ios-dt-separator:#dadadb] [--ios-dt-glyph:#000000] [--ios-dt-glyph-off:rgba(0,0,0,0.26)] [--ios-dt-glyph-blend:normal] " +
-  "[--ios-dt-track:rgba(0,0,0,0.21)] [--ios-dt-knob:#ffffff] [--ios-dt-add:rgba(118,118,128,0.12)] " +
+  "[--ios-dt-track:rgba(0,0,0,0.21)] [--ios-dt-knob:#ffffff] [--ios-dt-add:rgba(118,118,128,0.12)] [--ios-dt-press:#dcdcdc] " +
   "[--ios-dt-chevron:#bdbdbd] [--ios-dt-av-shadow:rgba(0,0,0,0.12)] [--ios-dt-glass:rgba(255,255,255,0.9)] [--ios-dt-glass-rim:inset_0_0_0_0_rgba(0,0,0,0)] [--ios-dt-glass-shadow:0_6px_36px_4px_rgba(0,0,0,0.065)] " +
   "[--ios-dt-scrim:rgba(255,255,255,0.573)] [--ios-dt-saturate:1] [--ios-dt-page:#ffffff] " +
   "dark:[--ios-dt-label:#ffffff] dark:[--ios-dt-secondary:#98989f] dark:[--ios-dt-blue:#0091ff] dark:[--ios-dt-red:#ff4245] " +
   "dark:[--ios-dt-fill:rgba(235,235,245,0.12)] dark:[--ios-dt-separator:#3a3a3c] dark:[--ios-dt-glyph:#ffffff] dark:[--ios-dt-glyph-off:rgba(255,255,255,0.26)] dark:[--ios-dt-glyph-blend:plus-lighter] " +
-  "dark:[--ios-dt-track:rgba(255,255,255,0.28)] dark:[--ios-dt-add:rgba(118,118,128,0.24)] " +
+  "dark:[--ios-dt-track:rgba(255,255,255,0.28)] dark:[--ios-dt-add:rgba(118,118,128,0.24)] dark:[--ios-dt-press:#464646] " +
   "dark:[--ios-dt-chevron:#5d5d5d] dark:[--ios-dt-av-shadow:rgba(0,0,0,0.3)] " +
   "dark:[--ios-dt-glass:rgba(28,28,28,0.9)] dark:[--ios-dt-glass-rim:inset_0_0_0_0.3333px_rgba(255,255,255,0.0385),inset_0_0_0_0.6667px_rgba(255,255,255,0.032),inset_0_0_0_1px_rgba(255,255,255,0.061)] dark:[--ios-dt-glass-shadow:0_0_0_0_rgba(0,0,0,0)] " +
   "dark:[--ios-dt-scrim:rgba(0,0,0,0.587)] dark:[--ios-dt-saturate:1.05] dark:[--ios-dt-page:#000000]";
@@ -208,7 +208,9 @@ export type GroupDetailsProps = Omit<ComponentProps<"div">, "children" | "onChan
   actions?: GroupDetailsAction[];
   addContactLabel?: string;
   onAddContact?: () => void;
+  /** Controlled Hide Alerts. Omit it and the switch keeps its own state; see `IosSwitch`. */
   hideAlerts?: boolean;
+  defaultHideAlerts?: boolean;
   onHideAlertsChange?: (next: boolean) => void;
   hideAlertsLabel?: string;
   /** Shared content, below the capture's fold and UNMEASURED. Each one is a grouped cell. */
@@ -370,14 +372,38 @@ function swallowClick(node: HTMLElement | null) {
 
 type GlassCircleProps = ComponentProps<"button"> & { size: number; "data-slot"?: string; "data-action"?: string };
 
-function GlassCircle({ size, className, style, children, ...rest }: GlassCircleProps) {
+/**
+ * The same glass circle the one-to-one screen draws, dimming under a finger to the same framework
+ * alpha (`iosDetailsPress.touchAlpha`, `-[CKUIBehaviorPhone replyButtonTouchAlpha]` = 0.4).
+ */
+function GlassCircle({ size, className, style, children, disabled, ...rest }: GlassCircleProps) {
+  const off = Boolean(disabled) || rest["aria-disabled"] === true || rest["aria-disabled"] === "true";
+  const { pressed, pressAttr, handlers } = usePressed(!off);
   return (
-    <button type="button"
-      className={cn("absolute flex items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff]", className)}
-      style={{ width: size, height: size, background: "var(--ios-dt-fill)", backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)", ...style }}
-      {...rest}>
+    <button type="button" data-pressed={pressAttr} disabled={disabled}
+      className={cn("absolute flex items-center justify-center rounded-full motion-reduce:!transition-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff]", className)}
+      style={{
+        width: size, height: size, background: "var(--ios-dt-fill)", backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)",
+        opacity: pressed ? iosDetailsPress.touchAlpha : 1,
+        transition: pressed ? "none" : `opacity ${iosDetailsPress.pressFade}ms ease-out`,
+        ...style,
+      }}
+      {...handlers} {...rest}>
       {children}
     </button>
+  );
+}
+
+/**
+ * The fill a held row paints, under its content and over the cell's own. `ios-details.tsx`'s, drawn
+ * here rather than exported from there because it is four lines and this screen's cell clips it the
+ * same way; `--ios-dt-press` is the shared token, from `-[CKUITheme detailsSelectedCellColor]` at
+ * the phone idiom.
+ */
+function PressFill({ on }: { on: boolean }) {
+  return (
+    <span aria-hidden="true" data-slot="row-press" className="pointer-events-none absolute inset-0 motion-reduce:!transition-none"
+      style={{ background: "var(--ios-dt-press)", opacity: on ? 1 : 0, transition: on ? "none" : `opacity ${iosDetailsPress.pressFade}ms ease-out` }} />
   );
 }
 
@@ -437,7 +463,13 @@ function Cell({ top, height, children }: { top: number; height: number; children
         transform: `translateY(${(top - whole).toFixed(4)}px) scaleY(${(height / boxHeight).toFixed(5)})`,
         ...continuous,
       }} />
-      {children}
+      {/* The rows are clipped to the cell's measured corner so a held row's fill is cut by it. The
+          clip wraps the rows and not the cell, because clipping `cell-fill` — which already paints
+          this same superellipse — lands a hard mask on an already-antialiased edge and darkens every
+          corner; see `ios-details.tsx`'s `Cell`, where that cost 2726 mismatched pixels in dark. */}
+      <div data-slot="cell-clip" className="absolute inset-0" style={{ borderRadius: groupDetailsMetrics.cellRadius, overflow: "hidden", ...continuous }}>
+        {children}
+      </div>
     </div>
   );
 }
@@ -468,6 +500,7 @@ const clip: CSSProperties = { overflow: "hidden", textOverflow: "ellipsis", whit
  * `ios-details.tsx`'s, verbatim, so the two screens file shared content the same way.
  */
 function SectionHeader({ title, count, onOpen }: { title: string; count?: number | string; onOpen?: () => void }) {
+  const { pressed, pressAttr, handlers } = usePressed(Boolean(onOpen));
   const body = (
     <>
       <span style={{ ...titleType, ...clip }}>{title}</span>
@@ -480,8 +513,9 @@ function SectionHeader({ title, count, onOpen }: { title: string; count?: number
   const style: CSSProperties = { paddingLeft: groupDetailsMetrics.inset, paddingRight: groupDetailsMetrics.inset + (onOpen ? 14 : 0), transform: "translateY(0.6667px)" };
   return (
     <div className="absolute" style={{ left: 0, right: 0, top: 0, height: groupDetailsMetrics.row }}>
+      {onOpen && <PressFill on={pressed} />}
       {onOpen
-        ? <button type="button" data-slot="section-header" onClick={onOpen} className={cn("absolute inset-0 flex items-center text-left", rowFocus)} style={style}>{body}</button>
+        ? <button type="button" data-slot="section-header" data-pressed={pressAttr} onClick={onOpen} className={cn("absolute inset-0 flex items-center text-left", rowFocus)} style={style} {...handlers}>{body}</button>
         : <h2 data-slot="section-header" className="absolute inset-0 m-0 flex items-center font-normal" style={style}>{body}</h2>}
     </div>
   );
@@ -491,15 +525,18 @@ function SectionHeader({ title, count, onOpen }: { title: string; count?: number
 const twoLineRow = { title: 16.875, detail: 40.375, height: 70.6667 } as const;
 
 function ItemRow({ item, top, height }: { item: GroupDetailsItem; top: number; height: number }) {
+  const { pressed, pressAttr, handlers } = usePressed();
   const twoLine = item.detail !== undefined;
   const pad = groupDetailsMetrics.inset + 14;
   return (
     <div className="absolute" style={{ left: 0, right: 0, top, height }}>
+      <PressFill on={pressed} />
       {/* Every item row sits under a row: the header above the first one, an item above the rest. */}
       <Separator top={0} />
-      <button type="button" data-slot="detail-row" onClick={item.onPress}
+      <button type="button" data-slot="detail-row" data-pressed={pressAttr} onClick={item.onPress}
         className={cn("absolute inset-0 text-left", !twoLine && "flex items-center", rowFocus)}
-        style={twoLine ? { transform: "translateY(0.6667px)" } : { paddingLeft: groupDetailsMetrics.inset, paddingRight: pad, transform: "translateY(0.6667px)" }}>
+        style={twoLine ? { transform: "translateY(0.6667px)" } : { paddingLeft: groupDetailsMetrics.inset, paddingRight: pad, transform: "translateY(0.6667px)" }}
+        {...handlers}>
         {twoLine ? (
           <>
             <span className="absolute" style={{ left: groupDetailsMetrics.inset, right: pad, top: twoLineRow.title, ...titleType, ...clip }}>{item.title}</span>
@@ -523,6 +560,19 @@ function listHeight(section: GroupDetailsSection<GroupDetailsItem>) {
   return groupDetailsMetrics.row + section.items.reduce((total, item) => total + (item.detail === undefined ? groupDetailsMetrics.row : twoLineRow.height), 0);
 }
 
+/** A tile of the shared grid; it dims under a finger at the framework's `replyButtonTouchAlpha`. */
+function PhotoTile({ photo, label, box, media }: { photo: GroupDetailsPhoto; label: string; box: CSSProperties; media: ReactNode }) {
+  const { pressed, pressAttr, handlers } = usePressed();
+  return (
+    <button type="button" data-slot="photo" data-pressed={pressAttr} aria-label={label} onClick={photo.onPress}
+      className={cn("absolute overflow-hidden motion-reduce:!transition-none", "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff]")}
+      style={{ ...box, opacity: pressed ? iosDetailsPress.touchAlpha : 1, transition: pressed ? "none" : `opacity ${iosDetailsPress.pressFade}ms ease-out` }}
+      {...handlers}>
+      {media}
+    </button>
+  );
+}
+
 function PhotosCell({ section, top }: { section: GroupDetailsSection<GroupDetailsPhoto>; top: number }) {
   return (
     <Cell top={top} height={photosHeight(section)}>
@@ -541,12 +591,7 @@ function PhotosCell({ section, top }: { section: GroupDetailsSection<GroupDetail
           // eslint-disable-next-line @next/next/no-img-element -- registry components stay framework-neutral
           ? <img src={photo.src} alt="" className="size-full object-cover" draggable={false} />
           : null);
-        return (
-          <button key={photo.id} type="button" data-slot="photo" aria-label={label} onClick={photo.onPress}
-            className={cn("absolute overflow-hidden", "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff]")} style={box}>
-            {media}
-          </button>
-        );
+        return <PhotoTile key={photo.id} photo={photo} label={label} box={box} media={media} />;
       })}
     </Cell>
   );
@@ -572,12 +617,101 @@ function initialsOf(name: string) {
   return name.trim().split(/\s+/).slice(0, 2).map(part => part[0] ?? "").join("").toUpperCase();
 }
 
+/** ChatKit's rendered contact cell insets its hairline to the name column: 16 + 37 + 12. */
+const nameColumn = groupDetailsMetrics.inset + groupDetailsMetrics.avatar + groupDetailsMetrics.avatarGap;
+
+/**
+ * The rows of the participants cell and the destructive row, each its own component so it can hold
+ * its own press state. They all fill with `--ios-dt-press` while held, and the cell clips the fill,
+ * so the first and last rows of the cell are cut by the measured radius 26 corner.
+ */
+function ParticipantRow({ person, top, first }: { person: GroupDetailsParticipant; top: number; first: boolean }) {
+  const m = groupDetailsMetrics;
+  const { pressed, pressAttr, handlers } = usePressed();
+  return (
+    <div className="absolute" style={{ left: 0, right: 0, top, height: m.participantRow }}>
+      <PressFill on={pressed} />
+      {!first && <Separator top={0} inset={nameColumn} />}
+      <button type="button" data-slot="participant" data-pressed={pressAttr} onClick={person.onPress}
+        className={cn("absolute inset-0 flex items-center text-left", rowFocus)}
+        style={{ paddingLeft: m.inset, paddingRight: m.inset + 14 }}
+        {...handlers}>
+        {person.avatar
+          ? <span aria-hidden="true" className="relative block shrink-0 overflow-hidden rounded-full" style={{ width: m.avatar, height: m.avatar }}>{person.avatar}</span>
+          : <Avatar size={m.avatar} initials={person.initials ?? initialsOf(person.name)} src={person.src} name={person.name} aria-hidden="true" role={undefined} />}
+        {/* ChatKit's rendered cell: 17pt semibold at the full label colour, 12 past the avatar. */}
+        <span style={{ ...titleType, ...clip, marginLeft: m.avatarGap, fontWeight: 600 }}>{person.name}</span>
+        <Chevron />
+      </button>
+    </div>
+  );
+}
+
+function ShowAllRow({ label, onPress, top, first }: { label: string; onPress?: () => void; top: number; first: boolean }) {
+  const m = groupDetailsMetrics;
+  const { pressed, pressAttr, handlers } = usePressed();
+  return (
+    <div className="absolute" style={{ left: 0, right: 0, top, height: m.showAllRow }}>
+      <PressFill on={pressed} />
+      {!first && <Separator top={0} inset={nameColumn} />}
+      <button type="button" data-slot="show-all-participants" data-pressed={pressAttr} onClick={onPress}
+        className={cn("absolute inset-0 flex items-center text-left", rowFocus)}
+        style={{ paddingLeft: nameColumn, ...titleType, color: "var(--ios-dt-blue)", transform: "translateY(0.6667px)" }}
+        {...handlers}>
+        {label}
+      </button>
+    </div>
+  );
+}
+
+function AddContactRow({ label, onPress, top, first }: { label: string; onPress?: () => void; top: number; first: boolean }) {
+  const m = groupDetailsMetrics;
+  const { pressed, pressAttr, handlers } = usePressed();
+  return (
+    <div className="absolute" style={{ left: 0, right: 0, top, height: m.addRow }}>
+      <PressFill on={pressed} />
+      {!first && <Separator top={0} inset={nameColumn} />}
+      <button type="button" data-slot="add-contact" data-pressed={pressAttr} onClick={onPress}
+        className={cn("absolute inset-0 flex items-center text-left", rowFocus)} style={{ paddingLeft: m.inset }}
+        {...handlers}>
+        <span aria-hidden="true" className="flex shrink-0 items-center justify-center rounded-full"
+          style={{ width: m.addButton, height: m.addButton, background: "var(--ios-dt-add)", ...continuous }}>
+          {/* ChatKit loads the "plus" SF Symbol here and tints it `detailsTextColor`; its ink
+              measures 13.6667 square on a 1.4444 stroke in the rendered cell. */}
+          <svg aria-hidden="true" width={m.addGlyph} height={m.addGlyph} viewBox={`0 0 ${m.addGlyph} ${m.addGlyph}`} fill="none"
+            stroke="var(--ios-dt-blue)" strokeWidth={m.addGlyphStroke} strokeLinecap="round">
+            <path d={`M${m.addGlyph / 2} ${m.addGlyphStroke / 2}V${m.addGlyph - m.addGlyphStroke / 2}M${m.addGlyphStroke / 2} ${m.addGlyph / 2}H${m.addGlyph - m.addGlyphStroke / 2}`} />
+          </svg>
+        </span>
+        <span style={{ ...titleType, ...clip, marginLeft: m.avatarGap, color: "var(--ios-dt-blue)" }}>{label}</span>
+      </button>
+    </div>
+  );
+}
+
+function LeaveRow({ label, onPress }: { label: string; onPress?: () => void }) {
+  const { pressed, pressAttr, handlers } = usePressed();
+  return (
+    <>
+      <PressFill on={pressed} />
+      <button type="button" data-slot="leave" data-pressed={pressAttr} onClick={onPress}
+        className={cn("absolute inset-0 flex items-center text-left", rowFocus)}
+        style={{ paddingLeft: groupDetailsMetrics.inset, ...titleType, color: "var(--ios-dt-red)", transform: "translateY(0.6667px)" }}
+        {...handlers}>
+        {label}
+      </button>
+    </>
+  );
+}
+
 export function GroupDetails({
   name, onNameChange, namePlaceholder = groupDetailsCopy.namePlaceholder, subtitle,
   participants = [], visibleParticipants, showAllParticipantsLabel = groupDetailsCopy.showAll, onShowAllParticipants,
   actions,
   addContactLabel = groupDetailsCopy.addContact, onAddContact,
-  hideAlerts = false, onHideAlertsChange, hideAlertsLabel = groupDetailsCopy.hideAlerts,
+  // No `= false`: `undefined` has to reach `IosSwitch` for it to keep its own state, which is what
+  // a consumer that passes no handler needs. See `IosSwitch` in `ios-details.tsx`.
+  hideAlerts, defaultHideAlerts, onHideAlertsChange, hideAlertsLabel = groupDetailsCopy.hideAlerts,
   photos, sharedLinks, attachments,
   leaveLabel = groupDetailsCopy.leave, onLeave,
   onBack, backdrop, progress, scroll, open = true, onExited, className, style, ...props
@@ -612,7 +746,6 @@ export function GroupDetails({
   const collapseTravel = iosDetailsCollapse.travel + subtitleShift;
   const shown = visibleParticipants === undefined ? participants : participants.slice(0, Math.max(0, visibleParticipants));
   const showAll = shown.length < participants.length;
-  const nameColumn = m.inset + m.avatar + m.avatarGap;
 
   // The dismissal is derived during render, not in an effect: an effect leaves one committed frame
   // with the screen already gone, and the exit never runs. `closing` also separates a screen that is
@@ -809,55 +942,15 @@ export function GroupDetails({
     const rows: Array<{ height: number; render: (top: number, first: boolean) => ReactNode }> = [];
     shown.forEach(person => rows.push({
       height: m.participantRow,
-      render: (top, first) => (
-        <div key={person.id} className="absolute" style={{ left: 0, right: 0, top, height: m.participantRow }}>
-          {!first && <Separator top={0} inset={nameColumn} />}
-          <button type="button" data-slot="participant" onClick={person.onPress}
-            className={cn("absolute inset-0 flex items-center text-left", rowFocus)}
-            style={{ paddingLeft: m.inset, paddingRight: m.inset + 14 }}>
-            {person.avatar
-              ? <span aria-hidden="true" className="relative block shrink-0 overflow-hidden rounded-full" style={{ width: m.avatar, height: m.avatar }}>{person.avatar}</span>
-              : <Avatar size={m.avatar} initials={person.initials ?? initialsOf(person.name)} src={person.src} name={person.name} aria-hidden="true" role={undefined} />}
-            {/* ChatKit's rendered cell: 17pt semibold at the full label colour, 12 past the avatar. */}
-            <span style={{ ...titleType, ...clip, marginLeft: m.avatarGap, fontWeight: 600 }}>{person.name}</span>
-            <Chevron />
-          </button>
-        </div>
-      ),
+      render: (top, first) => <ParticipantRow key={person.id} person={person} top={top} first={first} />,
     }));
     if (showAll) rows.push({
       height: m.showAllRow,
-      render: (top, first) => (
-        <div key="show-all" className="absolute" style={{ left: 0, right: 0, top, height: m.showAllRow }}>
-          {!first && <Separator top={0} inset={nameColumn} />}
-          <button type="button" data-slot="show-all-participants" onClick={onShowAllParticipants}
-            className={cn("absolute inset-0 flex items-center text-left", rowFocus)}
-            style={{ paddingLeft: nameColumn, ...titleType, color: "var(--ios-dt-blue)", transform: "translateY(0.6667px)" }}>
-            {showAllParticipantsLabel}
-          </button>
-        </div>
-      ),
+      render: (top, first) => <ShowAllRow key="show-all" label={showAllParticipantsLabel} onPress={onShowAllParticipants} top={top} first={first} />,
     });
     if (onAddContact) rows.push({
       height: m.addRow,
-      render: (top, first) => (
-        <div key="add-contact" className="absolute" style={{ left: 0, right: 0, top, height: m.addRow }}>
-          {!first && <Separator top={0} inset={nameColumn} />}
-          <button type="button" data-slot="add-contact" onClick={onAddContact}
-            className={cn("absolute inset-0 flex items-center text-left", rowFocus)} style={{ paddingLeft: m.inset }}>
-            <span aria-hidden="true" className="flex shrink-0 items-center justify-center rounded-full"
-              style={{ width: m.addButton, height: m.addButton, background: "var(--ios-dt-add)", ...continuous }}>
-              {/* ChatKit loads the "plus" SF Symbol here and tints it `detailsTextColor`; its ink
-                  measures 13.6667 square on a 1.4444 stroke in the rendered cell. */}
-              <svg aria-hidden="true" width={m.addGlyph} height={m.addGlyph} viewBox={`0 0 ${m.addGlyph} ${m.addGlyph}`} fill="none"
-                stroke="var(--ios-dt-blue)" strokeWidth={m.addGlyphStroke} strokeLinecap="round">
-                <path d={`M${m.addGlyph / 2} ${m.addGlyphStroke / 2}V${m.addGlyph - m.addGlyphStroke / 2}M${m.addGlyphStroke / 2} ${m.addGlyph / 2}H${m.addGlyph - m.addGlyphStroke / 2}`} />
-              </svg>
-            </span>
-            <span style={{ ...titleType, ...clip, marginLeft: m.avatarGap, color: "var(--ios-dt-blue)" }}>{addContactLabel}</span>
-          </button>
-        </div>
-      ),
+      render: (top, first) => <AddContactRow key="add-contact" label={addContactLabel} onPress={onAddContact} top={top} first={first} />,
     });
     const height = rows.reduce((total, row) => total + row.height, 0);
     place(height, top => {
@@ -872,9 +965,10 @@ export function GroupDetails({
 
   place(m.row, top => (
     <Cell key="hide-alerts" top={top} height={m.row}>
+      {/* No press fill: a table cell whose accessory is a switch takes `selectionStyle .none`. */}
       <div className="absolute inset-0 flex items-center justify-between" style={{ paddingLeft: m.inset, paddingRight: 14 }}>
         <span data-slot="hide-alerts-label" style={{ ...titleType, transform: "translateY(0.6667px)" }}>{hideAlertsLabel}</span>
-        <IosSwitch checked={hideAlerts} onChange={onHideAlertsChange} label={hideAlertsLabel} style={{ transform: "translateY(0.3333px)" }} />
+        <IosSwitch checked={hideAlerts} defaultChecked={defaultHideAlerts} onChange={onHideAlertsChange} label={hideAlertsLabel} style={{ transform: "translateY(0.3333px)" }} />
       </div>
     </Cell>
   ));
@@ -883,11 +977,7 @@ export function GroupDetails({
   if (attachments && attachments.items.length > 0) place(listHeight(attachments), top => <ListCell key="attachments" section={attachments} title="Attachments" top={top} />);
   place(m.row, top => (
     <Cell key="leave" top={top} height={m.row}>
-      <button type="button" data-slot="leave" onClick={onLeave}
-        className={cn("absolute inset-0 flex items-center text-left", rowFocus)}
-        style={{ paddingLeft: m.inset, ...titleType, color: "var(--ios-dt-red)", transform: "translateY(0.6667px)" }}>
-        {leaveLabel}
-      </button>
+      <LeaveRow label={leaveLabel} onPress={onLeave} />
     </Cell>
   ));
   // The page ends 20 below the last group: the measured gap, used as the bottom inset.
@@ -919,6 +1009,19 @@ export function GroupDetails({
           whole CSS px, and the entrance is cancelled the moment it lands for exactly that reason. */}
       <div ref={content} data-slot="details-content" className="absolute inset-0"
         style={closing ? { pointerEvents: "none" } : undefined}>
+        {/* The cells scroll; the header above them does not, it collapses into the conversation's own
+            nav bar. A group's list is long enough that this always matters. */}
+        <div ref={scroller} data-slot="details-scroll" className="absolute inset-0" onScroll={onScroll}
+          style={{ overflowY: scroll === undefined ? "auto" : "hidden", overscrollBehavior: "contain" }}>
+          <div data-slot="details-page" className="relative" style={{ height: pageHeight }}>{groups}</div>
+        </div>
+
+        {/*
+          After the scroll surface, with the rest of the header. Before it they were covered by
+          `details-scroll` — `absolute inset-0`, the whole screen — so a finger on Audio or FaceTime
+          landed on the scroller and the button was never pressed at all. The collapse already treats
+          them as header: it fades them out by the scroll that reaches their measured top.
+        */}
         {buttons.map((action, index) => (
           <GlassCircle key={action.id} size={m.actionSize} data-slot="action" data-action={action.id} aria-label={action.label}
             aria-disabled={action.disabled || undefined} onClick={action.disabled ? undefined : action.onPress}
@@ -934,13 +1037,6 @@ export function GroupDetails({
             <ActionGlyph icon={action.icon} />
           </GlassCircle>
         ))}
-
-        {/* The cells scroll; the header above them does not, it collapses into the conversation's own
-            nav bar. A group's list is long enough that this always matters. */}
-        <div ref={scroller} data-slot="details-scroll" className="absolute inset-0" onScroll={onScroll}
-          style={{ overflowY: scroll === undefined ? "auto" : "hidden", overscrollBehavior: "contain" }}>
-          <div data-slot="details-page" className="relative" style={{ height: pageHeight }}>{groups}</div>
-        </div>
 
         {collapsing && (
           // The nav bar's own glass, under the name once the header has collapsed into it: measured

@@ -230,6 +230,19 @@ export const macDetailsUnmeasured = {
   /** `-[UISwitch intrinsicContentSize]` under the Mac idiom, where `style` resolves to checkbox. */
   checkbox: 16,
   checkboxRadius: 3.5,
+  /**
+   * What a control does under the mouse. The capture is one resting frame, so neither the hover nor
+   * the press is in it, and the framework has nothing to say either: `-[CKUIThemeMac
+   * detailsSelectedCellColor]` read at idiom 5 is **#ffc726 / #ffc600**, a find-highlight yellow —
+   * NOT the phone's #dcdcdc / #464646 row fill, which is what the same selector returns at idiom 0.
+   * Assuming the two idioms agree is exactly the mistake that has already cost one wrong commit here.
+   *
+   * So both steps are choices, and they are one rule rather than nine numbers: a fill deepens from
+   * `--mdt-hover` to `--mdt-press` (6%/8% → 12%/16%, the same colour at twice the alpha), and a
+   * control that dims instead loses 0.15 more of its opacity than hovering already took — which is
+   * the ladder the file's photo tiles already shipped (1 → 0.90 → 0.75).
+   */
+  pressDim: 0.15,
   /** Columns in the photo grid; nothing says how many the 300 column runs. */
   photoColumns: 3,
   previewPhotoRows: 2,
@@ -285,15 +298,87 @@ const vars =
   "[--mdt-tab-fill:#ffffff] [--mdt-glass:rgba(0,0,0,0.035)] [--mdt-glass-rim:rgba(0,0,0,0.13)] " +
   "[--mdt-separator:#e1e1e1] [--mdt-red:#ff3b30] [--mdt-yellow:#e5a900] " +
   "[--mdt-label:rgba(0,0,0,0.8471)] [--mdt-secondary:rgba(0,0,0,0.5490)] [--mdt-tertiary:rgba(0,0,0,0.2588)] " +
-  "[--mdt-tint:#0088ff] [--mdt-hover:rgba(0,0,0,0.06)] [--mdt-tile:#e9e9eb] [--mdt-scrim:rgba(0,0,0,0.10)] [--mdt-knob:#ffffff] " +
+  "[--mdt-tint:#0088ff] [--mdt-hover:rgba(0,0,0,0.06)] [--mdt-press:rgba(0,0,0,0.12)] [--mdt-tile:#e9e9eb] [--mdt-scrim:rgba(0,0,0,0.10)] [--mdt-knob:#ffffff] " +
   "dark:[--mdt-panel:#1b1c1d] dark:[--mdt-ground:#1e1e1e] dark:[--mdt-divider:#34383c] dark:[--mdt-fill:#37383c] " +
   "dark:[--mdt-tab-fill:#3e3f42] dark:[--mdt-glass:#191c1d] dark:[--mdt-glass-rim:#2e3033] " +
   "dark:[--mdt-separator:#4e5055] dark:[--mdt-red:#ff5b65] dark:[--mdt-yellow:#ffd600] " +
   "dark:[--mdt-label:rgba(255,255,255,0.9)] dark:[--mdt-secondary:rgba(255,255,255,0.68)] dark:[--mdt-tertiary:#747577] " +
-  "dark:[--mdt-tint:#0091ff] dark:[--mdt-hover:rgba(255,255,255,0.08)] dark:[--mdt-tile:#3b3b3d] dark:[--mdt-scrim:rgba(0,0,0,0.28)]";
+  "dark:[--mdt-tint:#0091ff] dark:[--mdt-hover:rgba(255,255,255,0.08)] dark:[--mdt-press:rgba(255,255,255,0.16)] dark:[--mdt-tile:#3b3b3d] dark:[--mdt-scrim:rgba(0,0,0,0.28)]";
 
 /** The focus ring the rest of the macOS chrome uses (`macos-header.tsx`, `macos-composer.tsx`). */
 const focusRing = "outline-offset-2 focus-visible:outline-2 focus-visible:outline-[#3478f6]";
+
+/**
+ * Hover and press, driven by pointer events rather than by `:hover` / `:active`.
+ *
+ * Both halves are here for a reason the capture cannot show and a screenshot test would not catch.
+ *
+ * **Press** cannot be `:active`: it does not latch under a synthetic touch at all, it stays on when
+ * the button lifts outside the control, and it cannot be given up when the pointer drags away, which
+ * is what a real press has to do.
+ *
+ * **Hover** cannot stay a `hover:` class on any control whose resting fill is an inline `style`,
+ * which on this pane is the close ring, the "Edit" capsule, the tab capsules and the checkbox. An
+ * inline `background` beats a class unconditionally, so `hover:bg-[var(--mdt-hover)]` on those four
+ * was dead the day it was written: driving the close button with `page.mouse` measured
+ * rgba(0,0,0,0.035) at rest and rgba(0,0,0,0.035) hovered. They now compose instead of competing —
+ * `background` stays the control's own fill and the hover or press fill goes on `background-image`
+ * as a flat gradient over it, which is what a translucent overlay is meant to do anyway.
+ *
+ * Nothing here focuses anything: a programmatic focus taken while a pointer is still held matches
+ * `:focus-visible` in both engines and would draw a ring on top of the press (`tapback-bar.tsx` and
+ * `audio-recorder.tsx` document the same trap). The native focus a click already takes does not.
+ */
+function usePressed(enabled = true) {
+  const [pressed, setPressed] = useState(false);
+  const [hovering, setHovering] = useState(false);
+  const origin = useRef<{ id: number; x: number; y: number } | null>(null);
+  const release = useCallback(() => { origin.current = null; setPressed(false); }, []);
+  useEffect(() => {
+    if (!pressed) return;
+    const off = () => release();
+    window.addEventListener("pointerup", off);
+    window.addEventListener("pointercancel", off);
+    return () => { window.removeEventListener("pointerup", off); window.removeEventListener("pointercancel", off); };
+  }, [pressed, release]);
+  const handlers = enabled ? {
+    onPointerEnter: () => setHovering(true),
+    onPointerDown: (event: ReactPointerEvent) => {
+      if (event.pointerType === "mouse" && event.button !== 0) return;
+      origin.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
+      setPressed(true);
+    },
+    onPointerMove: (event: ReactPointerEvent) => {
+      const from = origin.current;
+      if (!from || from.id !== event.pointerId) return;
+      // 10 pt, `UIScrollView`'s own pan threshold. UNMEASURED on this surface.
+      if (Math.hypot(event.clientX - from.x, event.clientY - from.y) > 10) release();
+    },
+    onPointerUp: release,
+    onPointerCancel: release,
+    onPointerLeave: () => { release(); setHovering(false); },
+  } : {};
+  const on = enabled && pressed;
+  return { pressed: on, hovering: enabled && hovering, pressAttr: on ? ("" as const) : undefined, handlers };
+}
+
+/**
+ * The hover or press fill as a flat `background-image`, so it composites over whatever the control's
+ * own `background` already is instead of replacing it. `undefined` at rest.
+ */
+function overlay(hovering: boolean, pressed: boolean): string | undefined {
+  const token = pressed ? "var(--mdt-press)" : hovering ? "var(--mdt-hover)" : null;
+  return token ? `linear-gradient(${token}, ${token})` : undefined;
+}
+
+/**
+ * The opacity a control that dims rather than fills holds while it is pressed, given the opacity its
+ * own `hover:` class already takes. `undefined` while it is not pressed, so the class still rules —
+ * an inline `opacity` only overrides the class when it is actually set.
+ */
+function pressDim(hover: number, pressed: boolean): number | undefined {
+  return pressed ? hover - macDetailsUnmeasured.pressDim : undefined;
+}
 
 /** Info and Backgrounds always exist; the rest appear with their content. Order is the capture's. */
 export type MacDetailsTab = "info" | "backgrounds" | "photos" | "links" | "location" | "documents";
@@ -373,11 +458,19 @@ export type MacDetailsProps = Omit<ComponentProps<"div">, "children" | "onChange
   handles?: MacDetailsHandle[];
   onCreateContact?: () => void;
   onAddToContact?: () => void;
+  /**
+   * The three option rows. Each row is drawn only when its `on…Change` handler is given, and each
+   * value is **controlled only when it is passed**: hand over the handler alone and the checkbox
+   * keeps its own state, so it works whether or not the consumer stores the answer.
+   */
   hideAlerts?: boolean;
+  defaultHideAlerts?: boolean;
   onHideAlertsChange?: (next: boolean) => void;
   readReceipts?: boolean;
+  defaultReadReceipts?: boolean;
   onReadReceiptsChange?: (next: boolean) => void;
   sharedWithYou?: boolean;
+  defaultSharedWithYou?: boolean;
   onSharedWithYouChange?: (next: boolean) => void;
   onLeave?: () => void;
   onBlock?: () => void;
@@ -517,37 +610,66 @@ function PlusGlyph() {
  * `CKDetailsSharedWithYouCheckboxCell` put on their rows. Its 16 × 16 box is the framework's; the
  * corner and the tick are drawn, not measured.
  */
-export type MacCheckboxProps = Omit<ComponentProps<"button">, "onChange"> & {
+export type MacCheckboxProps = Omit<ComponentProps<"button">, "onChange" | "defaultChecked"> & {
+  /**
+   * Controlled state. **Omit it and the checkbox keeps its own.** It used to default to `false`,
+   * which made every uncontrolled instance a checkbox that could not be checked —
+   * `aria-checked="false"` before the click and `aria-checked="false"` after it.
+   */
   checked?: boolean;
+  /** Where an uncontrolled checkbox starts. Ignored while `checked` is given. */
+  defaultChecked?: boolean;
   onChange?: (next: boolean) => void;
   label?: string;
 };
 
-export function MacCheckbox({ checked = false, onChange, label, className, style, ...rest }: MacCheckboxProps) {
+export function MacCheckbox({ checked, defaultChecked = false, onChange, label, className, style, ...rest }: MacCheckboxProps) {
   const size = macDetailsUnmeasured.checkbox;
+  const [own, setOwn] = useState(defaultChecked);
+  const on = checked ?? own;
+  const { pressed, hovering, pressAttr, handlers } = usePressed();
   return (
     <button
       type="button"
       data-slot="mac-checkbox"
+      data-pressed={pressAttr}
       role="checkbox"
-      aria-checked={checked}
+      aria-checked={on}
       aria-label={label}
-      onClick={() => onChange?.(!checked)}
-      className={cn("relative shrink-0 transition-colors motion-reduce:transition-none", focusRing, className)}
+      onClick={() => { if (checked === undefined) setOwn(!on); onChange?.(!on); }}
+      className={cn("relative shrink-0 transition-[background-color,background-image] motion-reduce:transition-none", focusRing, className)}
       style={{
         width: size, height: size,
         borderRadius: macDetailsUnmeasured.checkboxRadius,
-        background: checked ? "var(--mdt-tint)" : "var(--mdt-fill)",
-        boxShadow: checked ? "none" : "inset 0 0 0 1px var(--mdt-tertiary)",
+        // The overlay goes over the box's own fill either way, so a checked box darkens under the
+        // pointer instead of swapping its tint for a grey, which would read as unchecking it.
+        backgroundColor: on ? "var(--mdt-tint)" : "var(--mdt-fill)",
+        backgroundImage: overlay(hovering, pressed),
+        boxShadow: on ? "none" : "inset 0 0 0 1px var(--mdt-tertiary)",
         ...style,
       }}
+      {...handlers}
       {...rest}
     >
       <svg aria-hidden="true" viewBox="0 0 16 16" width={size} height={size} className="block" fill="none"
         stroke="var(--mdt-knob)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-        style={{ opacity: checked ? 1 : 0 }}>
+        style={{ opacity: on ? 1 : 0 }}>
         <path d="M4.2 8.4 6.9 11.1 11.9 5.2" />
       </svg>
+    </button>
+  );
+}
+
+/** The heading's trailing "See All …". A text button, so it dims under the mouse rather than filling. */
+function SeeAll({ label, onAction }: { label: string; onAction?: () => void }) {
+  const { pressed, pressAttr, handlers } = usePressed();
+  const m = macDetailsMetrics;
+  return (
+    <button type="button" data-slot="see-all" data-pressed={pressAttr} onClick={onAction}
+      className={cn("rounded-[4px] bg-transparent p-0 text-[var(--mdt-tint)] transition-opacity hover:underline motion-reduce:transition-none", focusRing)}
+      style={{ fontSize: m.font.heading, lineHeight: "16px", letterSpacing: 0, opacity: pressDim(1, pressed) }}
+      {...handlers}>
+      {label}
     </button>
   );
 }
@@ -561,13 +683,7 @@ function SectionHeading({ id, title, action, onAction }: { id: string; title: st
       style={{ paddingTop: u.headingAbove, marginInlineStart: u.headingLeading, marginBottom: u.headingToContent }}>
       <h3 id={id} className="m-0 text-[var(--mdt-label)]"
         style={{ fontSize: m.font.heading, fontWeight: m.font.headingWeight, lineHeight: "16px", letterSpacing: 0 }}>{title}</h3>
-      {action ? (
-        <button type="button" data-slot="see-all" onClick={onAction}
-          className={cn("rounded-[4px] bg-transparent p-0 text-[var(--mdt-tint)] hover:underline", focusRing)}
-          style={{ fontSize: m.font.heading, lineHeight: "16px", letterSpacing: 0 }}>
-          {action}
-        </button>
-      ) : null}
+      {action ? <SeeAll label={action} onAction={onAction} /> : null}
     </div>
   );
 }
@@ -630,10 +746,18 @@ function Row({ onPress, glyph, title, meta, metaFirst = false, tone = "label", h
     paddingInline: u.rowPadding,
   };
   if (!onPress) return <div data-slot={slot} className="flex w-full items-center" style={style}>{body}</div>;
+  return <PressableRow slot={slot} onPress={onPress} style={style}>{body}</PressableRow>;
+}
+
+/** A row that navigates: it fills to `--mdt-hover` under the mouse and to `--mdt-press` while held. */
+function PressableRow({ slot, onPress, style, children }: { slot?: string; onPress: () => void; style: CSSProperties; children: ReactNode }) {
+  const { pressed, hovering, pressAttr, handlers } = usePressed();
   return (
-    <button type="button" data-slot={slot} onClick={onPress}
-      className={cn("flex w-full items-center bg-transparent p-0 hover:bg-[var(--mdt-hover)]", focusRing)} style={style}>
-      {body}
+    <button type="button" data-slot={slot} data-pressed={pressAttr} onClick={onPress}
+      className={cn("flex w-full items-center bg-transparent p-0 transition-[background-image] motion-reduce:transition-none", focusRing)}
+      style={{ ...style, backgroundImage: overlay(hovering, pressed) }}
+      {...handlers}>
+      {children}
     </button>
   );
 }
@@ -655,6 +779,113 @@ function RowGroup({ children, label }: { children: ReactNode[]; label?: string }
   );
 }
 
+/**
+ * A tile of a photo grid. It dims: 0.90 hovered (unchanged) and `pressDim` further while held, which
+ * is the ladder the tiles already shipped, now driven by a pointer so it is readable and cannot
+ * stick on when the button lifts off the tile.
+ */
+function PhotoTile({ item, size, label }: { item: MacDetailsPhoto; size: number; label: string }) {
+  const { pressed, pressAttr, handlers } = usePressed();
+  return (
+    <button type="button" data-slot="details-photo" data-pressed={pressAttr} onClick={item.onOpen} aria-label={label}
+      className={cn("relative block overflow-hidden p-0 transition-opacity hover:opacity-90 motion-reduce:transition-none", focusRing)}
+      style={{
+        width: size, height: size, borderRadius: macDetailsUnmeasured.photoRadius,
+        background: item.src ? "var(--mdt-tile)" : (item.fill ?? "var(--mdt-tile)"),
+        opacity: pressDim(0.9, pressed),
+      }}
+      {...handlers}>
+      {/* eslint-disable-next-line @next/next/no-img-element -- registry components stay framework-neutral */}
+      {item.src ? <img src={item.src} alt="" aria-hidden="true" draggable={false} className="absolute inset-0 size-full object-cover" /> : null}
+    </button>
+  );
+}
+
+/**
+ * The map card's "Open in Find My" capsule. Measured: it reads #4d5463 over a map that reads ≈
+ * #505a6b right beside it, i.e. it lifts what is behind it by only ~3–8% — it is a blur, not a
+ * scrim. A blur of a map this kit does not have cannot be reproduced, so this is `backdrop-filter`
+ * plus that measured lift. Hover and press deepen that lift; both steps are `macDetailsUnmeasured`.
+ */
+function FindMyButton({ onPress }: { onPress: () => void }) {
+  const m = macDetailsMetrics;
+  const { pressed, hovering, pressAttr, handlers } = usePressed();
+  return (
+    <button type="button" data-slot="details-find-my" data-pressed={pressAttr} onClick={onPress}
+      className={cn("absolute flex items-center backdrop-blur-[18px] transition-[background-image] motion-reduce:transition-none", focusRing)}
+      style={{
+        left: m.mapInset, top: m.mapInset,
+        height: m.mapButtonHeight, borderRadius: m.mapButtonHeight / 2,
+        paddingInline: 12, color: "var(--mdt-knob)",
+        fontSize: m.font.mapButton, fontWeight: 500, letterSpacing: 0,
+        backgroundColor: "color-mix(in srgb, var(--mdt-label) 8%, transparent)",
+        // The capsule sits on a map, not on the panel, so it lifts what is behind it with its own
+        // label colour rather than with `--mdt-hover`; the two steps are the same choice.
+        backgroundImage: pressed ? "linear-gradient(color-mix(in srgb, var(--mdt-label) 14%, transparent), color-mix(in srgb, var(--mdt-label) 14%, transparent))"
+          : hovering ? "linear-gradient(color-mix(in srgb, var(--mdt-label) 7%, transparent), color-mix(in srgb, var(--mdt-label) 7%, transparent))"
+            : undefined,
+      }}
+      {...handlers}>
+      Open in Find My
+    </button>
+  );
+}
+
+/** A row of the location card: the same fill ladder every other row uses. */
+function LocationActionRow({ item }: { item: MacDetailsLocationAction }) {
+  const m = macDetailsMetrics;
+  const { pressed, hovering, pressAttr, handlers } = usePressed();
+  return (
+    <button type="button" data-slot="details-location-action" data-pressed={pressAttr} data-action={item.id} onClick={item.onPress}
+      className={cn("flex w-full items-center bg-transparent text-left transition-[background-image] motion-reduce:transition-none", focusRing)}
+      style={{
+        height: m.cardRowHeight, paddingInline: m.separatorInset,
+        // The label is centred on the row, but `-apple-system`'s line box lands 2 pt higher in
+        // Chromium than native's does, so the content box is pushed down by that much. This is
+        // a font-metric correction, not a metric: the capture's rows are plainly centred
+        // (cap band 447.7–457.7 in a row spanning 429.5–475.5).
+        paddingTop: 4,
+        color: item.tone === "yellow" ? "var(--mdt-yellow)" : item.tone === "tint" ? "var(--mdt-tint)" : "var(--mdt-red)",
+        fontSize: m.font.row, fontWeight: m.font.rowWeight, letterSpacing: 0,
+        backgroundImage: overlay(hovering, pressed),
+      }}
+      {...handlers}>
+      {item.label}
+    </button>
+  );
+}
+
+/** The trailing "Add" circle of the face row. A filled disc, so it dims rather than filling. */
+function AddPersonButton({ size, onPress }: { size: number; onPress?: () => void }) {
+  const { pressed, pressAttr, handlers } = usePressed();
+  return (
+    <button type="button" data-slot="details-add-person" data-pressed={pressAttr} aria-label="Add" onClick={onPress}
+      className={cn("flex items-center justify-center rounded-full p-0 text-[var(--mdt-label)] transition-opacity hover:opacity-80 motion-reduce:transition-none", focusRing)}
+      style={{ width: size, height: size, background: "var(--mdt-fill)", opacity: pressDim(0.8, pressed) }}
+      {...handlers}>
+      <PlusGlyph />
+    </button>
+  );
+}
+
+/**
+ * One of the header's Ø 36 quick-action discs. `disabled` really is `disabled` here (unlike the
+ * phone's `aria-disabled` circles), so an unavailable action neither dims nor takes the pointer.
+ */
+function ActionDisc({ action, size }: { action: MacDetailsAction; size: number }) {
+  const { pressed, pressAttr, handlers } = usePressed(!action.disabled);
+  return (
+    <button type="button" data-slot="details-action" data-pressed={pressAttr} data-action={action.id}
+      aria-label={action.label} title={action.label} disabled={action.disabled} onClick={action.onPress}
+      className={cn("flex items-center justify-center rounded-full p-0 text-[var(--mdt-label)] transition-opacity motion-reduce:transition-none",
+        "enabled:hover:opacity-80 disabled:text-[var(--mdt-tertiary)]", focusRing)}
+      style={{ width: size, height: size, background: "var(--mdt-fill)", opacity: pressDim(0.8, pressed) }}
+      {...handlers}>
+      <ActionGlyph icon={action.icon} />
+    </button>
+  );
+}
+
 /** The strip's own titles, in the capture's order. */
 const tabTitles: Record<MacDetailsTab, string> = {
   info: "Info",
@@ -665,15 +896,65 @@ const tabTitles: Record<MacDetailsTab, string> = {
   documents: "Documents",
 };
 
+/**
+ * One capsule of the tab strip. The selected one is the measured `--mdt-tab-fill`; an unselected one
+ * had nothing but a text colour, so a click landed on a control that never acknowledged it. It now
+ * takes the same `--mdt-hover` / `--mdt-press` fills every other unselected control on this pane
+ * takes, and the selected one darkens under a press instead (its own fill is already the light one).
+ */
+function Tab({ tab, selected, id, controls, onSelect }: { tab: MacDetailsTab; selected: boolean; id: string; controls: string; onSelect: () => void }) {
+  const m = macDetailsMetrics;
+  const { pressed, hovering, pressAttr, handlers } = usePressed();
+  return (
+    <button type="button" role="tab" data-slot="details-tab" data-tab={tab} data-pressed={pressAttr}
+      aria-selected={selected} aria-controls={controls} id={id}
+      tabIndex={selected ? 0 : -1}
+      onClick={onSelect}
+      className={cn("shrink-0 transition-[background-image,color] motion-reduce:transition-none", focusRing,
+        selected ? "text-[var(--mdt-label)]" : "text-[var(--mdt-secondary)] hover:text-[var(--mdt-label)]")}
+      style={{
+        height: m.tabHeight, paddingInline: m.tabPaddingInline, borderRadius: m.tabHeight / 2,
+        fontSize: m.font.tab, fontWeight: selected ? m.font.tabSelectedWeight : m.font.tabWeight,
+        lineHeight: `${m.tabHeight}px`, letterSpacing: 0,
+        // The selected capsule's measured fill is the background; the overlay darkens it, so the
+        // selected tab acknowledges a press too instead of being the one dead control in the strip.
+        backgroundColor: selected ? "var(--mdt-tab-fill)" : "transparent",
+        backgroundImage: overlay(hovering, pressed),
+      }}
+      {...handlers}>
+      {tabTitles[tab]}
+    </button>
+  );
+}
+
+/** The two header chrome buttons: the close ring and the "Edit" capsule. Same fill ladder. */
+function HeaderButton({ slot, label, title, onPress, style, children }: { slot: string; label?: string; title?: string; onPress?: () => void; style: CSSProperties; children: ReactNode }) {
+  const { pressed, hovering, pressAttr, handlers } = usePressed();
+  return (
+    <button type="button" data-slot={slot} data-pressed={pressAttr} aria-label={label} title={title} onClick={onPress}
+      className={cn("absolute flex items-center justify-center p-0 text-[var(--mdt-label)] transition-[background-image] motion-reduce:transition-none", focusRing)}
+      style={{
+        backgroundColor: "var(--mdt-glass)", boxShadow: "inset 0 0 0 1px var(--mdt-glass-rim)",
+        backgroundImage: overlay(hovering, pressed),
+        ...style,
+      }}
+      {...handlers}>
+      {children}
+    </button>
+  );
+}
+
 export function MacDetails({
   name, initials, photo, avatar, participants, subtitle,
   actions = [], onEdit, onAddParticipant,
   map, mapTitle, mapSubtitle, mapPins, onOpenFindMy, locationActions = [],
   backgrounds = [], photos = [], links = [], attachments = [],
   handles = [], onCreateContact, onAddToContact,
-  hideAlerts = false, onHideAlertsChange,
-  readReceipts = false, onReadReceiptsChange,
-  sharedWithYou = false, onSharedWithYouChange,
+  // No `= false` on any of these: that default is what made every one of them a checkbox that could
+  // not be checked. `undefined` has to reach `MacCheckbox` for it to keep its own state.
+  hideAlerts, defaultHideAlerts, onHideAlertsChange,
+  readReceipts, defaultReadReceipts, onReadReceiptsChange,
+  sharedWithYou, defaultSharedWithYou, onSharedWithYouChange,
   onLeave, onBlock, onDelete, onClose,
   defaultParticipantsOpen = false,
   tab, defaultTab = "info", onTabChange,
@@ -831,13 +1112,7 @@ export function MacDetails({
     <ul className="m-0 grid list-none p-0" style={{ gridTemplateColumns: `repeat(${u.photoColumns}, ${tile}px)`, gap: u.photoGap }}>
       {items.map((item, index) => (
         <li key={item.id} className="m-0 p-0">
-          <button type="button" data-slot="details-photo" onClick={item.onOpen}
-            aria-label={item.alt ?? `Shared photo ${index + 1}`}
-            className={cn("relative block overflow-hidden p-0 transition-opacity hover:opacity-90 active:opacity-75 motion-reduce:transition-none", focusRing)}
-            style={{ width: tile, height: tile, borderRadius: u.photoRadius, background: item.src ? "var(--mdt-tile)" : (item.fill ?? "var(--mdt-tile)") }}>
-            {/* eslint-disable-next-line @next/next/no-img-element -- registry components stay framework-neutral */}
-            {item.src ? <img src={item.src} alt="" aria-hidden="true" draggable={false} className="absolute inset-0 size-full object-cover" /> : null}
-          </button>
+          <PhotoTile item={item} size={tile} label={item.alt ?? `Shared photo ${index + 1}`} />
         </li>
       ))}
     </ul>
@@ -877,21 +1152,7 @@ export function MacDetails({
           <Avatar size={m.mapPin} initials={pin.initials} src={pin.photo} name={pin.name} aria-hidden="true" />
         </span>
       ))}
-      {onOpenFindMy ? (
-        <button type="button" data-slot="details-find-my" onClick={onOpenFindMy}
-          // Measured: the capsule reads #4d5463 over a map that reads ≈ #505a6b right beside it, i.e.
-          // it lifts what is behind it by only ~3–8% — it is a blur, not a scrim. A blur of a map this
-          // kit does not have cannot be reproduced, so this is `backdrop-filter` plus that measured lift.
-          className={cn("absolute flex items-center bg-[color-mix(in_srgb,var(--mdt-label)_8%,transparent)] backdrop-blur-[18px]", focusRing)}
-          style={{
-            left: m.mapInset, top: m.mapInset,
-            height: m.mapButtonHeight, borderRadius: m.mapButtonHeight / 2,
-            paddingInline: 12, color: "var(--mdt-knob)",
-            fontSize: m.font.mapButton, fontWeight: 500, letterSpacing: 0,
-          }}>
-          Open in Find My
-        </button>
-      ) : null}
+      {onOpenFindMy ? <FindMyButton onPress={onOpenFindMy} /> : null}
       {mapTitle || mapSubtitle ? (
         <div className="absolute flex flex-col" style={{ left: m.contentInset, bottom: m.mapInset - 2, gap: 1 }}>
           {mapTitle ? <span style={{ color: "var(--mdt-knob)", fontSize: m.font.mapTitle, fontWeight: m.font.mapTitleWeight, lineHeight: "15px", letterSpacing: 0 }}>{mapTitle}</span> : null}
@@ -912,20 +1173,7 @@ export function MacDetails({
             <div aria-hidden="true" data-slot="details-card-separator"
               style={{ height: 1, marginInline: m.separatorInset, background: "var(--mdt-separator)" }} />
           )}
-          <button type="button" data-slot="details-location-action" data-action={item.id} onClick={item.onPress}
-            className={cn("flex w-full items-center bg-transparent text-left hover:bg-[var(--mdt-hover)]", focusRing)}
-            style={{
-              height: m.cardRowHeight, paddingInline: m.separatorInset,
-              // The label is centred on the row, but `-apple-system`'s line box lands 2 pt higher in
-              // Chromium than native's does, so the content box is pushed down by that much. This is
-              // a font-metric correction, not a metric: the capture's rows are plainly centred
-              // (cap band 447.7–457.7 in a row spanning 429.5–475.5).
-              paddingTop: 4,
-              color: item.tone === "yellow" ? "var(--mdt-yellow)" : item.tone === "tint" ? "var(--mdt-tint)" : "var(--mdt-red)",
-              fontSize: m.font.row, fontWeight: m.font.rowWeight, letterSpacing: 0,
-            }}>
-            {item.label}
-          </button>
+          <LocationActionRow item={item} />
         </div>
       ))}
     </section>
@@ -937,11 +1185,7 @@ export function MacDetails({
       {[...people.map(person => ({ person: person as MacDetailsParticipant | undefined, add: false })), ...(onAddParticipant ? [{ person: undefined, add: true }] : [])].map(cell => (
         <div key={cell.person?.id ?? "add"} className="flex min-w-0 flex-col items-center" style={{ width: m.personCell }}>
           {cell.add ? (
-            <button type="button" data-slot="details-add-person" aria-label="Add" onClick={onAddParticipant}
-              className={cn("flex items-center justify-center rounded-full p-0 text-[var(--mdt-label)] transition-opacity hover:opacity-80 motion-reduce:transition-none", focusRing)}
-              style={{ width: m.personSize, height: m.personSize, background: "var(--mdt-fill)" }}>
-              <PlusGlyph />
-            </button>
+            <AddPersonButton size={m.personSize} onPress={onAddParticipant} />
           ) : (
             <Avatar size={m.personSize} initials={cell.person?.initials} src={cell.person?.photo} name={cell.person?.name ?? ""} aria-hidden="true" />
           )}
@@ -1004,26 +1248,20 @@ export function MacDetails({
             above it — measured: their ring is y 8–43 while the avatar starts at 26. */}
         <div data-slot="details-header" className="relative z-10 shrink-0" style={{ paddingTop: m.avatarTop }}>
           {onClose ? (
-            <button type="button" data-slot="details-close" aria-label="Hide Details" title="Hide Details" onClick={onClose}
-              className={cn("absolute flex items-center justify-center rounded-full p-0 text-[var(--mdt-label)] transition-colors motion-reduce:transition-none hover:bg-[var(--mdt-hover)]", focusRing)}
-              style={{
-                width: m.headerButton, height: m.headerButton, top: m.headerButtonTop, left: m.headerInset,
-                background: "var(--mdt-glass)", boxShadow: "inset 0 0 0 1px var(--mdt-glass-rim)",
-              }}>
+            <HeaderButton slot="details-close" label="Hide Details" title="Hide Details" onPress={onClose}
+              style={{ width: m.headerButton, height: m.headerButton, top: m.headerButtonTop, left: m.headerInset, borderRadius: "50%" }}>
               <CloseGlyph />
-            </button>
+            </HeaderButton>
           ) : null}
           {onEdit ? (
-            <button type="button" data-slot="details-edit" onClick={onEdit}
-              className={cn("absolute flex items-center justify-center p-0 text-[var(--mdt-label)] transition-colors motion-reduce:transition-none hover:bg-[var(--mdt-hover)]", focusRing)}
+            <HeaderButton slot="details-edit" onPress={onEdit}
               style={{
                 minWidth: m.headerEditWidth, height: m.headerButton, top: m.headerButtonTop, right: m.headerInset,
                 paddingInline: 8, borderRadius: m.headerButton / 2,
-                background: "var(--mdt-glass)", boxShadow: "inset 0 0 0 1px var(--mdt-glass-rim)",
                 fontSize: m.font.edit, fontWeight: 400, letterSpacing: 0,
               }}>
               Edit
-            </button>
+            </HeaderButton>
           ) : null}
 
           <div className="flex flex-col items-center" style={{ paddingInline: m.contentInset }}>
@@ -1042,15 +1280,7 @@ export function MacDetails({
             {/* `QuickActionsContainerView`: Ø 36 discs, 16 apart, no labels. */}
             {actions.length ? (
               <div role="group" aria-labelledby={titleId} className="flex" style={{ marginTop: 10, gap: m.actionGap }}>
-                {actions.map(action => (
-                  <button key={action.id} type="button" data-slot="details-action" data-action={action.id}
-                    aria-label={action.label} title={action.label} disabled={action.disabled} onClick={action.onPress}
-                    className={cn("flex items-center justify-center rounded-full p-0 text-[var(--mdt-label)] transition-opacity motion-reduce:transition-none",
-                      "enabled:hover:opacity-80 disabled:text-[var(--mdt-tertiary)]", focusRing)}
-                    style={{ width: m.action, height: m.action, background: "var(--mdt-fill)" }}>
-                    <ActionGlyph icon={action.icon} />
-                  </button>
-                ))}
+                {actions.map(action => <ActionDisc key={action.id} action={action} size={m.action} />)}
               </div>
             ) : null}
           </div>
@@ -1063,20 +1293,7 @@ export function MacDetails({
               style={{ marginTop: m.sectionGap, gap: m.tabGap, paddingInlineStart: m.contentInset, paddingInlineEnd: m.contentInset }}>
               <style>{".mac-details-tabs{scrollbar-width:none}.mac-details-tabs::-webkit-scrollbar{display:none}"}</style>
               {tabs.map(key => (
-                <button key={key} type="button" role="tab" data-slot="details-tab" data-tab={key}
-                  aria-selected={active === key} aria-controls={sectionId(key)} id={`${titleId}-tab-${key}`}
-                  tabIndex={active === key ? 0 : -1}
-                  onClick={() => selectTab(key)}
-                  className={cn("shrink-0 bg-transparent transition-colors motion-reduce:transition-none", focusRing,
-                    active === key ? "text-[var(--mdt-label)]" : "text-[var(--mdt-secondary)] hover:text-[var(--mdt-label)]")}
-                  style={{
-                    height: m.tabHeight, paddingInline: m.tabPaddingInline, borderRadius: m.tabHeight / 2,
-                    fontSize: m.font.tab, fontWeight: active === key ? m.font.tabSelectedWeight : m.font.tabWeight,
-                    lineHeight: `${m.tabHeight}px`, letterSpacing: 0,
-                    background: active === key ? "var(--mdt-tab-fill)" : "transparent",
-                  }}>
-                  {tabTitles[key]}
-                </button>
+                <Tab key={key} tab={key} selected={active === key} id={`${titleId}-tab-${key}`} controls={sectionId(key)} onSelect={() => selectTab(key)} />
               ))}
             </div>
           ) : null}
@@ -1170,15 +1387,15 @@ export function MacDetails({
                   <RowGroup label="Conversation options">
                     {onHideAlertsChange ? (
                       <Row slot="details-hide-alerts" title="Hide Alerts" height={u.optionHeight}
-                        trailing={<MacCheckbox checked={hideAlerts} onChange={onHideAlertsChange} label="Hide Alerts" />} />
+                        trailing={<MacCheckbox checked={hideAlerts} defaultChecked={defaultHideAlerts} onChange={onHideAlertsChange} label="Hide Alerts" />} />
                     ) : null}
                     {onReadReceiptsChange ? (
                       <Row slot="details-read-receipts" title="Send Read Receipts" height={u.optionHeight}
-                        trailing={<MacCheckbox checked={readReceipts} onChange={onReadReceiptsChange} label="Send Read Receipts" />} />
+                        trailing={<MacCheckbox checked={readReceipts} defaultChecked={defaultReadReceipts} onChange={onReadReceiptsChange} label="Send Read Receipts" />} />
                     ) : null}
                     {onSharedWithYouChange ? (
                       <Row slot="details-shared-with-you" title="Shared With You" height={u.optionHeight}
-                        trailing={<MacCheckbox checked={sharedWithYou} onChange={onSharedWithYouChange} label="Shared With You" />} />
+                        trailing={<MacCheckbox checked={sharedWithYou} defaultChecked={defaultSharedWithYou} onChange={onSharedWithYouChange} label="Shared With You" />} />
                     ) : null}
                   </RowGroup>
                 </section>

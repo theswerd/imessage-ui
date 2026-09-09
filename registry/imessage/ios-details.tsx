@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ComponentProps, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type UIEvent as ReactUIEvent } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ComponentProps, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type UIEvent as ReactUIEvent } from "react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -31,6 +31,17 @@ import { cn } from "@/lib/utils";
  *
  * The screen sits over the conversation, which is blurred (σ≈18) and washed out by a 49% white /
  * 59% black scrim; pass that conversation as `backdrop`.
+ *
+ * ## Under a finger
+ *
+ * Every pressable thing on this screen has a held state, and none of it is in a capture — a still of
+ * a resting screen cannot hold one. Both values come from the framework instead, at the **phone**
+ * idiom, and `iosDetailsPress` records which is which: a grouped-list row fills with
+ * `-[CKUITheme detailsSelectedCellColor]` (#dcdcdc / #464646) and a round button or a photo tile
+ * dims to `-[CKUIBehaviorPhone replyButtonTouchAlpha]` (0.4). The Hide Alerts row is the exception
+ * and stays flat, as a `UITableViewCell` carrying a `UISwitch` does. See `usePressed` for why the
+ * state is pointer-driven rather than `:active`, and `IosSwitch` for what "the switch does not
+ * switch" actually was.
  *
  * The presentation is a separate matter, and its timings are UNMEASURED: no capture in this repo
  * records this screen in motion, so nothing below is a reading off a frame. See `iosDetailsMotion`.
@@ -74,12 +85,12 @@ const font = "-apple-system, BlinkMacSystemFont, sans-serif";
 const vars =
   "[--ios-dt-label:#000000] [--ios-dt-secondary:#848488] [--ios-dt-blue:#0088ff] [--ios-dt-red:#ff383c] " +
   "[--ios-dt-fill:rgba(0,0,0,0.06)] [--ios-dt-separator:#dadadb] [--ios-dt-glyph:#000000] [--ios-dt-glyph-off:rgba(0,0,0,0.26)] [--ios-dt-glyph-blend:normal] [--ios-dt-av-top:#a9c2e1] [--ios-dt-av-bottom:#747fb9] " +
-  "[--ios-dt-tag:#c7c7cc] [--ios-dt-tag-label:#ffffff] [--ios-dt-track:rgba(0,0,0,0.21)] [--ios-dt-knob:#ffffff] " +
+  "[--ios-dt-tag:#c7c7cc] [--ios-dt-tag-label:#ffffff] [--ios-dt-track:rgba(0,0,0,0.21)] [--ios-dt-knob:#ffffff] [--ios-dt-press:#dcdcdc] " +
   "[--ios-dt-chevron:#bdbdbd] [--ios-dt-av-shadow:rgba(0,0,0,0.12)] [--ios-dt-glass:rgba(255,255,255,0.9)] [--ios-dt-glass-rim:inset_0_0_0_0_rgba(0,0,0,0)] [--ios-dt-glass-shadow:0_6px_36px_4px_rgba(0,0,0,0.065)] " +
   "[--ios-dt-scrim:rgba(255,255,255,0.573)] [--ios-dt-saturate:1] [--ios-dt-page:#ffffff] " +
   "dark:[--ios-dt-label:#ffffff] dark:[--ios-dt-secondary:#98989f] dark:[--ios-dt-blue:#0091ff] dark:[--ios-dt-red:#ff4245] " +
   "dark:[--ios-dt-fill:rgba(235,235,245,0.12)] dark:[--ios-dt-separator:#3a3a3c] dark:[--ios-dt-glyph:#ffffff] dark:[--ios-dt-glyph-off:rgba(255,255,255,0.26)] dark:[--ios-dt-glyph-blend:plus-lighter] dark:[--ios-dt-av-top:#575368] dark:[--ios-dt-av-bottom:#302649] " +
-  "dark:[--ios-dt-track:rgba(255,255,255,0.28)] dark:[--ios-dt-chevron:#5d5d5d] dark:[--ios-dt-av-shadow:rgba(0,0,0,0.3)] " +
+  "dark:[--ios-dt-track:rgba(255,255,255,0.28)] dark:[--ios-dt-press:#464646] dark:[--ios-dt-chevron:#5d5d5d] dark:[--ios-dt-av-shadow:rgba(0,0,0,0.3)] " +
   "dark:[--ios-dt-glass:rgba(28,28,28,0.9)] dark:[--ios-dt-glass-rim:inset_0_0_0_0.3333px_rgba(255,255,255,0.0385),inset_0_0_0_0.6667px_rgba(255,255,255,0.032),inset_0_0_0_1px_rgba(255,255,255,0.061)] dark:[--ios-dt-glass-shadow:0_0_0_0_rgba(0,0,0,0)] " +
   "dark:[--ios-dt-scrim:rgba(0,0,0,0.587)] dark:[--ios-dt-saturate:1.05] dark:[--ios-dt-page:#000000]";
 
@@ -141,7 +152,9 @@ export type IosDetailsProps = Omit<ComponentProps<"div">, "children" | "onChange
   actions?: IosDetailsAction[];
   /** Blue link rows in the second cell. */
   links?: Array<{ id: string; label: string; onPress?: () => void }>;
+  /** Controlled Hide Alerts. Omit it and the switch keeps its own state; see `IosSwitch`. */
   hideAlerts?: boolean;
+  defaultHideAlerts?: boolean;
   onHideAlertsChange?: (next: boolean) => void;
   hideAlertsLabel?: string;
   /** Shared content, below the capture's fold and UNMEASURED. Each one is a grouped cell. */
@@ -198,6 +211,11 @@ export type IosDetailsProps = Omit<ComponentProps<"div">, "children" | "onChange
  * 1642 px at 0.96 (both 0.08%; dark is 3136 / 3068, both 0.15%), so the frame does not decide it and
  * this is a presentation choice, not a measurement. The blur is divided by the scale so that what
  * lands on screen is still σ18.
+ *
+ * Re-measured 2026-09-09 on the same two frames and the same region: **1639 light, 3624 dark**. The
+ * light number is better than the one above and the dark one is worse, and neither move is from the
+ * press work in this file — reverting the row clip alone, and then the action circles' paint order
+ * alone, each left the dark frame at exactly 3624. Whatever moved it is outside these three files.
  */
 /** The control points behind `iosDetailsMotion.ease`; the drag inverts the curve through them. */
 const sheetCurve = [0.32, 0.72, 0, 1] as const;
@@ -375,14 +393,110 @@ function swallowClick(node: HTMLElement | null) {
   setTimeout(() => node.removeEventListener("click", swallow, true), 0);
 }
 
+/**
+ * What a control does under a finger. Two values, both from the framework rather than from a still —
+ * no capture in this repo holds a pressed control, and a screenshot of a resting screen cannot show
+ * one:
+ *
+ * - **A grouped-list row fills.** `-[CKUITheme detailsSelectedCellColor]` read at the **phone** idiom
+ *   is **#dcdcdc** light and **#464646** dark (`--ios-dt-press`). It is an opaque replacement fill,
+ *   not an overlay: the same property is `conversationListSelectedCellColor`, which the list paints
+ *   over a white/black ground while details paints it over `detailsBackgroundColor` #ececec / #1e1e1e.
+ *   Read as a delta on the details ground that is −16 light and +40 dark, and this screen's own
+ *   measured cell composite (#efeff0 over white, #1c1c1f over black) moves −19 and +42 to reach it —
+ *   the same step to within three levels, which is the check that the value belongs on this surface
+ *   too. **The Mac disagrees and must not be given this value**: at idiom 5 the same selector returns
+ *   #ffc726 / #ffc600, a find-highlight yellow.
+ * - **A round button, or a photo tile, dims.** `-[CKUIBehaviorPhone replyButtonTouchAlpha]` is
+ *   **0.4**, and every idiom including Mac agrees. It is ChatKit's alpha for a round chrome button
+ *   held under a finger, so the glass circles and the back button take it directly; applying it to a
+ *   shared-photo tile as well is an extension of that reading, not a second one.
+ *
+ * UNMEASURED, and marked as such where they are used: `pressFade` (how long the fill takes to leave
+ * once the finger lifts — instant on the way in, as a `UITableViewCell`'s selected background is) and
+ * `pressSlop` (how far the finger may travel before the highlight is given up to a scroll; 10 pt is
+ * `UIScrollView`'s own pan threshold).
+ */
+export const iosDetailsPress = { touchAlpha: 0.4, pressFade: 200, pressSlop: 10 } as const;
+
+/**
+ * Press state driven by pointer events rather than by `:active`.
+ *
+ * `:active` is not usable here. A `Input.dispatchTouchEvent` hold — a real finger, as far as the
+ * engine is concerned — leaves `el.matches(":active")` **false** in Chromium, so a `:active` rule is
+ * a press state that a finger never opens; and even where it does latch, it survives a scroll that
+ * has already carried the row out from under the finger. Pointer events give both: the flag opens on
+ * `pointerdown`, is given up the moment the finger travels `pressSlop`, and is cleared by a
+ * `pointerup` or `pointercancel` **anywhere** — a listener on the element alone leaves the highlight
+ * stuck on when the finger lifts off the edge of it.
+ *
+ * Nothing here focuses anything. That is deliberate: both engines match `:focus-visible` on a
+ * programmatic focus taken while a pointer is still held, so a press state that focused its own row
+ * would draw the ring the captures do not have (`tapback-bar.tsx` and `audio-recorder.tsx` document
+ * the same trap). A tap still focuses the button natively, which does *not* match `:focus-visible`.
+ */
+export function usePressed(enabled = true) {
+  const [pressed, setPressed] = useState(false);
+  const origin = useRef<{ id: number; x: number; y: number } | null>(null);
+  const release = useCallback(() => { origin.current = null; setPressed(false); }, []);
+  useEffect(() => {
+    if (!pressed) return;
+    const off = () => release();
+    window.addEventListener("pointerup", off);
+    window.addEventListener("pointercancel", off);
+    return () => { window.removeEventListener("pointerup", off); window.removeEventListener("pointercancel", off); };
+  }, [pressed, release]);
+  const handlers = enabled ? {
+    onPointerDown: (event: ReactPointerEvent) => {
+      if (event.pointerType === "mouse" && event.button !== 0) return;
+      origin.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
+      setPressed(true);
+    },
+    onPointerMove: (event: ReactPointerEvent) => {
+      const from = origin.current;
+      if (!from || from.id !== event.pointerId) return;
+      if (Math.hypot(event.clientX - from.x, event.clientY - from.y) > iosDetailsPress.pressSlop) release();
+    },
+    onPointerUp: release,
+    onPointerCancel: release,
+    onPointerLeave: release,
+  } : {};
+  const on = enabled && pressed;
+  return { pressed: on, pressAttr: on ? ("" as const) : undefined, handlers };
+}
+
+/**
+ * The fill a held grouped-list row paints, under the row's own content. It is a sibling of the row's
+ * button rather than a child of it, because a row nudges its text by the measured 0.6667 and the fill
+ * must stay on the row's own box. The cell clips it, so a first or last row is cut by the measured
+ * radius 26 continuous corner and nothing has to know which row it is.
+ */
+function PressFill({ on }: { on: boolean }) {
+  return (
+    <span aria-hidden="true" data-slot="row-press" className="pointer-events-none absolute inset-0 motion-reduce:!transition-none"
+      style={{ background: "var(--ios-dt-press)", opacity: on ? 1 : 0, transition: on ? "none" : `opacity ${iosDetailsPress.pressFade}ms ease-out` }} />
+  );
+}
+
 type GlassCircleProps = ComponentProps<"button"> & { size: number; "data-slot"?: string; "data-action"?: string };
 
-function GlassCircle({ size, className, style, children, ...rest }: GlassCircleProps) {
+function GlassCircle({ size, className, style, children, disabled, ...rest }: GlassCircleProps) {
+  // An unavailable action keeps its circle and drops its glyph (measured); it must not dim under a
+  // finger either, and it is marked `aria-disabled` rather than `disabled` so it stays focusable.
+  const off = Boolean(disabled) || rest["aria-disabled"] === true || rest["aria-disabled"] === "true";
+  const { pressed, pressAttr, handlers } = usePressed(!off);
   return (
-    <button type="button"
-      className={cn("absolute flex items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff]", className)}
-      style={{ width: size, height: size, background: "var(--ios-dt-fill)", backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)", ...style }}
-      {...rest}>
+    <button type="button" data-pressed={pressAttr} disabled={disabled}
+      className={cn("absolute flex items-center justify-center rounded-full motion-reduce:!transition-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff]", className)}
+      style={{
+        width: size, height: size, background: "var(--ios-dt-fill)", backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)",
+        // `replyButtonTouchAlpha`. Instant in, so the circle is already dim by the time the eye
+        // arrives; the fade back out is the unmeasured `pressFade`.
+        opacity: pressed ? iosDetailsPress.touchAlpha : 1,
+        transition: pressed ? "none" : `opacity ${iosDetailsPress.pressFade}ms ease-out`,
+        ...style,
+      }}
+      {...handlers} {...rest}>
       {children}
     </button>
   );
@@ -450,8 +564,14 @@ function Chevron() {
   );
 }
 
-export type IosSwitchProps = Omit<ComponentProps<"button">, "onChange"> & {
+export type IosSwitchProps = Omit<ComponentProps<"button">, "onChange" | "defaultChecked"> & {
+  /**
+   * Controlled state. **Omit it and the switch keeps its own**, so a consumer that only wants a
+   * working switch gets one; hand it a boolean and the consumer owns every change, as React means it.
+   */
   checked?: boolean;
+  /** Where an uncontrolled switch starts. Ignored while `checked` is given. */
+  defaultChecked?: boolean;
   onChange?: (next: boolean) => void;
   label?: string;
 };
@@ -467,26 +587,42 @@ export type IosSwitchProps = Omit<ComponentProps<"button">, "onChange"> & {
  * Off, the track is the measured composite over this screen's cell fill (`--ios-dt-track`). Away
  * from that cell there is nothing measured to composite against, so it falls back to the framework's
  * `+[UIColor secondarySystemFillColor]` (#787880 at 16% light, 32% dark).
+ *
+ * It used to be a switch that could not switch: `checked` defaulted to `false`, so a consumer that
+ * passed neither a value nor a handler — which is what `IosMessagesApp` does when its caller hands it
+ * no `detailsContent` — got a control pinned off, `aria-checked="false"` before the tap and
+ * `aria-checked="false"` after it. The default is gone; `checked === undefined` now means
+ * uncontrolled, and only a caller that actually passes a boolean owns the state.
  */
-export function IosSwitch({ checked = false, onChange, label, className, style, ...rest }: IosSwitchProps) {
+export function IosSwitch({ checked, defaultChecked = false, onChange, label, className, style, ...rest }: IosSwitchProps) {
+  const [own, setOwn] = useState(defaultChecked);
+  const on = checked ?? own;
+  const toggle = () => {
+    if (checked === undefined) setOwn(!on);
+    onChange?.(!on);
+  };
   return (
-    <button type="button" data-slot="ios-switch" role="switch" aria-checked={checked} aria-label={label} onClick={() => onChange?.(!checked)}
+    <button type="button" data-slot="ios-switch" role="switch" aria-checked={on} aria-label={label} onClick={toggle}
       className={cn(
         "relative shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff] motion-reduce:!transition-none",
         "[--ios-sw-on:#34c759] [--ios-sw-off:rgba(120,120,128,0.16)] dark:[--ios-sw-on:#30d158] dark:[--ios-sw-off:rgba(120,120,128,0.32)]",
         className,
       )}
-      style={{ width: 63, height: 28, borderRadius: 14, overflow: "hidden", background: checked ? "var(--ios-sw-on)" : "var(--ios-dt-track, var(--ios-sw-off))", transition: "background 200ms ease", ...style }}
+      style={{ width: 63, height: 28, borderRadius: 14, overflow: "hidden", background: on ? "var(--ios-sw-on)" : "var(--ios-dt-track, var(--ios-sw-off))", transition: "background 200ms ease", ...style }}
       {...rest}>
       {/*
         The capture shows no shadow outside the switch at all: one pixel past the track the pixels
         are already the surrounding gradient, and inside the track the knob only darkens it by ~3/255.
         The track therefore clips the knob's shadow, and that shadow is barely there.
+
+        The knob slides: 220 ms on the sheet's own curve, which is a transition on `transform` and so
+        is a real interpolation `document.getAnimations()` can be caught mid-flight on, not a jump
+        between two committed frames.
       */}
-      <span aria-hidden="true" className="absolute block motion-reduce:!transition-none" style={{
+      <span aria-hidden="true" data-slot="ios-switch-knob" className="absolute block motion-reduce:!transition-none" style={{
         left: 2, top: 2, width: 37, height: 24, borderRadius: 12, background: "var(--ios-dt-knob, #ffffff)",
         boxShadow: "0 1px 3px rgba(0,0,0,0.10)",
-        transform: `translateX(${checked ? 22 : 0}px)`, transition: "transform 220ms cubic-bezier(0.32,0.72,0,1)",
+        transform: `translateX(${on ? 22 : 0}px)`, transition: "transform 220ms cubic-bezier(0.32,0.72,0,1)",
       }} />
     </button>
   );
@@ -503,6 +639,19 @@ export function subpixel(top: number): CSSProperties {
   return { top: whole, transform: `translateY(${(top - whole).toFixed(4)}px)` };
 }
 
+/**
+ * The rows sit inside a clip of the cell's own radius, so a held row's fill is cut by the measured
+ * corner and no row has to know whether it is the first or the last one.
+ *
+ * The clip is a wrapper around the rows rather than `overflow: hidden` on the cell itself, and the
+ * difference is measurable. Clipping the cell clips `cell-fill` too, and that fill already paints
+ * the same superellipse: the hard mask lands on an edge the fill has already antialiased and the
+ * corner comes out a shade dark. Over `details-dark.png` that alone took the settled screen from
+ * 3136 mismatched pixels to 5862, a ring two device pixels wide on all sixteen corners of the
+ * measured stack. With the clip on the rows instead, the fill is untouched and the dark frame is
+ * back where it was. Nothing else inside the wrapper reaches a corner — separators are inset the
+ * measured 16, and so is every glyph and tile — so the clip costs nothing but the press fill.
+ */
 function Cell({ top, height, children }: { top: number; height: number; children: ReactNode }) {
   const whole = Math.floor(top);
   const boxHeight = Math.max(1, Math.round(height));
@@ -514,7 +663,9 @@ function Cell({ top, height, children }: { top: number; height: number; children
         transform: `translateY(${(top - whole).toFixed(4)}px) scaleY(${(height / boxHeight).toFixed(5)})`,
         ...continuous,
       }} />
-      {children}
+      <div data-slot="cell-clip" className="absolute inset-0" style={{ borderRadius: cell.radius, overflow: "hidden", ...continuous }}>
+        {children}
+      </div>
     </div>
   );
 }
@@ -538,6 +689,7 @@ const clip: CSSProperties = { overflow: "hidden", textOverflow: "ellipsis", whit
  * row is the hit target when it navigates, and it is a plain heading when it does not. UNMEASURED.
  */
 function SectionHeader({ title, count, onOpen }: { title: string; count?: number | string; onOpen?: () => void }) {
+  const { pressed, pressAttr, handlers } = usePressed(Boolean(onOpen));
   const body = (
     <>
       <span style={{ ...titleType, ...clip }}>{title}</span>
@@ -550,8 +702,9 @@ function SectionHeader({ title, count, onOpen }: { title: string; count?: number
   const style: CSSProperties = { paddingLeft: cell.inset, paddingRight: cell.inset + (onOpen ? 14 : 0), transform: "translateY(0.6667px)" };
   return (
     <div className="absolute" style={{ left: 0, right: 0, top: 0, height: cell.row }}>
+      {onOpen && <PressFill on={pressed} />}
       {onOpen
-        ? <button type="button" data-slot="section-header" onClick={onOpen} className={cn("absolute inset-0 flex items-center text-left", rowFocus)} style={style}>{body}</button>
+        ? <button type="button" data-slot="section-header" data-pressed={pressAttr} onClick={onOpen} className={cn("absolute inset-0 flex items-center text-left", rowFocus)} style={style} {...handlers}>{body}</button>
         : <h2 data-slot="section-header" className="absolute inset-0 m-0 flex items-center font-normal" style={style}>{body}</h2>}
     </div>
   );
@@ -563,6 +716,7 @@ function SectionHeader({ title, count, onOpen }: { title: string; count?: number
  * no second line is the measured 52. UNMEASURED.
  */
 function ItemRow({ item, top, height }: { item: IosDetailsItem; top: number; height: number }) {
+  const { pressed, pressAttr, handlers } = usePressed(Boolean(item.onPress));
   const twoLine = item.detail !== undefined;
   const pad = cell.inset + (item.onPress ? 14 : 0);
   const body = twoLine ? (
@@ -582,10 +736,12 @@ function ItemRow({ item, top, height }: { item: IosDetailsItem; top: number; hei
     : { paddingLeft: cell.inset, paddingRight: pad, transform: "translateY(0.6667px)" };
   return (
     <div className="absolute" style={{ left: 0, right: 0, top, height }}>
-      {/* Every item row sits under a row: the header above the first one, an item above the rest. */}
+      {item.onPress && <PressFill on={pressed} />}
+      {/* Every item row sits under a row: the header above the first one, an item above the rest.
+          The hairline stays over the fill, the way a held cell's separator does natively. */}
       <Separator top={0} />
       {item.onPress
-        ? <button type="button" data-slot="detail-row" onClick={item.onPress} className={cn("absolute inset-0 text-left", !twoLine && "flex items-center", rowFocus)} style={style}>{body}</button>
+        ? <button type="button" data-slot="detail-row" data-pressed={pressAttr} onClick={item.onPress} className={cn("absolute inset-0 text-left", !twoLine && "flex items-center", rowFocus)} style={style} {...handlers}>{body}</button>
         : <div data-slot="detail-row" className={cn("absolute inset-0", !twoLine && "flex items-center")} style={style}>{body}</div>}
     </div>
   );
@@ -598,6 +754,19 @@ function photosHeight(section: IosDetailsSection<IosDetailsPhoto>) {
 }
 function listHeight(section: IosDetailsSection<IosDetailsItem>) {
   return cell.row + section.items.reduce((total, item) => total + (item.detail === undefined ? cell.row : cell.twoLine), 0);
+}
+
+/** A tile of the shared grid. It dims under a finger at the framework's `replyButtonTouchAlpha`. */
+function PhotoTile({ photo, label, box, media }: { photo: IosDetailsPhoto; label: string; box: CSSProperties; media: ReactNode }) {
+  const { pressed, pressAttr, handlers } = usePressed();
+  return (
+    <button type="button" data-slot="photo" data-pressed={pressAttr} aria-label={label} onClick={photo.onPress}
+      className={cn("absolute overflow-hidden motion-reduce:!transition-none", "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff]")}
+      style={{ ...box, opacity: pressed ? iosDetailsPress.touchAlpha : 1, transition: pressed ? "none" : `opacity ${iosDetailsPress.pressFade}ms ease-out` }}
+      {...handlers}>
+      {media}
+    </button>
+  );
 }
 
 function PhotosCell({ section, top }: { section: IosDetailsSection<IosDetailsPhoto>; top: number }) {
@@ -619,12 +788,7 @@ function PhotosCell({ section, top }: { section: IosDetailsSection<IosDetailsPho
           ? <img src={photo.src} alt="" className="size-full object-cover" draggable={false} />
           : null);
         return photo.onPress
-          ? (
-            <button key={photo.id} type="button" data-slot="photo" aria-label={label} onClick={photo.onPress}
-              className={cn("absolute overflow-hidden", "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088ff]")} style={box}>
-              {media}
-            </button>
-          )
+          ? <PhotoTile key={photo.id} photo={photo} label={label} box={box} media={media} />
           : (
             <span key={photo.id} data-slot="photo" role="img" aria-label={label} className="absolute block overflow-hidden" style={box}>
               {media}
@@ -632,6 +796,39 @@ function PhotosCell({ section, top }: { section: IosDetailsSection<IosDetailsPho
           );
       })}
     </Cell>
+  );
+}
+
+/** One of the second cell's blue rows ("Create New Contact"). It fills while it is held. */
+function LinkRow({ link, top, separated }: { link: { id: string; label: string; onPress?: () => void }; top: number; separated: boolean }) {
+  const { pressed, pressAttr, handlers } = usePressed();
+  return (
+    <div className="absolute" style={{ left: 0, right: 0, top, height: cell.row }}>
+      <PressFill on={pressed} />
+      {separated && <Separator top={0} />}
+      <button type="button" data-slot="link" data-pressed={pressAttr} onClick={link.onPress}
+        className={cn("absolute inset-0 flex items-center text-left", rowFocus)}
+        style={{ paddingLeft: cell.inset, fontSize: 17, lineHeight: "22px", transform: "translateY(0.6667px)", color: "var(--ios-dt-blue)" }}
+        {...handlers}>
+        {link.label}
+      </button>
+    </div>
+  );
+}
+
+/** The destructive row. Its own cell, so the fill is cut by all four of the measured corners. */
+function BlockRow({ label, onPress }: { label: string; onPress?: () => void }) {
+  const { pressed, pressAttr, handlers } = usePressed();
+  return (
+    <>
+      <PressFill on={pressed} />
+      <button type="button" data-slot="block" data-pressed={pressAttr} onClick={onPress}
+        className={cn("absolute inset-0 flex items-center text-left", rowFocus)}
+        style={{ paddingLeft: cell.inset, fontSize: 17, lineHeight: "22px", transform: "translateY(0.6667px)", color: "var(--ios-dt-red)" }}
+        {...handlers}>
+        {label}
+      </button>
+    </>
   );
 }
 
@@ -653,7 +850,9 @@ function ListCell({ section, title, top }: { section: IosDetailsSection<IosDetai
 
 export function IosDetails({
   name, initials, avatar, phoneLabel = "phone", phone, tag, actions = [], links = [],
-  hideAlerts = false, onHideAlertsChange, hideAlertsLabel = "Hide Alerts", blockLabel = "Block Contact", onBlock,
+  // No `= false` here: that default is what made the switch uncontrolled-but-pinned. `undefined`
+  // has to reach `IosSwitch` for it to keep its own state.
+  hideAlerts, defaultHideAlerts, onHideAlertsChange, hideAlertsLabel = "Hide Alerts", blockLabel = "Block Contact", onBlock,
   photos, sharedLinks, attachments,
   onBack, backdrop, progress, scroll, open = true, onExited, className, style, ...props
 }: IosDetailsProps) {
@@ -881,23 +1080,18 @@ export function IosDetails({
     place(links.length * cell.row, top => (
       <Cell key="links" top={top} height={links.length * cell.row}>
         {links.map((link, index) => (
-          <div key={link.id} className="absolute" style={{ left: 0, right: 0, top: index * cell.row, height: cell.row }}>
-            {index > 0 && <Separator top={0} />}
-            <button type="button" data-slot="link" onClick={link.onPress}
-              className={cn("absolute inset-0 flex items-center text-left", rowFocus)}
-              style={{ paddingLeft: cell.inset, fontSize: 17, lineHeight: "22px", transform: "translateY(0.6667px)", color: "var(--ios-dt-blue)" }}>
-              {link.label}
-            </button>
-          </div>
+          <LinkRow key={link.id} link={link} top={index * cell.row} separated={index > 0} />
         ))}
       </Cell>
     ));
   }
   place(cell.row, top => (
     <Cell key="hide-alerts" top={top} height={cell.row}>
+      {/* No press fill: a table cell whose accessory is a switch takes `selectionStyle .none`, and
+          the row is not a button — only the switch is. */}
       <div className="absolute inset-0 flex items-center justify-between" style={{ paddingLeft: cell.inset, paddingRight: 14 }}>
         <span data-slot="hide-alerts-label" style={{ ...titleType, transform: "translateY(0.6667px)" }}>{hideAlertsLabel}</span>
-        <IosSwitch checked={hideAlerts} onChange={onHideAlertsChange} label={hideAlertsLabel} style={{ transform: "translateY(0.3333px)" }} />
+        <IosSwitch checked={hideAlerts} defaultChecked={defaultHideAlerts} onChange={onHideAlertsChange} label={hideAlertsLabel} style={{ transform: "translateY(0.3333px)" }} />
       </div>
     </Cell>
   ));
@@ -906,11 +1100,7 @@ export function IosDetails({
   if (attachments && attachments.items.length > 0) place(listHeight(attachments), top => <ListCell key="attachments" section={attachments} title="Attachments" top={top} />);
   place(cell.row, top => (
     <Cell key="block" top={top} height={cell.row}>
-      <button type="button" data-slot="block" onClick={onBlock}
-        className={cn("absolute inset-0 flex items-center text-left", rowFocus)}
-        style={{ paddingLeft: cell.inset, fontSize: 17, lineHeight: "22px", transform: "translateY(0.6667px)", color: "var(--ios-dt-red)" }}>
-        {blockLabel}
-      </button>
+      <BlockRow label={blockLabel} onPress={onBlock} />
     </Cell>
   ));
   // The page ends 20 below the last group: the measured gap, used as the bottom inset.
@@ -943,14 +1133,6 @@ export function IosDetails({
           whole CSS px, and the entrance is cancelled the moment it lands for exactly that reason. */}
       <div ref={content} data-slot="details-content" className="absolute inset-0"
         style={closing ? { pointerEvents: "none" } : undefined}>
-        {actions.map((action, index) => (
-          <GlassCircle key={action.id} size={54} data-slot="action" data-action={action.id} aria-label={action.label}
-            aria-disabled={action.disabled || undefined} onClick={action.disabled ? undefined : action.onPress}
-            style={{ ...subpixel(195.6667), left: 100 + index * 74, color: action.disabled ? "var(--ios-dt-glyph-off)" : "var(--ios-dt-glyph)", mixBlendMode: action.disabled ? "var(--ios-dt-glyph-blend)" as CSSProperties["mixBlendMode"] : undefined }}>
-            <ActionGlyph icon={action.icon} />
-          </GlassCircle>
-        ))}
-
         {/* The cells scroll; the header above them does not, it collapses. With only the measured
             stack the page is shorter than the screen, so there is nothing to scroll and nothing to
             collapse, and the frame is the capture's. */}
@@ -958,6 +1140,22 @@ export function IosDetails({
           style={{ overflowY: scroll === undefined ? "auto" : "hidden", overscrollBehavior: "contain" }}>
           <div data-slot="details-page" className="relative" style={{ height: pageHeight }}>{groups}</div>
         </div>
+
+        {/*
+          The action circles come AFTER the scroll surface, with the rest of the header. They used to
+          come before it, and `details-scroll` is `absolute inset-0` — the full screen — so it covered
+          all three of them: a finger on Call landed on the scroller and the button was never pressed
+          at all, which is exactly what driving one measured (no press, no click, no anything). Here
+          they are part of the header the cells pass under, which is also what `iosDetailsCollapse`
+          already assumed when it fades them out by the scroll that reaches their measured top.
+        */}
+        {actions.map((action, index) => (
+          <GlassCircle key={action.id} size={54} data-slot="action" data-action={action.id} aria-label={action.label}
+            aria-disabled={action.disabled || undefined} onClick={action.disabled ? undefined : action.onPress}
+            style={{ ...subpixel(195.6667), left: 100 + index * 74, color: action.disabled ? "var(--ios-dt-glyph-off)" : "var(--ios-dt-glyph)", mixBlendMode: action.disabled ? "var(--ios-dt-glyph-blend)" as CSSProperties["mixBlendMode"] : undefined }}>
+            <ActionGlyph icon={action.icon} />
+          </GlassCircle>
+        ))}
 
         {collapsing && (
           // The nav bar's own glass, under the name once the header has collapsed into it: measured

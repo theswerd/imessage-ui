@@ -3,12 +3,14 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ComponentProps,
   type CSSProperties,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type RefObject,
 } from "react";
 import { cn } from "@/lib/utils";
 import { fontStack } from "@/registry/imessage/tokens";
@@ -201,6 +203,215 @@ export const photoPickerMetrics = {
   easing: { enter: "cubic-bezier(0.32, 0.72, 0, 1)", exit: "cubic-bezier(0.4, 0, 1, 1)" },
 } as const;
 
+/** Which Messages this picker is standing in. See `macPhotoPickerMetrics` for what changes. */
+export type PhotoPickerPlatform = "ios" | "macos";
+
+/**
+ * # The macOS presentation
+ *
+ * macOS Messages does not put the Photos browser in a sheet. The "+" is a **menu** there and not the
+ * iPhone's app strip — `-[CKUIBehaviorMac browserButtonShouldUseMenu]` is YES where the Phone's is
+ * NO, and `entryViewSupportsBrowserButton` is NO on both — so its "Photos" row opens a **popover
+ * anchored to the "+" button**, sized to its content and wearing the window's own material. Nothing
+ * about the iOS panel survives that: no grabber, no detents, no sheet corners, no bottom-edge inset,
+ * and no slide up from the screen's bottom edge, which in a desktop window put a sliver of tiles
+ * below the window itself.
+ *
+ * ## Measured — ChatKit 26.5 at idiom 5
+ *
+ * A Catalyst probe (`clang -target arm64-apple-ios26.0-macabi`, dlopen ChatKit, `-[UIDevice
+ * userInterfaceIdiom]` swizzled to 5 **before** anything latches it) then `+[CKUIBehavior
+ * sharedBehaviors]`, which vends `CKUIBehaviorMac`. The idiom-0 reading is beside each one, because
+ * the Mac does not inherit the Phone and the pair is the whole point:
+ *
+ * | Selector | idiom 5 (Mac) | idiom 0 (Phone) |
+ * |---|---|---|
+ * | `popOverWidth` | **252** | absent |
+ * | `popOverMaxHeight` | **400** | absent |
+ * | `popoverPadding` | **7** | absent |
+ * | `popoverHeightPadding` | **16** | absent |
+ * | `attachmentBrowserGridSectionInset` | {8, 8} | {8, 8} |
+ * | `attachmentBrowserGridInterItemSpacing` | 4 | 4 |
+ * | `attachmentBrowserGridMinimumLineSpacing` | 4 | 4 |
+ * | `attachmentBrowserDefaultSizeForSquare` | **104** | **72.5** |
+ * | `searchPhotosCellCornerRadius` | **8** | **0** |
+ *
+ * There is **no** photo-specific popover selector on either class: the whole
+ * `browser|picker|popover|photo|grid|sticker` selector list on `CKUIBehaviorMac` and on the base
+ * `CKUIBehavior` was dumped and holds no `photoPopoverSize` or `browserPopoverSize`. So the Photos
+ * row takes the generic Mac popover, 252 x 400, and that is what `width` / `maxHeight` are.
+ *
+ * The **chrome** is the one macOS popover a capture in this repo does hold: the fill, the bright
+ * inset rim, the dark hairline outside it and the 12 pt corner `macos-plus-menu.tsx` measured off
+ * `references/macos/captures/plus-menu-{light,dark}-2x.png`. Those values are copied here rather
+ * than imported, so this file stays a registry item with no dependency of its own — the same copy
+ * `macos-messages-app.tsx` keeps, for the same reason.
+ *
+ * The **anchor** is measured too, at one remove: `macos-plus-menu.tsx` puts the menu's left edge on
+ * the "+" button's left edge at pane x 9 and its top edge 3 pt inside the button's bottom at pane
+ * y 626, which places the button's bottom at 629; `macos-composer.tsx` measures the button 30 square
+ * with its own bottom 11 above the composer's, so the button is `{9, 599, 30, 30}` in a 640 pt pane
+ * and sits **41 pt above the pane's bottom edge**. That last form is what `anchor` records, because
+ * it is the one that survives a pane of another height. At run time the button is *found* rather
+ * than assumed — see `useMacPopoverPlacement` — so a caller that moves it keeps the arrow.
+ *
+ * ## Derived, not read
+ *
+ * - **Columns.** 252 less `popoverPadding` on each side is 238; less the grid's own 8 pt section
+ *   inset on each side is 222. At the measured 104 square and 4 pt spacing that is
+ *   `floor((222 + 4) / 108)` = **2** columns, and the tiles then stretch to 109 to fill the row.
+ *   The stretch is the rule this file's iOS grid already follows (its 5 columns of 72.73 come out of
+ *   ChatKit's 72.5 the same way), not a new invention — but the 109 itself is arithmetic, not a
+ *   reading.
+ * - **Height.** `popoverHeightPadding` = 16 is measured; that it is 8 above and 8 below rather than
+ *   16 of something else is an assumption. The box is the grid's own height plus that 16, capped at
+ *   the measured `popOverMaxHeight`, which is what "sized to its content" means here.
+ *
+ * ## Not measured, and marked
+ *
+ * - **The arrow.** No capture in `references/macos/captures` holds a Messages attachment popover.
+ *   ChatKit has no arrow metric. UIKit's own `+[_UIPopoverStandardChromeView arrowHeight]` reads
+ *   **0** under Catalyst, because AppKit draws the chrome there, and AppKit exposes none
+ *   (`_NSPopoverFrame` does not exist in macOS 26). So the arrow's size and its outline are
+ *   invented. Where it *points* is measured — the "+" button's centre — except that a 12 pt corner
+ *   will not let a 22 pt arrow sit closer than 23 pt to the box's edge, so at this anchor the tip
+ *   lands 8 pt right of the button's centre. That clamp is what UIKit does too.
+ * - **The motion.** Borrowed whole from `macPlusMenuMetrics.motion`, which is itself borrowed: 160
+ *   ms in, 120 ms out, from 0.96 at the anchor corner. Nothing records this popover opening.
+ * - **The tile aspect.** The iOS capture's tiles are 0.6 device px taller than they are wide; the
+ *   Mac square is `attachmentBrowserDefaultSizeForSquare`, so these are square. That is a reading of
+ *   the selector's name, not of a capture.
+ */
+export const macPhotoPickerMetrics = {
+  /** `-[CKUIBehaviorMac popOverWidth]` and `popOverMaxHeight`. */
+  width: 252,
+  maxHeight: 400,
+  /** `-[CKUIBehaviorMac popoverPadding]`: what the popover keeps clear left and right of its content. */
+  padding: 7,
+  /**
+   * `-[CKUIBehaviorMac popoverHeightPadding]`. Measured at 16; that it splits 8 above and 8 below is
+   * an assumption, since nothing says whether it is a total or a per-edge value.
+   * @unverified the split
+   */
+  heightPadding: 16,
+  /**
+   * The attachment browser's grid, all at idiom 5. `cell` is a *target*: the column count comes out
+   * of it and the tiles then stretch to fill, exactly as the iOS grid does with ChatKit's 72.5.
+   */
+  grid: { inset: 8, gap: 4, cell: 104, tileRadius: 8 },
+  /** Measured off `plus-menu-{light,dark}-2x.png` by `macos-plus-menu.tsx`; copied, not imported. */
+  radius: 12,
+  /**
+   * The "+" button, expressed as a distance up from the pane's bottom edge so it survives a pane of
+   * another height: `macComposerMetrics.bottom` 11 + `plus.size` 30 = 41, at `plus.left` 9.
+   * Only the fallback: the button is looked up in the DOM when it is there.
+   */
+  anchor: { left: 9, size: 30, aboveBottom: 41 },
+  /** @unverified invented outright; see the note above for why nothing can measure it. */
+  arrow: { width: 22, height: 11 },
+  /** @unverified borrowed whole from `macPlusMenuMetrics.motion`, which is itself borrowed. */
+  motion: {
+    enter: 160,
+    exit: 120,
+    scale: 0.96,
+    enterEase: "cubic-bezier(0.2, 0.8, 0.3, 1)",
+    exitEase: "cubic-bezier(0.4, 0, 1, 1)",
+  },
+} as const;
+
+/**
+ * The measured macOS popover material, as custom properties so a `.dark` ancestor flips it without
+ * the caller passing anything. Every value is `macos-plus-menu.tsx`'s, copied rather than imported
+ * so this file keeps no dependency of its own.
+ */
+const macVars =
+  "[--mac-pp-fill:rgba(238,240,241,0.92)] [--mac-pp-edge:inset_0_0_0_1px_rgba(255,255,255,0.8),0_0_0_0.5px_rgba(0,0,0,0.28),0_4px_16px_rgba(0,0,0,0.12)] [--mac-pp-outline:rgba(0,0,0,0.28)] " +
+  "dark:[--mac-pp-fill:rgba(37,39,40,0.94)] dark:[--mac-pp-edge:inset_0_0_0_1px_rgba(255,255,255,0.28),0_0_0_0.5px_rgba(0,0,0,0.85),0_4px_16px_rgba(0,0,0,0.35)] dark:[--mac-pp-outline:rgba(0,0,0,0.85)]";
+
+/**
+ * A host that wraps this picker in its own popover box — `macos-messages-app.tsx` does, from before
+ * the picker knew what a Mac was — would otherwise double the material: two fills, two rims, two
+ * shadows. These rules switch that box off *only* when the picker inside it is drawing the macOS
+ * popover itself, and take back the clip the same host forces on this component so the arrow is not
+ * cut off. Both selectors outrank the host's, so they win wherever the two stylesheets land.
+ */
+const macHostInteropCss = `[data-slot="mac-attachment-popover"]:has(> [data-slot="photo-picker"][data-platform="macos"]),
+[data-slot="mac-attachment-popover"]:has([data-slot="photo-picker"][data-platform="macos"]) > [aria-hidden="true"]:not([data-slot]){background:transparent!important;box-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;overflow:visible!important}
+[data-slot="mac-attachment-popover"] [data-slot="photo-picker"][data-platform="macos"]{clip-path:none!important;background:transparent!important}`;
+
+/**
+ * Where the popover sits, in the coordinates of whatever box the picker was dropped into.
+ *
+ * The "+" button is *found*, not assumed: the nearest `[data-im-platform]` ancestor is searched for
+ * `[data-slot="attach-button"]`, which is the slot `macos-composer.tsx` puts on it. That is what lets
+ * the same component be right inside the app shell's own popover wrapper (a 252 pt box at pane x 9)
+ * and inside a bare pane in a lab route, without either caller passing coordinates. When there is no
+ * button to find, `macPhotoPickerMetrics.anchor` stands in, measured from the pane's bottom edge.
+ *
+ * It always opens **upward**. That is the measured rule, not a preference: neither Mac popover fits
+ * below a button whose bottom is 11 pt off the floor of a 640 pt window, and an AppKit popover flips
+ * rather than hangs.
+ */
+function useMacPopoverPlacement(
+  root: RefObject<HTMLElement | null>,
+  enabled: boolean,
+  box: { width: number; height: number },
+  arrow: { width: number; height: number },
+  radius: number,
+) {
+  const [placement, setPlacement] = useState<{ left: number; top: number; arrowX: number } | null>(null);
+  useLayoutEffect(() => {
+    const node = root.current;
+    if (!enabled || !node) return;
+    const base = node.getBoundingClientRect();
+    const host = node.closest("[data-im-platform]") ?? node.ownerDocument.body;
+    const button = host.querySelector('[data-slot="attach-button"]');
+    const rect = button?.getBoundingClientRect();
+    const a = macPhotoPickerMetrics.anchor;
+    // In the root's own coordinates, so the caller's box can be the pane or a wrapper inside it.
+    const anchor = rect
+      ? { left: rect.left - base.left, top: rect.top - base.top, width: rect.width }
+      : { left: a.left, top: base.height - a.aboveBottom, width: a.size };
+    // Flush with the button's left edge, the way the "+" menu's own measured left edge is, and pulled
+    // back inside the box it was dropped into when that box is wide enough to have an inside.
+    const left = base.width > box.width ? Math.max(0, Math.min(anchor.left, base.width - box.width)) : anchor.left;
+    // The arrow points at the button's centre, but never closer to a corner than the corner's own
+    // radius plus half the arrow — past that it would come out of the curve. UIKit clamps it too.
+    const inset = radius + arrow.width / 2;
+    const centre = anchor.left + anchor.width / 2 - left;
+    // Measuring the DOM and rendering against what came back is the one thing a layout effect is
+    // for, and it cannot be lifted into render: the "+" button does not exist until the commit.
+    // The pose is committed before the browser paints, so no frame shows the popover unplaced.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a layout measurement, see above
+    setPlacement({
+      left,
+      top: anchor.top - arrow.height - box.height,
+      arrowX: Math.max(inset, Math.min(centre, box.width - inset)),
+    });
+  }, [root, enabled, box.width, box.height, arrow.width, arrow.height, radius]);
+  return placement;
+}
+
+/**
+ * Reads the platform off the DOM when the caller did not say. The macOS shell stamps
+ * `data-im-platform="macos"` on its root, so a picker dropped anywhere inside it gets the macOS
+ * presentation with nothing passed — which is what `macos-messages-app.tsx` does today, since it
+ * predates this component knowing about platforms. It is a layout effect, so a client-mounted picker
+ * is never painted in the wrong presentation; a picker that is *server*-rendered already open shows
+ * one iOS frame before the effect runs, which is why the `platform` prop exists.
+ */
+function useHostPlatform(root: RefObject<HTMLElement | null>, override?: PhotoPickerPlatform): PhotoPickerPlatform {
+  const [sniffed, setSniffed] = useState<PhotoPickerPlatform>("ios");
+  useLayoutEffect(() => {
+    if (override) return;
+    const host = root.current?.closest("[data-im-platform]");
+    // Same reason: the ancestor that says which Messages this is cannot be read during render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a DOM read, see above
+    setSniffed(host?.getAttribute("data-im-platform") === "macos" ? "macos" : "ios");
+  }, [root, override]);
+  return override ?? sniffed;
+}
+
 /**
  * Light values are measured off the capture, except the two `tertiarySystemFill` alphas, which are
  * `+[UIColor tertiarySystemFillColor]` read in both styles (that family does come back with the iOS
@@ -252,6 +463,11 @@ export const photoPickerSamples: PhotoPickerPhoto[] = [
 ];
 
 export type PhotoPickerProps = Omit<ComponentProps<"div">, "onSelect" | "children"> & {
+  /**
+   * Which Messages to be. Left off, it is read from the nearest `[data-im-platform]` ancestor, so
+   * the macOS shell gets the macOS popover without passing anything. See `macPhotoPickerMetrics`.
+   */
+  platform?: PhotoPickerPlatform;
   photos?: PhotoPickerPhoto[];
   /** Controlled selection, as photo ids, in the order they were picked. */
   selected?: string[];
@@ -335,6 +551,7 @@ function SearchGlyph({ scale = 0.72 }: { scale?: number }) {
 }
 
 export function PhotoPicker({
+  platform: platformProp,
   photos = photoPickerSamples,
   selected: selectedProp,
   defaultSelected,
@@ -377,6 +594,8 @@ export function PhotoPicker({
   /** Live drag, or null. `from` is the height the drag started at, so the pose is pure arithmetic. */
   const [drag, setDrag] = useState<{ pointer: number; startY: number; from: number; y: number } | null>(null);
   const panel = useRef<HTMLDivElement>(null);
+  /** The macOS popover's own box, which is what the presentation animates. */
+  const macBox = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const exited = useRef(false);
   /** Set by the arrow keys, consumed after the render that puts the tile in the window. */
@@ -393,6 +612,27 @@ export function PhotoPicker({
    * already open.
    */
   const awayDistance = useRef(0);
+
+  const platform = useHostPlatform(panel, platformProp);
+  const mac = platform === "macos";
+  const mm = macPhotoPickerMetrics;
+
+  /**
+   * The macOS popover's box, sized to its content. Width and the cap are ChatKit's; the column count
+   * and the tile size fall out of them, and the height is however many rows that makes, plus the
+   * measured `popoverHeightPadding`, capped at the measured `popOverMaxHeight`. All of it is pure
+   * arithmetic over `photos.length`, so it is available during render and the placement effect can
+   * depend on it.
+   */
+  const macContentWidth = mm.width - mm.padding * 2;
+  const macGridWidth = macContentWidth - mm.grid.inset * 2;
+  const macColumns = Math.max(1, Math.floor((macGridWidth + mm.grid.gap) / (mm.grid.cell + mm.grid.gap)));
+  const macTile = (macGridWidth - (macColumns - 1) * mm.grid.gap) / macColumns;
+  const macRows = Math.max(1, Math.ceil(photos.length / macColumns));
+  const macGridHeight = mm.grid.inset * 2 + macRows * macTile + (macRows - 1) * mm.grid.gap;
+  const macHeight = Math.min(mm.maxHeight, Math.round(macGridHeight + mm.heightPadding));
+
+  const placement = useMacPopoverPlacement(panel, mac, { width: mm.width, height: macHeight }, mm.arrow, mm.radius);
 
   const collapsedHeight = height;
   /**
@@ -434,9 +674,14 @@ export function PhotoPicker({
    * The row height comes from the tile's own measured aspect, not from `aspect-square`: the capture's
    * rows really are 0.6 device px taller than its columns are wide.
    */
-  const gap = m.gap;
-  const tileWidth = (width - (columns - 1) * gap) / columns;
-  const tileHeight = tileWidth / m.tileAspect;
+  const gap = mac ? mm.grid.gap : m.gap;
+  const gridColumns = mac ? macColumns : columns;
+  const gridWidth = mac ? macGridWidth : width;
+  const tileWidth = (gridWidth - (gridColumns - 1) * gap) / gridColumns;
+  // The Mac's cell is `attachmentBrowserDefaultSizeForSquare`, so its tiles are square; the iOS
+  // capture's really are 0.6 device px taller than they are wide.
+  const tileHeight = mac ? tileWidth : tileWidth / m.tileAspect;
+  const tileRadius = mac ? mm.grid.tileRadius : m.tileRadius;
   // Guarded: a caller that hands the panel a zero width would otherwise divide by zero windowing it.
   const stride = Math.max(1, tileHeight + gap);
 
@@ -450,7 +695,8 @@ export function PhotoPicker({
   const filtered = needle ? items.filter(item => item.name.toLowerCase().includes(needle)) : items;
   // Header visibility follows the detent, not the live drag: revealing it mid-drag would jump the
   // grid the moment the finger moved a pixel.
-  const expanded = detent === "expanded";
+  // A popover has one size, so the detent, its header and its search row are iOS-only.
+  const expanded = !mac && detent === "expanded";
   const headerHeight = expanded
     ? m.header.titleTop + m.header.rowHeight + (search ? m.header.searchTop + m.header.rowHeight : 0) + m.header.bottom
     : 0;
@@ -461,8 +707,8 @@ export function PhotoPicker({
    * stop on a tile that is gone.
    */
   const activeIndex = Math.min(active, Math.max(0, filtered.length - 1));
-  const rows = Math.ceil(filtered.length / columns);
-  const viewport = Math.max(0, panelHeight - headerHeight);
+  const rows = Math.ceil(filtered.length / gridColumns);
+  const viewport = mac ? macHeight - mm.heightPadding - mm.grid.inset * 2 : Math.max(0, panelHeight - headerHeight);
   /**
    * Windowed, because a real library is thousands of tiles and every one of them would otherwise
    * carry an `<img>`. Two rows of overscan on each side, and the active row is always in range so
@@ -470,15 +716,15 @@ export function PhotoPicker({
    */
   const firstRow = Math.max(0, Math.floor(scrollTop / stride) - 2);
   const lastRow = Math.min(rows - 1, Math.ceil((scrollTop + viewport) / stride) + 1);
-  const visible = filtered.slice(firstRow * columns, (lastRow + 1) * columns);
+  const visible = filtered.slice(firstRow * gridColumns, (lastRow + 1) * gridColumns);
   /**
    * The roving tab stop has to be a tile that exists. Scrolling the active tile out of the window
    * moves the stop to the first tile still drawn; focusing that one puts `active` back on it, so the
    * arrows carry on from wherever the eye is.
    */
-  const tabStop = activeIndex >= firstRow * columns && activeIndex <= lastRow * columns + columns - 1
+  const tabStop = activeIndex >= firstRow * gridColumns && activeIndex <= lastRow * gridColumns + gridColumns - 1
     ? activeIndex
-    : firstRow * columns;
+    : firstRow * gridColumns;
 
   useEffect(() => {
     const index = pendingFocus.current;
@@ -530,8 +776,8 @@ export function PhotoPicker({
     const step =
       event.key === "ArrowRight" ? 1
       : event.key === "ArrowLeft" ? -1
-      : event.key === "ArrowDown" ? columns
-      : event.key === "ArrowUp" ? -columns
+      : event.key === "ArrowDown" ? gridColumns
+      : event.key === "ArrowUp" ? -gridColumns
       : 0;
     let next = step ? activeIndex + step : activeIndex;
     if (event.key === "Home") next = 0;
@@ -542,7 +788,7 @@ export function PhotoPicker({
     // Scroll first, so the row the focus is about to land on is inside the window this render draws.
     const node = scroller.current;
     if (node) {
-      const row = Math.floor(next / columns);
+      const row = Math.floor(next / gridColumns);
       const top = row * stride;
       const bottom = top + tileHeight;
       let target = node.scrollTop;
@@ -588,14 +834,20 @@ export function PhotoPicker({
    * translating it by its own height alone leaves the inset on screen.
    */
   useEffect(() => {
-    const node = panel.current;
+    const node = mac ? macBox.current : panel.current;
     if (!node) return;
     // Reopening arms the exit again, so a panel that opens and closes twice reports twice.
     if (open) exited.current = false;
     const closing = !open;
-    const duration = closing ? m.timing.exit : m.timing.enter;
-    const away = { transform: `translateY(${awayDistance.current}px)` };
-    const settled = { transform: "translateY(0px)" };
+    const duration = closing ? (mac ? mm.motion.exit : m.timing.exit) : (mac ? mm.motion.enter : m.timing.enter);
+    /*
+     * A popover does not slide: it grows out of the "+" button's corner and fades, which is what
+     * `macos-plus-menu.tsx` does with the same borrowed numbers. Sliding it the way the iOS sheet
+     * does is what put a sliver of tiles below the *window's* bottom edge, because a desktop window
+     * has no screen edge for a sheet to leave by.
+     */
+    const away = mac ? { opacity: 0, transform: `scale(${mm.motion.scale})` } : { transform: `translateY(${awayDistance.current}px)` };
+    const settled = mac ? { opacity: 1, transform: "scale(1)" } : { transform: "translateY(0px)" };
     const finish = () => {
       if (exited.current) return;
       exited.current = true;
@@ -611,7 +863,7 @@ export function PhotoPicker({
     }
     const animation = node.animate(closing ? [settled, away] : [away, settled], {
       duration,
-      easing: closing ? m.easing.exit : m.easing.enter,
+      easing: closing ? (mac ? mm.motion.exitEase : m.easing.exit) : (mac ? mm.motion.enterEase : m.easing.enter),
       fill: "both",
     });
     if (progress !== undefined) {
@@ -622,7 +874,7 @@ export function PhotoPicker({
     if (!closing) return () => animation.cancel();
     animation.addEventListener("finish", finish);
     return () => animation.removeEventListener("finish", finish);
-  }, [open, progress, m.timing.enter, m.timing.exit, m.easing.enter, m.easing.exit]);
+  }, [open, progress, mac, mm.motion, m.timing.enter, m.timing.exit, m.easing.enter, m.easing.exit]);
 
   const field = (
     <div
@@ -655,6 +907,197 @@ export function PhotoPicker({
       />
     </div>
   );
+
+  /**
+   * The grid. One subtree for both platforms: only the box it sits in, the column count, the tile
+   * size and the tile corner change, and those are settled above.
+   */
+  const gridScroller = (
+    <div
+      ref={scroller}
+      data-slot="photo-picker-scroller"
+      // A scroll container has to be reachable by keyboard: without a tab stop the only way to
+      // move the panel is to focus a tile that happens to be off screen.
+      tabIndex={0}
+      role="group"
+      aria-label={label}
+      onScroll={event => setScrollTop(event.currentTarget.scrollTop)}
+      onKeyDown={onKeyDown}
+      className={cn("overflow-y-auto overflow-x-hidden [overscroll-behavior:contain] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#0088ff]", mac ? null : "w-full")}
+      // On the Mac the grid sits inside the popover's own `popoverPadding` and then inside the
+      // browser grid's own 8 pt section inset, both measured; on iOS it is flush to the panel.
+      style={mac
+        ? { position: "absolute", left: mm.padding + mm.grid.inset, top: mm.heightPadding / 2 + mm.grid.inset, width: macGridWidth, height: viewport }
+        : { height: viewport }}
+    >
+      {/* The full scroll height, with only the visible band of rows drawn inside it. */}
+      <div style={{ position: "relative", height: Math.max(0, rows * stride - gap) }}>
+        {/*
+          A group of toggles, not a listbox: each tile keeps its own pressed state and the grid never
+          owes the keyboard a single mandatory selection.
+        */}
+        <div
+          data-slot="photo-picker-grid"
+          className="grid select-none"
+          style={{
+            position: "absolute",
+            top: firstRow * stride,
+            left: 0,
+            right: 0,
+            gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))`,
+            gridAutoRows: `${tileHeight}px`,
+            gap,
+          }}
+        >
+          {visible.map(({ photo, id, name }, offset) => {
+            const index = firstRow * gridColumns + offset;
+            const order = selected.indexOf(id);
+            const isSelected = order >= 0;
+            const broken = failed.includes(id);
+            return (
+              <button
+                key={id}
+                type="button"
+                data-slot="photo-picker-tile"
+                data-index={index}
+                data-selected={isSelected ? "true" : "false"}
+                aria-label={name}
+                aria-pressed={isSelected}
+                tabIndex={index === tabStop ? 0 : -1}
+                onFocus={() => setActive(index)}
+                onClick={() => toggle(photo, id)}
+                className="relative block size-full p-0 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#0088ff]"
+                style={{
+                  background: photo.src && !broken ? "var(--ios-pp-tile)" : (photo.fill ?? "var(--ios-pp-tile)"),
+                  // Clipped, not rounded, for the same reason the panel is; the focus ring is drawn
+                  // inside the tile so the clip cannot swallow it.
+                  clipPath: `inset(0 round ${tileRadius}px)`,
+                }}
+              >
+                {photo.src && !broken ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={photo.src}
+                    alt=""
+                    aria-hidden="true"
+                    loading="lazy"
+                    decoding="async"
+                    sizes={`${Math.round(tileWidth)}px`}
+                    onError={() => setFailed(prev => (prev.includes(id) ? prev : [...prev, id]))}
+                    className="absolute inset-0 size-full object-cover"
+                    draggable={false}
+                  />
+                ) : null}
+                {/* `aria-pressed` already says selected, so the hidden text only carries the pick order. */}
+                {ordered && isSelected ? <span style={offscreen}>{`${order + 1} of ${selected.length}`}</span> : null}
+                {/*
+                  The badge never unmounts: it is always in the tree and only its opacity and scale
+                  change, so a deselect gets the same committed frames a select does instead of
+                  vanishing on the render that drops it. The 150 ms is unverified.
+                */}
+                <span
+                  aria-hidden="true"
+                  data-slot="photo-picker-badge"
+                  className="pointer-events-none absolute flex items-center justify-center motion-safe:transition-[opacity,transform]"
+                  style={{
+                    right: m.badge.inset,
+                    bottom: m.badge.inset,
+                    width: m.badge.size,
+                    height: m.badge.size,
+                    transitionDuration: `${m.timing.badge}ms`,
+                    opacity: isSelected ? 1 : 0,
+                    transform: isSelected ? "scale(1)" : "scale(0.6)",
+                  }}
+                >
+                  {ordered ? (
+                    <>
+                      <span className="absolute inset-0 rounded-full" style={{ background: "var(--ios-pp-badge)", boxShadow: `0 0 0 ${m.badge.rim}px var(--ios-pp-glyph)` }} />
+                      <span className="relative" style={{ color: "var(--ios-pp-glyph)", fontSize: m.badge.fontSize, fontWeight: 600, lineHeight: 1 }}>
+                        {isSelected ? order + 1 : ""}
+                      </span>
+                    </>
+                  ) : (
+                    <PhotoPickerSelectionBadge size={m.badge.size} />
+                  )}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+
+  if (mac) {
+    /*
+     * The macOS popover. Its box is `popOverWidth` wide and as tall as its own grid, capped at
+     * `popOverMaxHeight`; it wears the plus menu's measured material and 12 pt corner; and it grows
+     * out of the "+" button rather than sliding up from an edge a desktop window does not have.
+     * There is no grabber, no detent, no header and no search row, because a popover has one size.
+     *
+     * The root stays the box it was dropped into and only holds the coordinate space: it is the
+     * popover *inside* it that is placed, so the same component is right in the app shell's own
+     * wrapper and in a bare pane. It is invisible until the placement effect has run, because a
+     * popover that paints one frame at the wrong end of the pane is worse than one that waits.
+     */
+    return (
+      <div
+        ref={panel}
+        data-slot="photo-picker"
+        data-platform="macos"
+        data-state={open ? "open" : "closed"}
+        tabIndex={-1}
+        onKeyDown={onPanelKeyDown}
+        className={cn("absolute inset-0 outline-none", vars, macVars, className)}
+        style={{ pointerEvents: "none", fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif", ...style }}
+        {...props}
+      >
+        <style>{macHostInteropCss}</style>
+        <div
+          ref={macBox}
+          data-slot="mac-popover"
+          role="group"
+          aria-label={label}
+          className="absolute bg-[var(--mac-pp-fill)] shadow-[var(--mac-pp-edge)]"
+          style={{
+            left: placement?.left ?? 0,
+            top: placement?.top ?? 0,
+            width: mm.width,
+            height: macHeight,
+            borderRadius: mm.radius,
+            visibility: placement ? undefined : "hidden",
+            pointerEvents: "auto",
+            backdropFilter: "blur(30px)",
+            WebkitBackdropFilter: "blur(30px)",
+            // It grows out of the arrow's tip, which is the "+" button: the same corner rule the
+            // plus menu follows, moved to the corner this popover is actually anchored by.
+            transformOrigin: `${placement?.arrowX ?? mm.width / 2}px ${macHeight + mm.arrow.height}px`,
+          }}
+        >
+          {/*
+            The arrow. Invented outright — see `macPhotoPickerMetrics.arrow` — and drawn as the
+            popover's own material clipped to a triangle, with the box's hairline carried down its
+            two slanted edges. It overlaps the box by half a point so the fills meet without a seam.
+          */}
+          <span
+            aria-hidden="true"
+            data-slot="mac-popover-arrow"
+            className="pointer-events-none absolute"
+            style={{ left: (placement?.arrowX ?? mm.width / 2) - mm.arrow.width / 2, top: macHeight - 0.5, width: mm.arrow.width, height: mm.arrow.height + 0.5 }}
+          >
+            <span
+              className="absolute inset-0 bg-[var(--mac-pp-fill)]"
+              style={{ clipPath: "polygon(0 0, 100% 0, 50% 100%)", backdropFilter: "blur(30px)", WebkitBackdropFilter: "blur(30px)" }}
+            />
+            <svg aria-hidden="true" className="absolute inset-0 block size-full" viewBox={`0 0 ${mm.arrow.width} ${mm.arrow.height + 0.5}`} fill="none" preserveAspectRatio="none">
+              <path d={`M0 0.25 L${mm.arrow.width / 2} ${mm.arrow.height + 0.25} L${mm.arrow.width} 0.25`} stroke="var(--mac-pp-outline)" strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
+            </svg>
+          </span>
+          {gridScroller}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -716,115 +1159,7 @@ export function PhotoPicker({
         </div>
       ) : null}
 
-      <div
-        ref={scroller}
-        data-slot="photo-picker-scroller"
-        // A scroll container has to be reachable by keyboard: without a tab stop the only way to
-        // move the panel is to focus a tile that happens to be off screen.
-        tabIndex={0}
-        role="group"
-        aria-label={label}
-        onScroll={event => setScrollTop(event.currentTarget.scrollTop)}
-        onKeyDown={onKeyDown}
-        className="w-full overflow-y-auto overflow-x-hidden [overscroll-behavior:contain] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#0088ff]"
-        style={{ height: viewport }}
-      >
-        {/* The full scroll height, with only the visible band of rows drawn inside it. */}
-        <div style={{ position: "relative", height: Math.max(0, rows * stride - gap) }}>
-          {/*
-            A group of toggles, not a listbox: each tile keeps its own pressed state and the grid never
-            owes the keyboard a single mandatory selection.
-          */}
-          <div
-            data-slot="photo-picker-grid"
-            className="grid select-none"
-            style={{
-              position: "absolute",
-              top: firstRow * stride,
-              left: 0,
-              right: 0,
-              gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-              gridAutoRows: `${tileHeight}px`,
-              gap,
-            }}
-          >
-            {visible.map(({ photo, id, name }, offset) => {
-              const index = firstRow * columns + offset;
-              const order = selected.indexOf(id);
-              const isSelected = order >= 0;
-              const broken = failed.includes(id);
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  data-slot="photo-picker-tile"
-                  data-index={index}
-                  data-selected={isSelected ? "true" : "false"}
-                  aria-label={name}
-                  aria-pressed={isSelected}
-                  tabIndex={index === tabStop ? 0 : -1}
-                  onFocus={() => setActive(index)}
-                  onClick={() => toggle(photo, id)}
-                  className="relative block size-full p-0 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#0088ff]"
-                  style={{
-                    background: photo.src && !broken ? "var(--ios-pp-tile)" : (photo.fill ?? "var(--ios-pp-tile)"),
-                    // Clipped, not rounded, for the same reason the panel is; the focus ring is drawn
-                    // inside the tile so the clip cannot swallow it.
-                    clipPath: `inset(0 round ${m.tileRadius}px)`,
-                  }}
-                >
-                  {photo.src && !broken ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={photo.src}
-                      alt=""
-                      aria-hidden="true"
-                      loading="lazy"
-                      decoding="async"
-                      sizes={`${Math.round(tileWidth)}px`}
-                      onError={() => setFailed(prev => (prev.includes(id) ? prev : [...prev, id]))}
-                      className="absolute inset-0 size-full object-cover"
-                      draggable={false}
-                    />
-                  ) : null}
-                  {/* `aria-pressed` already says selected, so the hidden text only carries the pick order. */}
-                  {ordered && isSelected ? <span style={offscreen}>{`${order + 1} of ${selected.length}`}</span> : null}
-                  {/*
-                    The badge never unmounts: it is always in the tree and only its opacity and scale
-                    change, so a deselect gets the same committed frames a select does instead of
-                    vanishing on the render that drops it. The 150 ms is unverified.
-                  */}
-                  <span
-                    aria-hidden="true"
-                    data-slot="photo-picker-badge"
-                    className="pointer-events-none absolute flex items-center justify-center motion-safe:transition-[opacity,transform]"
-                    style={{
-                      right: m.badge.inset,
-                      bottom: m.badge.inset,
-                      width: m.badge.size,
-                      height: m.badge.size,
-                      transitionDuration: `${m.timing.badge}ms`,
-                      opacity: isSelected ? 1 : 0,
-                      transform: isSelected ? "scale(1)" : "scale(0.6)",
-                    }}
-                  >
-                    {ordered ? (
-                      <>
-                        <span className="absolute inset-0 rounded-full" style={{ background: "var(--ios-pp-badge)", boxShadow: `0 0 0 ${m.badge.rim}px var(--ios-pp-glyph)` }} />
-                        <span className="relative" style={{ color: "var(--ios-pp-glyph)", fontSize: m.badge.fontSize, fontWeight: 600, lineHeight: 1 }}>
-                          {isSelected ? order + 1 : ""}
-                        </span>
-                      </>
-                    ) : (
-                      <PhotoPickerSelectionBadge size={m.badge.size} />
-                    )}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </div>
+      {gridScroller}
 
       {grabber ? (
         <div

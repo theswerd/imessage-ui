@@ -18,6 +18,7 @@ import { bodyClipPath, tailBox, tailPath, tailSeamOverlap } from "@/registry/ime
  * | part                    | native evidence                                              | here |
  * |-------------------------|--------------------------------------------------------------|------|
  * | single photo's box      | `thumbnailFillSizeForWidth:imageSize:`, swept                 | yes, MEASURED, within 0.38 pt (ChatKit rounds to the device grid; see `photoBox`) |
+ * | multi-photo box         | `-[CKUIBehavior previewBalloonSizeThatFits:]`, read at both idioms | yes, MEASURED: see `photoStackBox`. 375 x 353 on Mac, 350.625 x 332.625 on iPhone |
  * | balloon max width       | `balloonMaxWidthForTranscriptWidth:…`, `balloonMaxWidthPercent` 0.85 iPhone / 0.65 Mac | rule recorded in `balloonMaxWidth`; the group uses the measured constant and now cannot exceed its container |
  * | loading                 | `DOWNLOADING` = "Downloading…"                                 | partial: tiles hold on the placeholder and the group is `aria-busy`, but there is NO progress indicator and no "Downloading…" copy. `photoSheetProgressIndicatorSize` {20, 20} is the picker sheet, not the balloon, so the balloon's spinner is UNMEASURED |
  * | failed / not downloaded | `TAP_TO_DOWNLOAD`, `CLICK_TO_DOWNLOAD`, `downloadButtonFont` 17 | yes: copy and type size MEASURED; `pending` offers it without a failed fetch. A *send* failure is a different thing and belongs to the shell (`FailedSendBadge`, ChatKit's `_clearFailureBadge`), not to this component |
@@ -41,6 +42,12 @@ import { bodyClipPath, tailBox, tailPath, tailSeamOverlap } from "@/registry/ime
  * The 2x2 tiling here is therefore a pre-stack layout kept because it is the one thing that can be
  * built without a capture: the stack's frames live in PhotoFoundation's solver, and no capture of a
  * multi-photo message exists to fit them against. Recorded, not fixed.
+ *
+ * The stack's **outer box**, though, is no longer a guess — see `photoStackBox`. `PFMessagesStackLayoutFrameSolver`
+ * only ever hands out *normalized* geometry (`normalizedVerticalInsets`, `normalizedVerticalOffset`,
+ * `normalizedSizeTransform`, `normalizedHorizontalOffsets`), and `-[PXMessagesStackItemsLayoutHelper
+ * maxItemSizeForReferenceSize:]` is handed the reference size from outside, so the absolute box has to
+ * come from the chat item — and it does.
  *
  * The single photo's box, on the other hand, is now read out of ChatKit rather than guessed: see
  * `photoBox` below. So are the accessible names: ChatKit's own accessibility bundle
@@ -76,7 +83,12 @@ export type MessageImagesProps = Omit<ComponentProps<"div">, "children"> & {
   images: MessageImage[];
   direction?: Direction;
   tail?: boolean;
-  /** Longest edge of the group, in px. Defaults to the platform's maximum bubble width. */
+  /**
+   * The balloon width the transcript grants this message — native's `balloonMaxWidth`, which is what
+   * `-[CKChatItem size]` passes down. Defaults to the platform's measured maximum bubble width. A single
+   * photo fills it (`photoBox`); a group derives its own box from it by ChatKit's rule (`photoStackBox`)
+   * and, on iOS, comes out *wider* than this value, exactly as native does.
+   */
   maxWidth?: number;
   /** Tallest the group may grow, in px. Defaults to the native cap (see `photoBox`). */
   maxHeight?: number;
@@ -121,13 +133,72 @@ const TILE_GAP = 2;
  * which one is native rather than leaving the wrong one to bind if a caller ever passes a wide box.
  *
  * Native rounds each result to the device pixel grid (it answers 158.0 where 280.5 x 0.5625 is
- * 157.78); the fractions are kept here for the same reason `tileSize` keeps its own, which is why the
- * lab's own probe reports our box within 0.38 pt of ChatKit's rather than equal to it.
+ * 157.78); the fractions are kept here, which is why the lab's own probe reports our box within 0.38 pt
+ * of ChatKit's rather than equal to it.
+ *
+ * This is the **single**-photo rule only. Two or more attachments are a different chat item with a
+ * different, fixed box; see `photoStackBox`.
  */
 export const photoBox: Record<Platform, { minRatio: number; maxRatio: number; maxHeight: number; portraitOnly: true }> = {
   ios: { minRatio: 0.5625, maxRatio: 4 / 3, maxHeight: 500, portraitOnly: true },
   macos: { minRatio: 0, maxRatio: Number.POSITIVE_INFINITY, maxHeight: 500, portraitOnly: true },
 };
+
+/**
+ * How big a balloon holding **more than one** photo is. This is not `photoBox` and it is not the text
+ * balloon's width, which is what this component used to hand it: two or more attachments on a message
+ * are a `CKAggregateAttachmentMessagePartChatItem`, and its entire `-loadSizeThatFits:textAlignmentInsets:`
+ * is one unconditional call —
+ *
+ *     -[CKUIBehavior sharedBehaviors] previewBalloonSizeThatFits:size
+ *
+ * — with no branch on the photos at all. `-[CKChatItem size]` calls that with `(self.maxWidth,
+ * CGFLOAT_MAX)`, and `maxWidth` is `balloonMaxWidth` unchanged, because
+ * `+[CKBalloonChatItem resultingMaxWidthWithBalloonMaxWidth:fullMaxWidth:transcriptTraitCollection:
+ * transcriptBackgroundLuminance:]` is a bare `ret`. So the whole rule is `previewBalloonSizeThatFits:`,
+ * whose body is:
+ *
+ *     w' = min(w, previewMaxWidth) * 1.25
+ *     h' = w' - 2 * (stackBalloonVerticalInset - smallTranscriptSpace)
+ *
+ * MEASURED twice: read out of the disassembly and then confirmed by calling the selector at both idioms
+ * over a dozen widths (100…900), which reproduces the formula exactly. The three inputs, read at their
+ * own idiom in their own process:
+ *
+ * | idiom  | previewMaxWidth | stackBalloonVerticalInset | smallTranscriptSpace | at its `maxWidth` |
+ * |--------|-----------------|---------------------------|----------------------|-------------------|
+ * | iPhone | 761             | 15                        | 6                    | 280.5 → 350.625 x 332.625 |
+ * | Mac    | **300**         | 15                        | 4                    | 382.5 → **375 x 353**     |
+ *
+ * `previewMaxWidth` is the whole story on the Mac: at 300 it saturates for any balloon max width at or
+ * above 300, so a macOS photo group is **375 x 353 whatever the window does**, and 382.5 x 382.5 — the
+ * text balloon's width squared by a 2x2 grid — was never a number ChatKit produces. It is also not
+ * square: the height is 22 pt (Mac) / 18 pt (iPhone) short of the width.
+ *
+ * Nothing else bounds it, and several things that look like they might do not:
+ *   - `calculatesWidthForAttachmentBalloons` is **0 on both idioms**, so it is not a Mac difference.
+ *   - `attachmentBalloonSize` is `{187, 124.5}` on **both** idioms; it belongs to the fixed rich-icon
+ *     file balloon (`attachmentBalloonRichIconInsets`), not to a photo.
+ *   - `-[CKUIBehaviorMac thumbnailFillSizeForWidth:imageSize:]`, re-swept today at idiom 5 in its own
+ *     process, still fills the width it is given with only the portrait 500 ceiling (see `photoBox`) —
+ *     it never narrows anything, and it is the *single*-photo path, not this one.
+ *   - `balloonMaxWidthPercent` 0.65 makes the Mac balloon proportionally narrower than the iPhone's, but
+ *     it is the same balloon width a text bubble gets; there is no photo-specific percent.
+ *   - `macTotalMarginWidth` = 40 is Mac-only and matches the measured `edgeInset` 20 per side, but
+ *     `(630 - 40) x 0.65` = 383.5 against the capture's 382.5, so it still does not close that 1.0 pt.
+ *   - There is no photo-grid or collage constant on either idiom.
+ */
+export const photoStackBox: Record<Platform, { previewMaxWidth: number; widthScale: number; heightInset: number }> = {
+  ios: { previewMaxWidth: 761, widthScale: 1.25, heightInset: 2 * (15 - 6) },
+  macos: { previewMaxWidth: 300, widthScale: 1.25, heightInset: 2 * (15 - 4) },
+};
+
+/** `-[CKUIBehavior previewBalloonSizeThatFits:]` for a balloon the transcript allows `balloonWidth`. */
+export function photoStackSize(balloonWidth: number, platform: Platform): { width: number; height: number } {
+  const box = photoStackBox[platform];
+  const width = Math.min(balloonWidth, box.previewMaxWidth) * box.widthScale;
+  return { width, height: width - box.heightInset };
+}
 
 /**
  * The width a transcript of `transcriptWidth` gives any balloon, photo balloons included:
@@ -297,10 +368,11 @@ export function MessageImages({
   const single = tiles.length === 1;
   const groupKey = tiles.map(image => image.src).join("|");
 
-  // Tiles are square, so one number sets both axes: half the group, less the gap. Keep the fraction
-  // instead of rounding it, or they stop being square: 280.5 halves to 139.25, and two of those plus
-  // the gap is the group's 280.5 again.
-  const tileSize = (width - TILE_GAP) / 2;
+  // More than one photo is one balloon of a fixed shape, not a square of the text bubble's width: see
+  // `photoStackBox`. 375 x 353 on macOS at any window size, 350.625 x 332.625 on iOS. The tiles inside
+  // it are whatever the grid makes of that box, and stop being square with it — the box is the measured
+  // part, the tiling is not (native draws a stack here, see the note at the top of the file).
+  const stack = single ? null : photoStackSize(width, platform);
 
   // One photo keeps its aspect ratio: the caller's dimensions when it gave any, otherwise the image's
   // own once it has loaded. 4:3 is only the placeholder until then, and only for a photo whose size
@@ -313,17 +385,18 @@ export function MessageImages({
   const learnedAspect = single ? (measured?.src === firstSrc ? measured.aspect : aspectMemo.get(firstSrc)) : undefined;
   const aspect = declaredAspect ?? learnedAspect ?? 4 / 3;
 
-  // The clamp is the native one, so a very tall photo stops at 4:3 of its width and a very wide one at
-  // 16:9, both cropped by `object-cover`; a portrait photo never grows past `maxHeight`, and when the
-  // clamped shape would, the width comes in with it rather than the photo stretching. The ceiling is
-  // portrait-only because that is what the sweep says (see `photoBox`): a landscape or square photo at
-  // a width past 500 keeps its true fit.
+  // The clamp is the native one, and it is the SINGLE photo's: a very tall photo stops at 4:3 of its
+  // width and a very wide one at 16:9, both cropped by `object-cover`; a portrait photo never grows
+  // past `maxHeight`, and when the clamped shape would, the width comes in with it rather than the
+  // photo stretching. The ceiling is portrait-only because that is what the sweep says (see
+  // `photoBox`): a landscape or square photo at a width past 500 keeps its true fit. A group ignores
+  // all of it — its box is `photoStackBox`, which never looks at the photos.
   const box = photoBox[platform];
   const ceiling = maxHeight ?? box.maxHeight;
   const ratio = Math.min(Math.max(1 / aspect, box.minRatio), box.maxRatio);
   const capped = box.portraitOnly ? ratio > 1 : true;
-  const groupWidth = single && capped ? Math.min(width, ceiling / ratio) : width;
-  const height = single ? groupWidth * ratio : tiles.length === 2 ? tileSize : tileSize * 2 + TILE_GAP;
+  const groupWidth = stack ? stack.width : capped ? Math.min(width, ceiling / ratio) : width;
+  const height = stack ? stack.height : groupWidth * ratio;
 
   const grid = useMemo<CSSProperties>(() => {
     if (single) return { display: "block" };
@@ -398,13 +471,14 @@ export function MessageImages({
       aria-label={images.length > 1 ? `${images.length} Photos` : undefined}
       aria-busy={busy || undefined}
       className={cn("relative", className)}
-      // `maxWidth: 100%` is the ceiling this group used to be missing entirely. `groupWidth` is a
-      // constant — `bubbleMetrics[platform].maxWidth`, 382.5 on Mac and 280.5 on iPhone — with nothing
-      // tying it to the transcript it is drawn in, so a pane narrower than that (a resized window, an
-      // open inspector, a two-pane layout) had the group hang out of its row: at a 140 pt container
-      // the macOS group measured 382.5 wide and spilled 242.5 px, which is the defect this line
-      // closes. Native's own rule is `balloonMaxWidth` above, and a shell that resizes its transcript
-      // should pass that as `maxWidth`; this is the floor under it either way.
+      // `maxWidth: 100%` is the ceiling this group used to be missing entirely. `groupWidth` derives
+      // from a constant — `bubbleMetrics[platform].maxWidth` — with nothing tying it to the transcript
+      // it is drawn in, so a pane narrower than that (a resized window, an open inspector, a two-pane
+      // layout) had the group hang out of its row: at a 140 pt container the macOS group measured
+      // 382.5 wide and spilled 242.5 px, which is the defect this line closes. It matters more now
+      // that a group is 375 pt on Mac and 350.6 on iOS by `photoStackBox` rather than the balloon's
+      // own width. Native's own rule is `balloonMaxWidth` above, and a shell that resizes its
+      // transcript should pass that as `maxWidth`; this is the floor under it either way.
       style={{ width: groupWidth, maxWidth: "100%", boxSizing: "border-box", fontFamily: fontStack, marginTop: reactions ? slot.marginTop : undefined, ...style }} {...props}>
       {/* `aspectRatio` rather than a pixel height, so the box keeps its shape when the clamp above
           bites: at full width it resolves to exactly `height`, and under the clamp the grid shortens

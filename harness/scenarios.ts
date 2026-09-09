@@ -2,6 +2,11 @@ import type { Direction, Service } from "@/registry/imessage/tokens";
 import type { FaceTimeState } from "@/registry/imessage/facetime-card";
 import type { BubbleEffectKind, ScreenEffectKind } from "@/registry/imessage/message-effects";
 import type { SystemMessageEvent } from "@/registry/imessage/system-message";
+// Type-only, so this file still loads on its own under `bun test`: the imports are erased and no
+// component code comes with them. They exist so the two list derivations below cannot drift from the
+// props the shells actually take — which is exactly the drift that lost the unread dot.
+import type { IosConversation } from "@/registry/imessage/ios-conversation-list";
+import type { SidebarConversation } from "@/registry/imessage/macos-sidebar";
 
 export type Platform = "ios" | "macos";
 export const platforms = { ios: { title: "iOS 26", width: 402, height: 874, scale: 3 }, macos: { title: "macOS 26", width: 960, height: 640, scale: 2 } } as const;
@@ -385,6 +390,16 @@ export const scenarios = [
   { id: "thread-open", title: "Open a thread", group: "Interactions", duration: 260, checkpoints: [0, 30, 70, 140, 260], only: "ios" },
   { id: "thread-close", title: "Close a thread", group: "Interactions", duration: 200, checkpoints: [0, 100, 150, 180, 200], only: "ios" },
   { id: "list", title: "Conversation list", group: "Screens", duration: 0, checkpoints: [0] },
+  // The state neither list had ever drawn. Both components have rendered an unread dot since they
+  // were written — `data-slot="unread"` on iOS, `data-slot="row-unread"` and `"pinned-unread"` on
+  // macOS — and no fixture in this repo had ever set the field, so a static screenshot of the kit
+  // showed a Messages list in which nothing was ever unread. It runs on BOTH shells because the two
+  // draw it differently: iOS puts a Ø10 dot in the 26 pt gutter left of the avatar and nothing else,
+  // macOS puts a Ø9 one in an 18 pt gutter, hangs another off a pinned tile's label, and turns it
+  // white on the selected row. `unreadConversationList` says what each row is there to prove; the
+  // frame selects the group row so the selected-and-unread case — the only one the platforms
+  // disagree on — is on screen at load rather than one click away.
+  { id: "list-unread", title: "Unread conversations", group: "Screens", duration: 0, checkpoints: [0] },
   { id: "push-conversation", title: "Push a conversation", group: "Screens", duration: 350, checkpoints: [0, 40, 90, 180, 350], only: "ios" },
   { id: "push-back", title: "Back to the list", group: "Screens", duration: 320, checkpoints: [0, 40, 90, 180, 320], only: "ios" },
   { id: "new-message", title: "New message", group: "Screens", duration: 0, checkpoints: [0] },
@@ -507,6 +522,17 @@ export const scenarioGroups = ["Messages", "Previews", "Interactions", "Screens"
 
 export type SceneFrame = {
   messages: FixtureMessage[];
+  /**
+   * The rows the conversation list and the sidebar draw. On the frame rather than reached for
+   * directly in `preview.tsx` so a scenario can state its own set — `list-unread` is the one that
+   * does — and so the unit tests can assert what a scenario puts in front of the two lists.
+   */
+  conversations: readonly ListFixture[];
+  /**
+   * Which sidebar row is selected on macOS. Stated only when a scenario cares; otherwise the shell
+   * follows the conversation the frame is showing (the group fixture's row, or Alex Morgan).
+   */
+  selectedConversation?: string;
   /** Group chat metadata when the scene is a group. */
   group?: { name: string; participants: string[] };
   typing: boolean;
@@ -622,7 +648,7 @@ function photoMessage(): FixtureMessage {
 
 export function frameAt(id: ScenarioId, milliseconds: number): SceneFrame {
   const t = Math.max(0, milliseconds);
-  const frame: SceneFrame = { messages: clone(conversation), typing: false, swipe: 0, screen: "conversation" };
+  const frame: SceneFrame = { messages: clone(conversation), conversations: conversationList, typing: false, swipe: 0, screen: "conversation" };
   switch (id) {
     case "outgoing": {
       frame.composerDraft = t < 17 ? "Blue for iMessage." : undefined;
@@ -856,6 +882,16 @@ export function frameAt(id: ScenarioId, milliseconds: number): SceneFrame {
     case "list":
       frame.screen = "list";
       break;
+    // iOS shows the list alone; macOS shows the sidebar beside a transcript, so the frame also says
+    // which conversation is open. It is the unread group, and `makeGroup` puts that same group in
+    // the pane behind it, so the selected row, the header and the transcript name one conversation
+    // instead of three.
+    case "list-unread":
+      frame.screen = "list";
+      frame.conversations = unreadConversationList;
+      makeGroup(frame);
+      frame.selectedConversation = "design";
+      break;
     case "push-conversation":
       frame.screenTransition = { from: "list", progress: clamp01(t / unverifiedMotion.push) };
       break;
@@ -1028,12 +1064,106 @@ export function frameAt(id: ScenarioId, milliseconds: number): SceneFrame {
   return frame;
 }
 
-/** Conversation list fixtures shared by the iOS list and the macOS sidebar. */
-export const conversationList = [
-  { id: "alex", name: "Alex Morgan", initials: "AM", preview: "Sounds good 👍", time: "9:39 AM", pinned: false },
-  { id: "design", name: "Design Crit", initials: "DC", preview: "Sam Rivera: Tuesday morning at 9?", time: "9:21 AM", pinned: false },
-  { id: "jamie", name: "Jamie Chen", initials: "JC", preview: "You loved “Next week!”", time: "Yesterday", pinned: false },
-  { id: "sam", name: "Sam Rivera", initials: "SR", preview: "But have failed to deliver on performance using it", time: "Yesterday", pinned: false },
-  { id: "riley", name: "Riley Park", initials: "RP", preview: "Risky-signup alerts are still on, so heads up, one just landed.", time: "Yesterday", pinned: false, muted: true },
-  { id: "freestyle", name: "Freestyle", initials: "F", preview: "See you at demo day.", time: "Monday", pinned: true },
-] as const;
+/**
+ * One row of a conversation list, in the one shape both shells' lists are derived from.
+ *
+ * It is stated as a type, and every field is stated on every row, for a reason that cost this kit a
+ * whole piece of UI: the fixture used to be an `as const` array where only one row carried `muted`,
+ * which made the element type a union and `item.muted` unreachable on the rest, so `preview.tsx`
+ * copied the rows into each shell **field by field** with an `"muted" in item` guard. A field the
+ * copy did not name — `unread`, which both lists have drawn since they were written — was dropped in
+ * silence. Neither list had ever rendered an unread dot. A homogeneous row type plus the two
+ * derivations below (`iosConversations`, `macConversations`) is what makes that failure a compile
+ * error instead of a missing pixel; `timeline.test.ts` holds the derivations to the row's own keys.
+ */
+export type ListFixture = {
+  id: string;
+  name: string;
+  initials: string;
+  preview: string;
+  time: string;
+  /** macOS only: the row is lifted out of the list into the pinned tile grid above it. */
+  pinned: boolean;
+  /** macOS only: the bell. iOS 26's list draws nothing for a muted conversation. */
+  muted?: boolean;
+  /**
+   * Unread. `true` is the plain dot; a number is announced ("3 unread messages") but is never
+   * painted on either platform — neither list draws a count, the badge is on the app icon. iOS takes
+   * a boolean, so a count reaches it as `true`; macOS takes the number and announces it.
+   */
+  unread?: boolean | number;
+  /** Two or more makes the row a group: the Snowglobe stack instead of a monogram. */
+  members?: readonly { name: string; initials: string }[];
+  /** Who sent the last message. A group row prefixes its preview with it; a one-to-one ignores it. */
+  sender?: string;
+};
+
+/**
+ * Conversation list fixtures shared by the iOS list and the macOS sidebar. Every row is read: this
+ * is the fixture every other scenario's sidebar and list is screenshotted against, so an unread dot
+ * here would move a hundred baselines that are not about unread. `list-unread` below carries its own
+ * fixture instead, which is the one place the dot is the subject.
+ */
+export const conversationList: readonly ListFixture[] = [
+  { id: "alex", name: "Alex Morgan", initials: "AM", preview: "Sounds good 👍", time: "9:39 AM", pinned: false, unread: false },
+  { id: "design", name: "Design Crit", initials: "DC", preview: "Sam Rivera: Tuesday morning at 9?", time: "9:21 AM", pinned: false, unread: false },
+  { id: "jamie", name: "Jamie Chen", initials: "JC", preview: "You loved “Next week!”", time: "Yesterday", pinned: false, unread: false },
+  { id: "sam", name: "Sam Rivera", initials: "SR", preview: "But have failed to deliver on performance using it", time: "Yesterday", pinned: false, unread: false },
+  { id: "riley", name: "Riley Park", initials: "RP", preview: "Risky-signup alerts are still on, so heads up, one just landed.", time: "Yesterday", pinned: false, muted: true, unread: false },
+  { id: "freestyle", name: "Freestyle", initials: "F", preview: "See you at demo day.", time: "Monday", pinned: true, unread: false },
+];
+
+/**
+ * The same six people with the unread state on them, which nothing in this repo had ever put on
+ * screen. Each row is one case the two lists distinguish, and `alex` stays read as the control:
+ *
+ * - `alex` — read. The row every other one is read against, and the one that proves the dot's
+ *   26 pt gutter (`conversationListCellLeftMargin`) is spent on a read row too: nothing else in the
+ *   row's layout moves when the dot arrives.
+ * - `design` — a **group**, unread with a **count**. Two states in one row: the Snowglobe stack
+ *   beside a dot, and a count that is announced and never painted. It is also the row `list-unread`
+ *   leaves **selected**, which is the one behaviour the two platforms do not share — macOS turns the
+ *   dot white on the selection fill (`unreadIndicatorSelectedImage`), iOS has no selected row at all.
+ * - `jamie` — the plain one-to-one dot, `unread: true` with no number.
+ * - `sam` — unread with a two-line preview, so the dot is proved to centre on the ROW rather than on
+ *   the first line of text. Its count is the two-digit one, which is where an announced count would
+ *   show up if anything ever drew it.
+ * - `riley` — unread **and muted**. The bell does not change the dot: ChatKit picks the tinted image
+ *   off visibility, and the mute state only chooses which bell glyph sits at the trailing edge.
+ * - `freestyle` — **pinned** and unread, which is the macOS tile's own dot
+ *   (`CKPinnedConversationView`, hanging off the label's leading edge) rather than a row's.
+ */
+export const unreadConversationList: readonly ListFixture[] = [
+  { id: "alex", name: "Alex Morgan", initials: "AM", preview: "Sounds good 👍", time: "9:39 AM", pinned: false, unread: false },
+  { id: "design", name: "Design Crit", initials: "DC", preview: "Tuesday morning at 9?", time: "9:21 AM", pinned: false, unread: 3, sender: "Sam Rivera", members: groupCast },
+  { id: "jamie", name: "Jamie Chen", initials: "JC", preview: "You loved “Next week!”", time: "Yesterday", pinned: false, unread: true },
+  { id: "sam", name: "Sam Rivera", initials: "SR", preview: "But have failed to deliver on performance using it", time: "Yesterday", pinned: false, unread: 12 },
+  { id: "riley", name: "Riley Park", initials: "RP", preview: "Risky-signup alerts are still on, so heads up, one just landed.", time: "Yesterday", pinned: false, muted: true, unread: true },
+  { id: "freestyle", name: "Freestyle", initials: "F", preview: "See you at demo day.", time: "Monday", pinned: true, unread: 2 },
+];
+
+/**
+ * The rows in the shape `IosConversationList` takes. iOS has no pinned collection and draws nothing
+ * for a muted conversation, so those two fields have nowhere to go; everything else is carried,
+ * including the sender prefix, which the iOS list has no notion of and which native therefore bakes
+ * into the preview string (`-[CKConversation previewText]` is the message's text alone; the phone's
+ * cell has one summary label and composes the prefix itself).
+ */
+export function iosConversations(rows: readonly ListFixture[]): IosConversation[] {
+  return rows.map(row => ({
+    id: row.id, name: row.name, initials: row.initials, time: row.time,
+    preview: row.sender && (row.members?.length ?? 0) > 1 ? `${row.sender}: ${row.preview}` : row.preview,
+    // A count is a dot on iOS: nothing in the phone's cell draws a number.
+    unread: !!row.unread,
+    members: row.members,
+  }));
+}
+
+/** The rows in the shape `MacSidebar` takes, which is the one that keeps `pinned`, `muted` and the count. */
+export function macConversations(rows: readonly ListFixture[]): SidebarConversation[] {
+  return rows.map(row => ({
+    id: row.id, name: row.name, initials: row.initials, preview: row.preview, time: row.time,
+    pinned: row.pinned, muted: row.muted, unread: row.unread, sender: row.sender,
+    members: row.members?.map(member => ({ name: member.name, initials: member.initials })),
+  }));
+}

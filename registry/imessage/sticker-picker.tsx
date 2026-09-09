@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { cn } from "@/lib/utils";
 import { emojiFontStack, fontStack } from "@/registry/imessage/tokens";
 
@@ -233,6 +233,177 @@ export const stickerPickerMetrics = {
   enterEasing: "cubic-bezier(0.32, 0.72, 0, 1)",
   exitEasing: "cubic-bezier(0.4, 0, 1, 1)",
 } as const;
+
+/** Which Messages this picker is standing in. See `macStickerPickerMetrics` for what changes. */
+export type StickerPickerPlatform = "ios" | "macos";
+
+/**
+ * # The macOS presentation
+ *
+ * macOS Messages does not present the sticker browser as a sheet. Its "+" is a **menu** —
+ * `-[CKUIBehaviorMac browserButtonShouldUseMenu]` is YES where `CKUIBehaviorPhone`'s is NO — so the
+ * "Stickers" row opens a **popover anchored to the "+" button**, wearing the window's own material.
+ * With it go the sheet's title row, its round close button, its 20% backdrop dim and its slide up
+ * from the screen's bottom edge: a popover has no titlebar, does not dim the window behind it, and a
+ * desktop window has no screen edge for a sheet to leave by — sliding it there is what put a sliver
+ * of the card below the *window*.
+ *
+ * ## Measured — ChatKit 26.5 at idiom 5
+ *
+ * A Catalyst probe (`clang -target arm64-apple-ios26.0-macabi`, dlopen ChatKit, `-[UIDevice
+ * userInterfaceIdiom]` swizzled to 5 **before** anything latches it) then `+[CKUIBehavior
+ * sharedBehaviors]`, which vends `CKUIBehaviorMac`. The idiom-0 reading is beside each one, because
+ * the Mac does not inherit the Phone:
+ *
+ * | Selector | idiom 5 (Mac) | idiom 0 (Phone) |
+ * |---|---|---|
+ * | `stickerPopoverSize` | **{320, 480}** | **{393, 680}** |
+ * | `attachmentBrowserGridSectionInset` | {8, 8} | {8, 8} |
+ * | `attachmentBrowserGridInterItemSpacing` | 4 | 4 |
+ * | `attachmentBrowserGridMinimumLineSpacing` | 4 | 4 |
+ * | `attachmentBrowserDefaultSizeForSquare` | 104 | 72.5 |
+ * | `stickersCellCornerRadius` | 8 | 8 |
+ * | `browserButtonShouldUseMenu` | YES | NO |
+ *
+ * `stickerPopoverSize` names *this* popover, so its 320 x 480 is the box outright rather than a cap:
+ * that is why the height here is fixed where `photo-picker.tsx`'s macOS height is content-derived
+ * against a `popOverMaxHeight`. The iPhone sheet this file measures is the 393-wide one, which is
+ * why it is not simply re-used at its own size.
+ *
+ * The **chrome** is the one macOS popover a capture in this repo holds: the fill, the bright inset
+ * rim, the dark hairline outside it and the 12 pt corner `macos-plus-menu.tsx` measured off
+ * `references/macos/captures/plus-menu-{light,dark}-2x.png`, copied here rather than imported so
+ * this file keeps no dependency of its own.
+ *
+ * The **anchor** is measured at one remove: `macos-plus-menu.tsx` puts the menu's left edge on the
+ * "+" button's left edge at pane x 9 and its top 3 pt inside the button's bottom at pane y 626, and
+ * `macos-composer.tsx` measures the button 30 square with its bottom 11 above the composer's — so
+ * the button is `{9, 599, 30, 30}` in a 640 pt pane, 41 pt up from the pane's bottom edge. That last
+ * form is what `anchor` records; at run time the button is *found* rather than assumed.
+ *
+ * ## Derived, not read
+ *
+ * **Columns.** 320 less the grid's own measured 8 pt section inset on each side is 304; at ChatKit's
+ * 72.5 cell and 4 pt spacing that is `floor((304 + 4) / 76.5)` = **4** columns, and the tiles stretch
+ * to 73 to fill the row — the identical rule, and very nearly the identical tile, that the iPhone
+ * sheet gets from the same cell at 5 across. The Mac's own
+ * `attachmentBrowserDefaultSizeForSquare` of 104 is deliberately **not** used here: it would give
+ * two 150 pt stickers in a 320 pt popover, which is not a sticker grid, and it describes the
+ * attachment browser's own cells rather than StickerKit's. `photo-picker.tsx` does use the 104,
+ * because there the grid really is the attachment browser's.
+ *
+ * ## Not measured, and marked
+ *
+ * - **The arrow.** No capture in `references/macos/captures` holds a Messages attachment popover;
+ *   ChatKit has no arrow metric; UIKit's `+[_UIPopoverStandardChromeView arrowHeight]` reads **0**
+ *   under Catalyst because AppKit draws the chrome there, and AppKit exposes none (`_NSPopoverFrame`
+ *   does not exist in macOS 26). Its size and its outline are invented; where it points is measured,
+ *   except that a 12 pt corner will not let a 22 pt arrow sit closer than 23 pt to the box's edge,
+ *   so at this anchor the tip lands 8 pt right of the button's centre — the clamp UIKit makes too.
+ * - **The category strip.** Kept at the measured iPhone geometry (43.3333 chips on a 43.3333 strip).
+ *   It is the same StickerKit remote view, but nothing measures what the Mac does to it.
+ * - **The motion.** Borrowed whole from `macPlusMenuMetrics.motion`, itself borrowed: 160 ms in,
+ *   120 ms out, from 0.96 at the anchor corner.
+ */
+export const macStickerPickerMetrics = {
+  /** `-[CKUIBehaviorMac stickerPopoverSize]`: the popover's box, not a cap. */
+  width: 320,
+  height: 480,
+  /** Measured off `plus-menu-{light,dark}-2x.png` by `macos-plus-menu.tsx`; copied, not imported. */
+  radius: 12,
+  /**
+   * The "+" button as a distance up from the pane's bottom edge, so it survives a pane of another
+   * height: `macComposerMetrics.bottom` 11 + `plus.size` 30 = 41, at `plus.left` 9. Fallback only.
+   */
+  anchor: { left: 9, size: 30, aboveBottom: 41 },
+  /** @unverified invented outright; see the note above for why nothing can measure it. */
+  arrow: { width: 22, height: 11 },
+  /** @unverified borrowed whole from `macPlusMenuMetrics.motion`, which is itself borrowed. */
+  motion: {
+    enter: 160,
+    exit: 120,
+    scale: 0.96,
+    enterEase: "cubic-bezier(0.2, 0.8, 0.3, 1)",
+    exitEase: "cubic-bezier(0.4, 0, 1, 1)",
+  },
+} as const;
+
+/**
+ * The measured macOS popover material, as custom properties so a `.dark` ancestor flips it without
+ * the caller passing anything. `photo-picker.tsx` carries the same copy, for the same reason.
+ */
+const macVars =
+  "[--mac-sp-fill:rgba(238,240,241,0.92)] [--mac-sp-edge:inset_0_0_0_1px_rgba(255,255,255,0.8),0_0_0_0.5px_rgba(0,0,0,0.28),0_4px_16px_rgba(0,0,0,0.12)] [--mac-sp-outline:rgba(0,0,0,0.28)] " +
+  "dark:[--mac-sp-fill:rgba(37,39,40,0.94)] dark:[--mac-sp-edge:inset_0_0_0_1px_rgba(255,255,255,0.28),0_0_0_0.5px_rgba(0,0,0,0.85),0_4px_16px_rgba(0,0,0,0.35)] dark:[--mac-sp-outline:rgba(0,0,0,0.85)]";
+
+/**
+ * A host that wraps this picker in its own popover box — `macos-messages-app.tsx` does, from before
+ * the picker knew what a Mac was — would otherwise double the material: two fills, two rims, two
+ * shadows. This switches that box off, but only when the picker inside it is drawing the macOS
+ * popover itself. The selector outranks the host's, so it wins wherever the two stylesheets land.
+ */
+const macHostInteropCss = `[data-slot="mac-attachment-popover"]:has([data-slot="sticker-picker"][data-platform="macos"]) > [aria-hidden="true"]:not([data-slot]){background:transparent!important;box-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}`;
+
+/**
+ * Where the popover sits, in the coordinates of whatever box the picker was dropped into. The "+"
+ * button is *found*, not assumed: the nearest `[data-im-platform]` ancestor is searched for
+ * `[data-slot="attach-button"]`, the slot `macos-composer.tsx` puts on it, so the same component is
+ * right inside the app shell's own wrapper and inside a bare pane in a lab route. It always opens
+ * **upward**, which is the measured rule rather than a preference: neither Mac popover fits below a
+ * button whose bottom is 11 pt off the floor of a 640 pt window, and an AppKit popover flips rather
+ * than hangs. `photo-picker.tsx` carries the same hook, copied for the same no-dependency reason.
+ */
+function useMacPopoverPlacement(
+  root: RefObject<HTMLElement | null>,
+  enabled: boolean,
+  box: { width: number; height: number },
+  arrow: { width: number; height: number },
+  radius: number,
+) {
+  const [placement, setPlacement] = useState<{ left: number; top: number; arrowX: number } | null>(null);
+  useLayoutEffect(() => {
+    const node = root.current;
+    if (!enabled || !node) return;
+    const base = node.getBoundingClientRect();
+    const host = node.closest("[data-im-platform]") ?? node.ownerDocument.body;
+    const button = host.querySelector('[data-slot="attach-button"]');
+    const rect = button?.getBoundingClientRect();
+    const a = macStickerPickerMetrics.anchor;
+    const anchor = rect
+      ? { left: rect.left - base.left, top: rect.top - base.top, width: rect.width }
+      : { left: a.left, top: base.height - a.aboveBottom, width: a.size };
+    const left = base.width > box.width ? Math.max(0, Math.min(anchor.left, base.width - box.width)) : anchor.left;
+    // The arrow points at the button's centre, but never closer to a corner than the corner's own
+    // radius plus half the arrow — past that it would come out of the curve. UIKit clamps it too.
+    const inset = radius + arrow.width / 2;
+    const centre = anchor.left + anchor.width / 2 - left;
+    // Measuring the DOM and rendering against what came back is the one thing a layout effect is
+    // for, and it cannot be lifted into render: the "+" button does not exist until the commit.
+    // The pose is committed before the browser paints, so no frame shows the popover unplaced.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a layout measurement, see above
+    setPlacement({ left, top: anchor.top - arrow.height - box.height, arrowX: Math.max(inset, Math.min(centre, box.width - inset)) });
+  }, [root, enabled, box.width, box.height, arrow.width, arrow.height, radius]);
+  return placement;
+}
+
+/**
+ * Reads the platform off the DOM when the caller did not say. The macOS shell stamps
+ * `data-im-platform="macos"` on its root, so a picker dropped anywhere inside it gets the macOS
+ * presentation with nothing passed. A layout effect, so a client-mounted picker is never painted in
+ * the wrong presentation; a picker *server*-rendered already open shows one iOS frame before the
+ * effect runs, which is why the `platform` prop exists.
+ */
+function useHostPlatform(root: RefObject<HTMLElement | null>, override?: StickerPickerPlatform): StickerPickerPlatform {
+  const [sniffed, setSniffed] = useState<StickerPickerPlatform>("ios");
+  useLayoutEffect(() => {
+    if (override) return;
+    const host = root.current?.closest("[data-im-platform]");
+    // Same reason: the ancestor that says which Messages this is cannot be read during render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a DOM read, see above
+    setSniffed(host?.getAttribute("data-im-platform") === "macos" ? "macos" : "ios");
+  }, [root, override]);
+  return override ?? sniffed;
+}
 
 /** Columns that fit ChatKit's 72.5 cell across `width`, and the cell size that squares up to it. */
 export function stickerGridColumns(width: number = stickerPickerMetrics.sheet.width): number {
@@ -487,6 +658,11 @@ type DragState = {
 };
 
 export type StickerPickerProps = Omit<ComponentProps<"div">, "onSelect" | "children"> & {
+  /**
+   * Which Messages to be. Left off, it is read from the nearest `[data-im-platform]` ancestor, so
+   * the macOS shell gets the macOS popover without passing anything. See `macStickerPickerMetrics`.
+   */
+  platform?: StickerPickerPlatform;
   tabs?: StickerTab[];
   /** Controlled active category id. */
   tab?: string;
@@ -536,6 +712,7 @@ export type StickerPickerProps = Omit<ComponentProps<"div">, "onSelect" | "child
 };
 
 export function StickerPicker({
+  platform: platformProp,
   tabs = stickerPickerTabs,
   tab: tabProp,
   defaultTab,
@@ -607,8 +784,26 @@ export function StickerPicker({
   const empty = useMemo<Sticker[]>(() => [], []);
   const stickers = activeTab?.stickers ?? empty;
 
-  const columns = columnsProp ?? activeTab?.columns ?? stickerGridColumns(width);
-  const tileSize = (width - 2 * m.grid.inset - (columns - 1) * m.grid.gap) / columns;
+  const platform = useHostPlatform(root, platformProp);
+  const mac = platform === "macos";
+  const mm = macStickerPickerMetrics;
+
+  /**
+   * The box. On the Mac it is `stickerPopoverSize` outright and its place comes from the "+" button;
+   * on iOS it is the caller's, defaulting to the capture's. Everything below — the strip, the grid,
+   * the drag's own "did it land inside the card" test and the seeked drag preview — reads these four
+   * and not the props, so one set of arithmetic serves both presentations.
+   */
+  const placement = useMacPopoverPlacement(root, mac, { width: mm.width, height: mm.height }, mm.arrow, mm.radius);
+  const boxWidth = mac ? mm.width : width;
+  const boxHeight = mac ? mm.height : height;
+  const boxLeft = mac ? (placement?.left ?? 0) : left;
+  const boxTop = mac ? (placement?.top ?? 0) : top;
+  /** A popover has no titlebar, so the strip starts at the top and the grid moves up with it. */
+  const headerHeight = mac ? 0 : m.header.height;
+
+  const columns = columnsProp ?? activeTab?.columns ?? stickerGridColumns(boxWidth);
+  const tileSize = (boxWidth - 2 * m.grid.inset - (columns - 1) * m.grid.gap) / columns;
 
   /**
    * One Web Animations timeline over the sheet and its dim, run forwards or backwards. Both keyframe
@@ -623,9 +818,17 @@ export function StickerPicker({
     if (!sheetNode) return;
     if (open) reported.current = false;
     const isClosing = !open;
-    const duration = isClosing ? m.timing.exit : m.timing.enter;
-    const away: Keyframe = { transform: `translateY(${height + m.sheet.inset}px)` };
-    const settled: Keyframe = { transform: "translateY(0px)" };
+    const duration = isClosing ? (mac ? mm.motion.exit : m.timing.exit) : (mac ? mm.motion.enter : m.timing.enter);
+    /*
+     * A popover does not slide: it grows out of the "+" button's corner and fades, which is what
+     * `macos-plus-menu.tsx` does with the same borrowed numbers. Sliding it the way the iOS form
+     * sheet does is what left a sliver of the card below the *window's* bottom edge, because a
+     * desktop window has no screen edge for a sheet to leave by.
+     */
+    const away: Keyframe = mac
+      ? { opacity: 0, transform: `scale(${mm.motion.scale})` }
+      : { transform: `translateY(${height + m.sheet.inset}px)` };
+    const settled: Keyframe = mac ? { opacity: 1, transform: "scale(1)" } : { transform: "translateY(0px)" };
     const finish = () => {
       if (reported.current) return;
       reported.current = true;
@@ -646,7 +849,7 @@ export function StickerPicker({
       const frame = requestAnimationFrame(finish);
       return () => cancelAnimationFrame(frame);
     }
-    const easing = isClosing ? m.exitEasing : m.enterEasing;
+    const easing = isClosing ? (mac ? mm.motion.exitEase : m.exitEasing) : (mac ? mm.motion.enterEase : m.enterEasing);
     const options: KeyframeAnimationOptions = { duration, easing, fill: "both" };
     const animations = [sheetNode.animate(isClosing ? [settled, away] : [away, settled], options)];
     const dimNode = dim.current;
@@ -671,7 +874,7 @@ export function StickerPicker({
     }
     animations[0].addEventListener("finish", finish);
     return () => animations[0].removeEventListener("finish", finish);
-  }, [open, everOpened, progress, height, scrim, m.timing.enter, m.timing.exit, m.sheet.inset, m.enterEasing, m.exitEasing]);
+  }, [open, everOpened, progress, height, scrim, mac, mm.motion, m.timing.enter, m.timing.exit, m.sheet.inset, m.enterEasing, m.exitEasing]);
 
   // Escape closes it, so the sheet never depends on a tap outside to get out of the way.
   useEffect(() => {
@@ -922,7 +1125,7 @@ export function StickerPicker({
     const live = carry.current;
     if (!drag || !live || drag.pointerId !== event.pointerId || drag.landing) return;
     const point = rootPoint(event.clientX, event.clientY);
-    const insideSheet = point.x >= left && point.x <= left + width && point.y >= top && point.y <= top + height;
+    const insideSheet = point.x >= boxLeft && point.x <= boxLeft + boxWidth && point.y >= boxTop && point.y <= boxTop + boxHeight;
     const node = ghost.current;
     const inner = scaler.current;
     const reduced = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -971,8 +1174,8 @@ export function StickerPicker({
     const column = index % columns;
     // The tile's own box, from the layout rather than from a measured rect, so the pose does not
     // depend on the grid having been laid out yet.
-    const gridLeft = left + m.grid.inset;
-    const gridTop = top + m.header.height + m.strip.height + m.grid.inset;
+    const gridLeft = boxLeft + m.grid.inset;
+    const gridTop = boxTop + headerHeight + m.strip.height + m.grid.inset;
     const source = {
       x: gridLeft + column * (tileSize + m.grid.gap) + tileSize / 2,
       y: gridTop + row * (tileSize + m.grid.gap) + tileSize / 2,
@@ -991,7 +1194,7 @@ export function StickerPicker({
       rotation: lerp(0, stickerLandingRotation(sticker.id), Math.max(travel, land)),
       scale: lerp(carried, m.landing.size / tileSize, land),
     };
-  }, [dragPreview, stickers, columns, tileSize, left, top, m.grid.inset, m.grid.gap, m.header.height, m.strip.height, m.preview, m.drag.scale, m.landing.size]);
+  }, [dragPreview, stickers, columns, tileSize, boxLeft, boxTop, headerHeight, m.grid.inset, m.grid.gap, m.strip.height, m.preview, m.drag.scale, m.landing.size]);
 
   const alive = open || closing;
   const gridId = `${id}-grid`;
@@ -1001,15 +1204,17 @@ export function StickerPicker({
       ref={root}
       data-slot="sticker-picker"
       data-picker={id}
+      data-platform={mac ? "macos" : undefined}
       data-state={open ? "open" : closing ? "closing" : "closed"}
-      className={cn("absolute inset-0 z-20 select-none", vars, className)}
-      style={{ fontFamily: fontStack, pointerEvents: "none", ...style }}
+      className={cn("absolute inset-0 z-20 select-none", vars, mac ? macVars : null, className)}
+      style={{ fontFamily: mac ? "-apple-system, BlinkMacSystemFont, sans-serif" : fontStack, pointerEvents: "none", ...style }}
       {...props}
     >
+      {mac ? <style>{macHostInteropCss}</style> : null}
       {/* The dim is measured: black at exactly 0.20 over everything behind the sheet. It is also the
           tap-outside target, but not a control: Escape and the close button do the same job, so it
           stays out of the tab order and out of the accessibility tree. */}
-      {alive && scrim ? (
+      {alive && scrim && !mac ? (
         <div
           ref={dim}
           aria-hidden="true"
@@ -1022,30 +1227,76 @@ export function StickerPicker({
 
       <div
         ref={sheet}
-        data-slot="sheet"
+        // The Mac's box is a popover, not a sheet, and it says so: a host that rewrites
+        // `[data-slot="sheet"]` to strip an iPhone sheet's glass must not strip the Mac's own.
+        data-slot={mac ? "mac-popover" : "sheet"}
         role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
+        // Only a form sheet over a 20% dim makes the rest of the window unavailable. A popover does
+        // not dim anything, so claiming the window is inert behind it would be a lie to the reader.
+        aria-modal={mac ? undefined : true}
+        aria-labelledby={mac ? undefined : titleId}
+        aria-label={mac ? title : undefined}
         tabIndex={-1}
         // A closed sheet is not just off screen: `inert` takes its grid and strip out of the tab
         // order and out of the accessibility tree, which a transform alone would not.
         inert={!open}
         onKeyDown={onSheetKeyDown}
-        className="pointer-events-auto absolute overflow-hidden outline-none"
-        style={{
-          left,
-          top,
-          width,
-          height,
-          borderRadius: `${m.sheet.topRadius}px ${m.sheet.topRadius}px ${m.sheet.bottomRadius}px ${m.sheet.bottomRadius}px`,
-          ...continuous,
-          background: `rgb(var(--ios-sp-glass) / var(--ios-sp-alpha))`,
-          backdropFilter: `blur(${m.sheet.blur}px) saturate(${m.sheet.saturate})`,
-          WebkitBackdropFilter: `blur(${m.sheet.blur}px) saturate(${m.sheet.saturate})`,
-          boxShadow: "0 4px 24px 0 var(--ios-sp-shadow)",
-          color: "var(--ios-sp-label)",
-        }}
+        className={cn("pointer-events-auto absolute outline-none", mac ? "bg-[var(--mac-sp-fill)] shadow-[var(--mac-sp-edge)]" : "overflow-hidden")}
+        style={mac
+          ? {
+              left: boxLeft,
+              top: boxTop,
+              width: boxWidth,
+              height: boxHeight,
+              borderRadius: mm.radius,
+              // Nothing to show until the "+" has been found: a popover that paints one frame at the
+              // wrong end of the pane is worse than one that waits a frame.
+              visibility: placement ? undefined : "hidden",
+              backdropFilter: "blur(30px)",
+              WebkitBackdropFilter: "blur(30px)",
+              color: "var(--ios-sp-label)",
+              // It grows out of the arrow's tip, which is the "+" button: the plus menu's corner
+              // rule, moved to the corner this popover is actually anchored by.
+              transformOrigin: `${placement?.arrowX ?? boxWidth / 2}px ${boxHeight + mm.arrow.height}px`,
+            }
+          : {
+              left: boxLeft,
+              top: boxTop,
+              width: boxWidth,
+              height: boxHeight,
+              borderRadius: `${m.sheet.topRadius}px ${m.sheet.topRadius}px ${m.sheet.bottomRadius}px ${m.sheet.bottomRadius}px`,
+              ...continuous,
+              background: `rgb(var(--ios-sp-glass) / var(--ios-sp-alpha))`,
+              backdropFilter: `blur(${m.sheet.blur}px) saturate(${m.sheet.saturate})`,
+              WebkitBackdropFilter: `blur(${m.sheet.blur}px) saturate(${m.sheet.saturate})`,
+              boxShadow: "0 4px 24px 0 var(--ios-sp-shadow)",
+              color: "var(--ios-sp-label)",
+            }}
       >
+        {/*
+          The arrow. Invented outright — see `macStickerPickerMetrics.arrow` — and drawn as the
+          popover's own material clipped to a triangle, with the box's hairline carried down its two
+          slanted edges. It overlaps the box by half a point so the two fills meet without a seam.
+        */}
+        {mac ? (
+          <span
+            aria-hidden="true"
+            data-slot="mac-popover-arrow"
+            className="pointer-events-none absolute"
+            style={{ left: (placement?.arrowX ?? boxWidth / 2) - mm.arrow.width / 2, top: boxHeight - 0.5, width: mm.arrow.width, height: mm.arrow.height + 0.5 }}
+          >
+            <span
+              className="absolute inset-0 bg-[var(--mac-sp-fill)]"
+              style={{ clipPath: "polygon(0 0, 100% 0, 50% 100%)", backdropFilter: "blur(30px)", WebkitBackdropFilter: "blur(30px)" }}
+            />
+            <svg aria-hidden="true" className="absolute inset-0 block size-full" viewBox={`0 0 ${mm.arrow.width} ${mm.arrow.height + 0.5}`} fill="none" preserveAspectRatio="none">
+              <path d={`M0 0.25 L${mm.arrow.width / 2} ${mm.arrow.height + 0.25} L${mm.arrow.width} 0.25`} stroke="var(--mac-sp-outline)" strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
+            </svg>
+          </span>
+        ) : null}
+
+        {/* A popover has no titlebar and no close button: Escape and a click outside dismiss it. */}
+        {mac ? null : (
         <div data-slot="header" className="absolute left-0 top-0 w-full" style={{ height: m.header.height }}>
           <p
             id={titleId}
@@ -1085,6 +1336,7 @@ export function StickerPicker({
             </button>
           ) : null}
         </div>
+        )}
 
         <div
           data-slot="tab-strip"
@@ -1094,7 +1346,7 @@ export function StickerPicker({
           onKeyDown={onTabsKeyDown}
           className="absolute left-0 flex items-center overflow-x-auto"
           style={{
-            top: m.header.height,
+            top: headerHeight,
             height: m.strip.height,
             width: "100%",
             paddingLeft: m.strip.inset,
@@ -1172,7 +1424,7 @@ export function StickerPicker({
         <div
           data-slot="grid-scroller"
           className="absolute overflow-y-auto overflow-x-hidden [overscroll-behavior:contain]"
-          style={{ left: 0, right: 0, top: m.header.height + m.strip.height, bottom: 0, padding: m.grid.inset }}
+          style={{ left: 0, right: 0, top: headerHeight + m.strip.height, bottom: 0, padding: m.grid.inset }}
         >
           {stickers.length === 0 ? (
             // The empty state is the capture's: a bold headline over a two-line secondary body,
