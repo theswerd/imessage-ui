@@ -34,6 +34,12 @@ const LABS: Lab[] = [
   { url: "/lab/reply?platform=macos", ...MAC },
   // The pane lab draws the whole window: skip the header's pill rim and the composer's.
   { url: "/lab/macos-chrome?scene=pane", ...MAC, clip: { x: 0, y: 92, width: 960, height: 480 } },
+  // The photo stack is four separately clipped layers sharing edges — the front card carries the
+  // body clip and the tail, the ones behind it carry a rim — which is the same shape of problem the
+  // bubble's tail seam is. The scan skips the status bar, whose Dynamic Island and glyph edges are
+  // meant to be sharp, and stops above the composer's own rim.
+  { url: "/harness?platform=ios&scene=photos&embed=1", ...IOS, clip: { x: 0, y: 160, width: 402, height: 620 } },
+  { url: "/harness?platform=ios&scene=photo-many&embed=1", ...IOS, clip: { x: 0, y: 160, width: 402, height: 620 } },
 ];
 
 const DELTA = 12;
