@@ -108,6 +108,11 @@ final class SimulatorReview: XCTestCase {
         safari.buttons["Open components"].tap()
         safari.links["Home"].tap()
         XCTAssertTrue(explore.waitForExistence(timeout: 5))
+        safari.swipeUp()
+        safari.swipeUp()
+        XCTAssertTrue(safari.links["Ben Swerdlow"].isHittable)
+        XCTAssertTrue(safari.links["Freestyle"].isHittable)
+        capture("home-footer")
     }
     func testCopyAgentPrompt() throws {
         continueAfterFailure = false

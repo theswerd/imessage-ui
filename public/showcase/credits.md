@@ -15,6 +15,5 @@ Demo content only; not included in registry installs.
 - [Lakeside cabin](https://images.unsplash.com/photo-1470770841072-f978cf4d019e): /showcase/cabin.jpg
 - [Mountain peak](https://images.unsplash.com/photo-1464822759023-fed622ff2c3b): /showcase/mountain.jpg
 
-Voice message: Rick Astley, Never Gonna Give You Up. Streamed Apple song preview,
-with a nearby link to the track on Apple Music. Audio is not stored in this project
+Voice message: Rick Astley, Never Gonna Give You Up. Streamed Apple song preview. Audio is not stored in this project
 or shipped in the registry. Retrieved from Apple's iTunes Search API on 2026-09-29.

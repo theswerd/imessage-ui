@@ -8,6 +8,7 @@ import { AudioLines, CalendarDays, Circle, Code2, House, ImageIcon, Link2, Maxim
 import { componentHref, siteComponents } from "@/lib/site-catalog";
 import { ComponentSearch } from "./component-search";
 import { Brand } from "./brand";
+import { GithubMark } from "./github-mark";
 import { AddToAgent } from "./add-to-agent";
 
 const icons = [MessageCircle, PanelLeft, UserRound, MessageCircle, Smile, ImageIcon, Link2, AudioLines, Circle, Code2, PanelLeft, Maximize2, UserRound, CalendarDays];
@@ -37,7 +38,7 @@ export function SiteHeader() {
         {!home && <button type="button" className="icon-button mobile-menu" aria-label="Open components" onClick={() => menu.current?.showModal()}><Menu size={19} /></button>}
         <Link href="/" className="site-brand" aria-label="Message UI home"><Brand /><strong>Message UI</strong></Link>
       </div>
-      <div className="header-actions">{home && <Link href="/components" className="header-components-link">Components</Link>}<ComponentSearch /><button type="button" className="icon-button theme-switch" aria-label="Toggle site appearance" onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}><Sun size={17} className="hidden dark:block" /><Moon size={17} className="dark:hidden" /></button>{!home && <AddToAgent />}</div>
+      <div className="header-actions">{home && <Link href="/components" className="header-components-link">Components</Link>}<ComponentSearch /><a className="icon-button github-link" href="https://github.com/theswerd/imessage-ui" target="_blank" rel="noopener noreferrer" aria-label="Message UI on GitHub" title="GitHub"><GithubMark /></a><button type="button" className="icon-button theme-switch" aria-label="Toggle site appearance" onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}><Sun size={17} className="hidden dark:block" /><Moon size={17} className="dark:hidden" /></button>{!home && <AddToAgent />}</div>
     </header>
     {!home && <><aside className="registry-sidebar"><ComponentNavigation /></aside><dialog ref={menu} className="mobile-sidebar-dialog" aria-label="Component navigation"><button type="button" aria-label="Close components" className="icon-button mobile-close" onClick={() => menu.current?.close()}><X size={20} /></button><ComponentNavigation close={() => menu.current?.close()} /></dialog></>}
   </>;

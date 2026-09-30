@@ -2,9 +2,10 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { AddToAgent } from "@/components/add-to-agent";
 import { HomePreview } from "@/components/home-preview";
+import { SiteFooter } from "@/components/site-footer";
 
 export default function Home() {
-  return <main id="main" className="registry-main home-main">
+  return <><main id="main" className="registry-main home-main">
     <section className="home-hero" aria-labelledby="home-title">
       <div className="home-copy">
         <h1 id="home-title">Message UI,<br /><span>for the web.</span></h1>
@@ -13,5 +14,5 @@ export default function Home() {
       </div>
       <HomePreview />
     </section>
-  </main>;
+  </main><SiteFooter /></>;
 }
