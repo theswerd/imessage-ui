@@ -100,6 +100,13 @@ final class SimulatorReview: XCTestCase {
         XCTAssertTrue(safari.staticTexts["I found 12 files named final."].waitForExistence(timeout: 5))
         XCTAssertTrue(safari.links.matching(NSPredicate(format: "label CONTAINS %@", "OpenWork. Put your agent to work.")).firstMatch.exists)
         capture("home-openwork")
+        openInbox()
+        let hexclank = safari.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Hexclank,")).firstMatch
+        XCTAssertTrue(hexclank.waitForExistence(timeout: 5))
+        hexclank.tap()
+        XCTAssertTrue(safari.staticTexts["Three. You can stop refreshing."].waitForExistence(timeout: 5))
+        XCTAssertTrue(safari.links.matching(NSPredicate(format: "label CONTAINS %@", "Hexclank. Your product, one text away.")).firstMatch.exists)
+        capture("home-hexclank")
     }
     func testHomepage() throws {
         continueAfterFailure = false

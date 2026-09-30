@@ -35,6 +35,16 @@ export const homeInbox: DemoThread[] = [
     ],
   },
   {
+    contact: { id: "hexclank", name: "Hexclank", photo: "/showcase/hexclave.svg", preview: "Three. You can stop refreshing.", time: "9:36 AM", unread: true },
+    messages: [
+      { id: "hexclank-1", direction: "outgoing", text: "Any new signups?", sentAt: now - 420_000 },
+      { id: "hexclank-2", direction: "incoming", text: "Three. You can stop refreshing.", sentAt: now - 390_000 },
+      { id: "hexclank-3", direction: "outgoing", text: "That was my cardio.", sentAt: now - 360_000, reactions: [{ type: "laugh", byMe: true }] },
+      { id: "hexclank-4", direction: "incoming", text: "I'll text you the highlights.", sentAt: now - 330_000 },
+      { id: "hexclank-link", direction: "incoming", text: "https://hexclank.com", kind: "link", link: { url: "https://hexclank.com", title: "Hexclank. Your product, one text away.", image: "/showcase/hexclank-preview.svg" }, sentAt: now - 300_000 },
+    ],
+  },
+  {
     contact: { id: "mom", name: "Mom", initials: "M", preview: "Is the cloud wearing a jacket?", time: "9:32 AM", unread: true },
     messages: [
       { id: "mom-1", direction: "incoming", text: "What do you actually do at work?", sentAt: now - 660_000 },

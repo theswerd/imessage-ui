@@ -16,6 +16,12 @@ https://openworklabs.com/icon.png. Link preview: `/showcase/openwork-og.png`, th
 Open Graph image from https://openworklabs.com/openwork-social.png.
 Retrieved 2026-09-29. Demo content only; not included in registry installs.
 
+Hexclank contact avatar: `/showcase/hexclave.svg`, the Hexclave mark from
+`hexclave/apps/dashboard/public/logo.svg`, centered on white without changing the mark.
+Link preview: `/showcase/hexclank-preview.svg`, composed for this demo with the same
+mark and the lime color from https://hexclank.com/favicon.svg (retrieved 2026-09-29).
+Website: https://hexclank.com. Demo content only; not included in registry installs.
+
 - [Lake and village](https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1): /showcase/lake.jpg
 - [Lakeside cabin](https://images.unsplash.com/photo-1470770841072-f978cf4d019e): /showcase/cabin.jpg
 - [Mountain peak](https://images.unsplash.com/photo-1464822759023-fed622ff2c3b): /showcase/mountain.jpg
