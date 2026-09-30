@@ -56,9 +56,21 @@ final class SimulatorReview: XCTestCase {
         let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
         safari.activate()
         XCTAssertTrue(safari.links["Explore components"].waitForExistence(timeout: 15))
-        safari.swipeUp()
         let back = safari.webViews.buttons["Back"].firstMatch
-        back.tap()
+        func openInbox() {
+            // A full-page swipe can put the preview's Back button under the sticky site header.
+            // Move the page through its gutter so the button is visibly clear before tapping it.
+            for _ in 0..<2 {
+                let top = back.frame.minY
+                if top >= 160 && top <= 320 { break }
+                let start = safari.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5))
+                let distance = max(-300, min(300, 200 - top))
+                start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: distance)))
+            }
+            XCTAssertTrue(back.isHittable)
+            back.tap()
+        }
+        openInbox()
         let freestyle = safari.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Freestyle guy,")).firstMatch
         XCTAssertTrue(freestyle.waitForExistence(timeout: 5))
         capture("home-inbox")
@@ -74,13 +86,20 @@ final class SimulatorReview: XCTestCase {
         let keyboardDone = safari.toolbars.buttons["selected"]
         if keyboardDone.exists { keyboardDone.tap() }
         capture("home-freestyle-sent")
-        back.tap()
+        openInbox()
         safari.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Jamie Lee,")).firstMatch.tap()
         XCTAssertTrue(safari.staticTexts["Wait. You went outside?"].waitForExistence(timeout: 5))
-        back.tap()
+        openInbox()
         freestyle.tap()
         XCTAssertTrue(safari.staticTexts["More VMs from my iPhone."].waitForExistence(timeout: 5))
         capture("home-freestyle-retained")
+        openInbox()
+        let openwork = safari.buttons.matching(NSPredicate(format: "label CONTAINS %@", "OpenWork,")).firstMatch
+        XCTAssertTrue(openwork.waitForExistence(timeout: 5))
+        openwork.tap()
+        XCTAssertTrue(safari.staticTexts["I found 12 files named final."].waitForExistence(timeout: 5))
+        XCTAssertTrue(safari.links.matching(NSPredicate(format: "label CONTAINS %@", "OpenWork. Put your agent to work.")).firstMatch.exists)
+        capture("home-openwork")
     }
     func testHomepage() throws {
         continueAfterFailure = false

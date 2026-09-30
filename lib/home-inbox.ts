@@ -25,6 +25,16 @@ export const homeInbox: DemoThread[] = [
     ],
   },
   {
+    contact: { id: "openwork", name: "OpenWork", photo: "/showcase/openwork.png", preview: "I found 12 files named final.", time: "9:38 AM", unread: true },
+    messages: [
+      { id: "openwork-1", direction: "outgoing", text: "Can you organize my Downloads folder?", sentAt: now - 300_000 },
+      { id: "openwork-2", direction: "incoming", text: "I found 12 files named final.", sentAt: now - 270_000 },
+      { id: "openwork-3", direction: "outgoing", text: "They were all final at the time.", sentAt: now - 240_000 },
+      { id: "openwork-4", direction: "incoming", text: "Let's give them a fresh start.", sentAt: now - 210_000, reactions: [{ type: "laugh", byMe: true }] },
+      { id: "openwork-link", direction: "incoming", text: "https://openworklabs.com", kind: "link", link: { url: "https://openworklabs.com", title: "OpenWork. Put your agent to work.", image: "/showcase/openwork-og.png" }, sentAt: now - 180_000 },
+    ],
+  },
+  {
     contact: { id: "mom", name: "Mom", initials: "M", preview: "Is the cloud wearing a jacket?", time: "9:32 AM", unread: true },
     messages: [
       { id: "mom-1", direction: "incoming", text: "What do you actually do at work?", sentAt: now - 660_000 },

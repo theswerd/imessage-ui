@@ -38,7 +38,7 @@ test("homepage has a working conversation, agent setup, and routes to the playgr
   await message.fill("Hello from the homepage");
   await message.press("Enter");
   await expect(page.getByRole("log", { name: "Messages" })).toContainText("Hello from the homepage");
-  await page.getByRole("button", { name: "Reset preview" }).click();
+  await page.reload();
   await expect(page.getByRole("log", { name: "Messages" })).not.toContainText("Hello from the homepage");
   await page.getByRole("button", { name: "Copy prompt for your agent", exact: true }).click();
   await expect(page.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
@@ -102,7 +102,7 @@ for (const theme of ["light", "dark"] as const) {
     await expect(result.locator("img")).toHaveAttribute("src", "/showcase/freestyle.png");
     await result.click();
     await expect(log).toContainText("Make that 100 VMs.");
-    await page.getByRole("button", { name: "Reset preview" }).click();
+    await page.reload();
     await expect(log).toContainText("Wait. You went outside?");
     await back.click();
     await app.getByRole("button", { name: /Freestyle guy,/ }).click();

@@ -98,8 +98,6 @@
 .home-preview { position: relative; isolation: isolate; width: min(100%, clamp(220px, calc((100svh - 250px) * .46), 330px)); justify-self: center; }
 .home-preview::before { content: ""; position: absolute; inset: 10% -8%; z-index: -1; background: radial-gradient(ellipse, #007aff12, #007aff00 70%); pointer-events: none; }
 .home-preview .phone-frame { box-shadow: 0 24px 70px -25px #27395635, 0 0 0 5px #8d91980b; }
-.home-preview-reset { display: flex; align-items: center; gap: 5px; padding: 10px; min-height: 40px; margin: 8px auto -24px; font-size: 10px; color: var(--muted-foreground); border-radius: 8px; }
-.home-preview-reset:hover { color: var(--foreground); background: var(--muted); }
 .site-footer { min-height: 56px; display: flex; align-items: center; justify-content: center; gap: 14px; padding: 12px 24px; font-size: 12px; line-height: 20px; color: var(--muted-foreground); }
 .site-footer a { display: inline-flex; align-items: center; min-height: 28px; transition: color 120ms ease; }
 .site-footer a:hover { color: var(--foreground); }

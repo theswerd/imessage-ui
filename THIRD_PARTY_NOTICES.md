@@ -11,6 +11,7 @@ third-party assets or grant rights to their trademarks.
 | Inter font subsets | Inter via Google Fonts, SIL Open Font License 1.1. [Provenance](assets/fonts/README.md), [license](assets/fonts/OFL.txt). |
 | Showcase photographs | Unsplash. [Image sources and terms](public/showcase/credits.md). |
 | Freestyle marks and preview imagery | Freestyle brand assets. [Image credits](public/showcase/credits.md), [website](https://www.freestyle.sh). |
+| OpenWork icon and preview imagery | OpenWork brand assets. [Image credits](public/showcase/credits.md), [website](https://openworklabs.com). |
 | Voice message demonstration | Streamed Apple song preview of Rick Astley's Never Gonna Give You Up. The audio is not stored in this repository or included in registry installs. [Credits](public/showcase/credits.md). |
 | Native screenshots and recordings | Reference material from Apple software for comparison and testing, with fixture conversations. Apple interface artwork and trademarks retain their original ownership. [Measurement provenance](references/SPEC.md). |
 
