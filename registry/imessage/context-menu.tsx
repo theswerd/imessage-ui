@@ -64,12 +64,40 @@ export function iosContextMenuHeight(items: ContextMenuItem[]): number {
 }
 
 export type ContextMenuItem = { id: string; label: string; icon?: MenuIconName | ReactNode; destructive?: boolean; disabled?: boolean } | { separator: true };
-export type MenuIconName = "copy" | "translate" | "select" | "more" | "tapback-details" | "reply" | "sticker" | "forward" | "delete" | "clock";
+export type MenuIconName = "copy" | "translate" | "select" | "more" | "tapback-details" | "reply" | "sticker" | "forward" | "delete" | "clock" | "save";
 
 export const iosMessageMenu: ContextMenuItem[] = [
   { id: "copy", label: "Copy", icon: "copy" },
   { id: "translate", label: "Translate", icon: "translate" },
   { id: "select", label: "Select", icon: "select" },
+  { id: "more", label: "More…", icon: "more" },
+];
+
+/**
+ * **A photo does not get the text bubble's menu.** MEASURED on the device: long-pressing a sent
+ * photo balloon on iOS 26 opens a three-row menu reading **Save / Copy / More…** — no Translate, no
+ * Select, and no Reply. Captured by driving Messages through XCUITest (three photos sent into one
+ * conversation, then a 1.0 s press on the last balloon and on the middle one). The capture is in the
+ * repo as `references/ios/light/photo-long-press-0.png`, 1206x2622; the middle-balloon one it is
+ * cross-checked against is not (one capture per scene), and its numbers are in
+ * `references/simulator-cases.md` §3.5.
+ *
+ * The menu's *chrome* is the same `contextMenuMetrics.ios` the text menu uses, and the capture
+ * confirms every number of it: the panel measures **250.000 x 146.000** (x 136.000..386.000,
+ * y 686.000..832.000), which `iosContextMenuHeight` reproduces exactly for three rows
+ * (10 + 3x42 + 10 = 146); the three label/icon ink bands centre on y 717.500, 759.167 and 801.167
+ * against a menu top of 686.0, i.e. 31.5 / 73.5 / 115.5 inside it, which is `padding` 10 + `row` 42
+ * to the last digit; the icon ink centres on x 172.167, i.e. **36.167** from the panel's leading
+ * edge (`iconCenter` 36.2); and the label ink starts at x 197.0, **61.0** in (`textX` 60).
+ *
+ * `ADD_TO_PHOTOS_LIBRARY` ("Add to Photos Library"), `SAVE_COUNT_PHOTO` ("Save %tu Photo") and
+ * `COPY_PHOTOS` ("Copy %tu Photos") are all in `ChatKit.loctable`, so the plural and multi-select
+ * forms of these rows exist; the single-photo case captured here spells them "Save" (`SAVE`) and
+ * "Copy" (`COPY`). What "More…" opens is NOT captured.
+ */
+export const iosPhotoMenu: ContextMenuItem[] = [
+  { id: "save", label: "Save", icon: "save" },
+  { id: "copy", label: "Copy", icon: "copy" },
   { id: "more", label: "More…", icon: "more" },
 ];
 /**
@@ -145,6 +173,14 @@ export function MenuIcon({ name, size = 22, style }: { name: MenuIconName; size?
     );
     case "clock": return (
       <svg {...common}><circle {...s} cx="11" cy="11" r="8.3" /><path {...s} d="M11,6.2 V11.3 L14.4,13.3" /></svg>
+    );
+    // `square.and.arrow.down`: a rounded square broken open at the top, with an arrow dropping
+    // through the gap into it. Traced from the Save row of `references/ios/light/photo-long-press-0.png`, where
+    // the ink measures 17.000 x 17.667 pt centred on the row — taller than it is wide because the
+    // arrow's shaft starts above the square's top edge. The proportions here are that ink box in a
+    // 22 viewBox; the stroke weight is the one every other icon in this file uses, not a measurement.
+    case "save": return (
+      <svg {...common}><path {...s} d="M8.7,5.3 H7.6 A3,3 0 0 0 4.6,8.3 V15.55 A3,3 0 0 0 7.6,18.55 H14.4 A3,3 0 0 0 17.4,15.55 V8.3 A3,3 0 0 0 14.4,5.3 H13.3" /><path {...s} d="M11,2.55 V13.2 M7.4,9.6 L11,13.2 L14.6,9.6" /></svg>
     );
   }
 }

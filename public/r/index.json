@@ -1,7 +1,7 @@
 {
   "$schema": "https://ui.shadcn.com/schema/registry-item.json",
   "name": "index",
-  "title": "iMessage UI",
+  "title": "Message UI",
   "description": "The whole kit: every component plus the conversation pane and both app shells.",
   "registryDependencies": [
     "http://localhost:3100/r/audio-recorder.json",
@@ -14,6 +14,7 @@
     "http://localhost:3100/r/ios-messages-app.json",
     "http://localhost:3100/r/ios-notices.json",
     "http://localhost:3100/r/ios-plus-menu.json",
+    "http://localhost:3100/r/ios-push-banner.json",
     "http://localhost:3100/r/ios-search.json",
     "http://localhost:3100/r/ios-select-mode.json",
     "http://localhost:3100/r/ios-swipe-times.json",
@@ -32,6 +33,7 @@
     "http://localhost:3100/r/sticker-picker.json",
     "http://localhost:3100/r/system-message.json",
     "http://localhost:3100/r/tapback-details.json",
+    "http://localhost:3100/r/theme-transition.json",
     "http://localhost:3100/r/use-long-press.json"
   ],
   "type": "registry:style"

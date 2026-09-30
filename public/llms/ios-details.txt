@@ -4,7 +4,7 @@ The details screen: contact, call actions, and the grouped settings cells.
 
 ## Requirements
 
-React 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor.
+React 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor. Standalone primitives need PaletteStyle inside a data-im-platform wrapper; full conversation and app shells include it. Setup: http://localhost:3100/onboard.md
 
 ## Install
 
@@ -15,7 +15,26 @@ npx shadcn@latest add http://localhost:3100/r/ios-details.json
 ## Usage
 
 ```tsx
-Install the full collection, then import the components you need from @/components/imessage/.
+"use client";
+
+import { IosDetails } from "@/components/message-ui/ios-details";
+
+export function ContactView({ onBack }: { onBack: () => void }) {
+  return <div className="relative h-[874px] w-[402px] max-w-full overflow-hidden">
+    <IosDetails
+      name="Jamie Lee"
+      initials="JL"
+      phoneLabel="mobile"
+      phone="+1 (415) 555-0142"
+      actions={[
+        { id: "call", label: "Call", icon: "phone", disabled: true },
+        { id: "video", label: "FaceTime", icon: "video", disabled: true },
+        { id: "mail", label: "Mail", icon: "mail", disabled: true },
+      ]}
+      onBack={onBack}
+    />
+  </div>;
+}
 ```
 
-Components render UI only. Supply your own message data, persistence, uploads, and send handlers. No iMessage or Apple service connection is included.
+Components render UI only. Supply your own message data, persistence, uploads, and send handlers. Connect your own messaging service.

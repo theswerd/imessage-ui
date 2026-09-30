@@ -71,18 +71,21 @@ export function PhotoPickerScene({
 
   if (scene === "badge") {
     /*
-     * Nothing but the selection badge, at its measured 21.9873 ink in a 26 pt box on white, so the
-     * SVG can be diffed against the badge PhotosUICore actually draws:
-     *   render `+[PXSelectionBadgeUIViewTile preferredSize]`'s own UIImage at 3x over white and
-     *   compare that PNG with this scene at dpr 3, 26 x 26.
+     * Nothing but the selection badge, on white, so it can be diffed on its own.
+     *
+     * The box used to be PhotosUICore's `+[PXSelectionBadgeUIViewTile preferredSize]` {26, 26} with a
+     * 21.9873 ink inside it. The device measures the ink at 23.0 and does not put it in a 26 box at
+     * all (see `badge` in `photo-picker.tsx`), so this scene is now exactly the ink: the box is
+     * `badge.size` and the badge fills it. The old diff target - that `preferredSize` image rendered
+     * at 3x - no longer applies, because it is a different badge from the one this sheet draws.
      */
     return (
       <div
         data-testid="lab"
         className={theme}
         style={{
-          width: m.badge.box,
-          height: m.badge.box,
+          width: m.badge.size,
+          height: m.badge.size,
           background: "#ffffff",
           display: "flex",
           alignItems: "center",

@@ -1,0 +1,21 @@
+# Appearance switch
+
+The system light/dark switch as iOS 26 plays it: a crossfade of about half a second, on two different curves in the two directions, from the recorded ramps.
+
+## Requirements
+
+React 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor. Standalone primitives need PaletteStyle inside a data-im-platform wrapper; full conversation and app shells include it. Setup: http://localhost:3100/onboard.md
+
+## Install
+
+```sh
+npx shadcn@latest add http://localhost:3100/r/theme-transition.json
+```
+
+## Usage
+
+```tsx
+// Exported props and source: http://localhost:3100/r/theme-transition.json
+```
+
+Components render UI only. Supply your own message data, persistence, uploads, and send handlers. Connect your own messaging service.

@@ -5,6 +5,7 @@ import type { SystemMessageEvent } from "@/registry/imessage/system-message";
 // Type-only, so this file still loads on its own under `bun test`: the imports are erased and no
 // component code comes with them. They exist so the two list derivations below cannot drift from the
 // props the shells actually take — which is exactly the drift that lost the unread dot.
+import type { PushBannerKind } from "@/registry/imessage/ios-push-banner";
 import type { IosConversation } from "@/registry/imessage/ios-conversation-list";
 import type { SidebarConversation } from "@/registry/imessage/macos-sidebar";
 
@@ -42,6 +43,18 @@ export const nativeMotion = {
    */
   searchOpen: 267,
   searchClose: 292,
+  /**
+   * The New Message sheet leaving. `iosSheetDismissal.duration` in `ios-new-message-sheet.tsx`,
+   * copied rather than imported like every other value here, and measured off two independent
+   * recordings of an iPhone 17 Pro on iOS 26 (`references/simulator-cases.md` §2.4): the panel's top
+   * edge leaves 186 device px, is past mid-screen by ~100 ms and is off the bottom by 190–210.
+   *
+   * The duration is the smaller half of what was measured. The shape is a table of nine recorded
+   * samples in the component, which is why `sheet-dismiss` checkpoints every one of them rather than
+   * the round numbers a duration alone would suggest. The re-present beside it has **no** duration:
+   * the same recording re-opens the sheet by deep link with no intermediate frame at all.
+   */
+  sheetDismiss: 200,
   /**
    * The bubble effects, read off 60 fps recordings of the iOS 26 simulator and written up frame by
    * frame in `references/ios/motion/effects.md`. These are `bubbleEffectDuration` in
@@ -217,7 +230,7 @@ export type FixtureMessage = {
   readMinutesAgo?: number;
   edited?: boolean;
   reactions?: Reaction[];
-  link?: { url: string; host: string; title?: string };
+  link?: { url: string; host: string; title?: string; image?: string };
   attachment?: { name: string; size: string; href: string };
   /**
    * `pending` and `livePhoto` are `MessageImage`'s own two flags. A pending tile is an attachment the
@@ -319,13 +332,54 @@ export const scenarios = [
   { id: "group-events", title: "Group status lines", group: "Messages", duration: 0, checkpoints: [0] },
   { id: "sms", title: "Text message (SMS)", group: "Messages", duration: 0, checkpoints: [0] },
   { id: "link-preview", title: "Link preview", group: "Previews", duration: 0, checkpoints: [0] },
+  { id: "rich-link-preview", title: "Rich link preview", group: "Previews", duration: 0, checkpoints: [0] },
   { id: "attachment", title: "File preview", group: "Previews", duration: 0, checkpoints: [0] },
   { id: "photos", title: "Photos", group: "Previews", duration: 0, checkpoints: [0] },
+  { id: "photo-tail-texture", title: "Photo tail texture and direction", group: "Previews", duration: 0, checkpoints: [0] },
   // One photo is its own balloon; several are a stack. These two are the ends of that: a single
   // photo, which never becomes a card, and ten, which fills all four card slots and turns the last
   // one into the count card. See `photoStackLayout` in `message-image.tsx`.
   { id: "photo-one", title: "One photo", group: "Previews", duration: 0, checkpoints: [0] },
   { id: "photo-many", title: "Ten photos", group: "Previews", duration: 0, checkpoints: [0] },
+  // What the device actually draws when you attach several photos and send. `photos` and `photo-many`
+  // put them on one message, which is the multi-attachment balloon; this is the send path.
+  { id: "photo-run", title: "Three photos, as sent", group: "Previews", duration: 0, checkpoints: [0] },
+  // A Tapback on a photo, which no other scene shows. `photo-tapback` is one photo with one balloon
+  // on it; `photo-run-tapback` puts one on the middle balloon of a run of three and one on the last,
+  // because a run is three separate messages and each carries its own balloon on its own corner.
+  { id: "photo-tapback", title: "Tapback on a photo", group: "Interactions", duration: 0, checkpoints: [0] },
+  { id: "photo-run-tapback", title: "Tapbacks across a photo run", group: "Interactions", duration: 0, checkpoints: [0] },
+  // Long-pressing a *photo*, which is a different menu and a different lift from a text bubble's:
+  // Save / Copy / More… over a preview that scales to a fixed 326 pt and drops its tail. Measured on
+  // the device; see `messageActionsMetrics.photoLiftWidth` and `iosPhotoMenu`. The settled state only
+  // (duration 0): the entrance timing was not captured, and `long-press` already covers that curve.
+  { id: "photo-long-press", title: "Long press a photo", group: "Interactions", duration: 0, checkpoints: [0], only: "ios" },
+  // The appearance switch, at the times it was recorded at. The two directions are different curves,
+  // so they are two scenes rather than one played backwards — see `theme-transition.tsx`.
+  { id: "theme-to-dark", title: "Switch to dark", group: "Screens", duration: 492, checkpoints: [0, 47, 104, 152, 199, 242, 292, 359, 409, 442, 492], only: "ios" },
+  { id: "theme-to-light", title: "Switch to light", group: "Screens", duration: 495, checkpoints: [0, 55, 105, 155, 193, 247, 292, 343, 393, 445, 495], only: "ios" },
+  /*
+   * The notification banner, at the frames it was recorded at. Every checkpoint below is the `at` of a
+   * `box` assertion in `references/ios/motion/simulator-checkpoints.json` — nothing here is a round
+   * number somebody liked — and the geometry they sample is `iosPushBannerFrames` in
+   * `ios-push-banner.tsx`, which is that file's numbers verbatim.
+   *
+   * Three separate scenes rather than one with a prop, because the three recordings are three
+   * different clocks: the short and long banners settle at 200 ms and the group one takes 215, and
+   * the settled heights differ (176 / 189.67 / 181 pt) because the banner **clamps** — a long body
+   * buys 41 device px (13.67 pt) and a group subtitle 15 px (5 pt), not a line's worth each.
+   *
+   * `push-banner-short` runs to **7132**, not to its 200 ms entrance: that is the recording's first
+   * retraction frame, and it is the evidence that the banner holds for 7.1 s rather than the 5 s
+   * usually quoted. Everything between 200 and 7115 is the hold, and the scene is deliberately still
+   * there. The other two recordings were stopped at the settle, so their scenes end there too.
+   *
+   * `push-banner-long`'s recording also lists checkpoints at 18 and 83 ms, which carry no assertion.
+   * They are not here: a scene checkpoint that nothing was measured at is a picture, not a question.
+   */
+  { id: "push-banner-short", title: "Notification banner", group: "Screens", duration: 7132, checkpoints: [0, 17, 33, 55, 68, 85, 102, 133, 150, 183, 200, 7132], only: "ios" },
+  { id: "push-banner-long", title: "Banner: long message", group: "Screens", duration: 200, checkpoints: [0, 50, 116, 150, 183, 200], only: "ios" },
+  { id: "push-banner-group", title: "Banner: group message", group: "Screens", duration: 215, checkpoints: [0, 15, 31, 66, 100, 133, 165, 198, 215], only: "ios" },
   // The two per-tile states a photo balloon can be in that the plain `photos` scenario cannot show:
   // an attachment that has not been fetched, which offers native's own download copy at
   // `downloadButtonFont`'s measured 17 pt, and a Live Photo, which wears ChatKit's
@@ -410,6 +464,17 @@ export const scenarios = [
   { id: "push-back", title: "Back to the list", group: "Screens", duration: 320, checkpoints: [0, 40, 90, 180, 320], only: "ios" },
   { id: "new-message", title: "New message", group: "Screens", duration: 0, checkpoints: [0] },
   { id: "new-message-sheet", title: "Present New Message", group: "Screens", duration: 400, checkpoints: [0, 50, 100, 200, 400], only: "ios" },
+  // The dismissal, and every checkpoint on it is a *frame of a recording*: 0, 15, 31, 46, 63, 80 and
+  // 98 are `newmsg-sheet-open`'s samples of the sheet's top edge (186 px at rest to 1454 past
+  // mid-screen), 183 is its last one before the edge is gone, and 200 is where both recordings agree
+  // it is off the bottom. 140 is the one time here that `newmsg-sheet-open` never sampled: it sits in
+  // the middle of the single 85 ms stretch the table interpolates across, and it is where the second
+  // recording disagrees most — which is why it is a checkpoint and not an assertion.
+  { id: "sheet-dismiss", title: "Dismiss New Message", group: "Screens", duration: nativeMotion.sheetDismiss, checkpoints: [0, 15, 31, 46, 63, 80, 98, 140, 183, 200], only: "ios" },
+  // Re-opening a sheet the app has already built, which the device does not animate at all: one
+  // frame, the sheet at rest. `duration: 0` is the claim — there is no timeline to seek — and the
+  // single checkpoint asks the only question a still can: is the top edge where it was, at 186 px.
+  { id: "sheet-represent", title: "Re-present New Message", group: "Screens", duration: 0, checkpoints: [0], only: "ios" },
   // Search over the list. Both durations are measured off 60 fps recordings and the two tables are
   // different animations, so the checkpoints are read off each curve rather than mirrored: opening,
   // 45 is where the compose glyph is halfway out, 130 the alpha midpoint where the ✕ arrives, 200
@@ -568,8 +633,11 @@ export type SceneFrame = {
   /**
    * A screen change in flight: the shell is on `screen`, arriving `from`, scrubbed to `progress`.
    * A scrubbed frame has no change to observe, so the transition is stated rather than derived.
+   * `represent` says the New Message sheet arriving has been built once already, which is the case
+   * the device does not animate — the shell counts its own presentations when it plays them, and a
+   * single frame gives it nothing to count.
    */
-  screenTransition?: { from: "conversation" | "list" | "new-message"; progress: number };
+  screenTransition?: { from: "conversation" | "list" | "new-message"; progress: number; represent?: boolean };
   /** The reply thread on a message is open, its entrance scrubbed to `progress` (0..1). */
   thread?: { rootId: string; progress: number };
   menu?: "plus" | "context";
@@ -589,7 +657,7 @@ export type SceneFrame = {
    * and showing item `index`. `dismiss` holds the drag-to-dismiss pose instead of synthesising a
    * drag, and `chrome` states whether the bars are up. iOS only: a photo on the Mac is a Quick Look.
    */
-  photoViewer?: { id: string; index: number; progress: number; chrome?: boolean; dismiss?: number };
+  photoViewer?: { id: string; index: number; progress: number; chrome?: boolean; dismiss?: number; pageOffset?: number };
   /**
    * The Photos picker: its entrance scrubbed to `progress`, which detent it is at, and what is
    * picked. The Mac shows the same component in a popover and ignores `detent`, which has no sheet
@@ -636,6 +704,22 @@ export type SceneFrame = {
    * loaded straight at mid-transition renders `to` settled — see the `switch-conversation` entry.
    */
   conversationSwitch?: { from: string; to: string; progress: number };
+  /**
+   * The system appearance switch, seeked. `to` is the appearance being moved *into*, `ms` how far in.
+   * `theme-transition.tsx` carries the two recorded ramps, and they are different curves in the two
+   * directions, so the direction is part of the state rather than something to reverse.
+   */
+  themeCrossfade?: { to: "light" | "dark"; ms: number };
+  /**
+   * The iOS notification banner over the whole app, seeked. `kind` picks which of the three recorded
+   * tables in `ios-push-banner.tsx` drives it and `ms` is the millisecond on that table.
+   *
+   * There is no `progress` here on purpose. The banner's geometry is a table of measured frames, not
+   * a curve with a duration, and the three shapes do not even share one — the short and long banners
+   * settle at 200 ms and the group one at 215. Normalising them would throw away the thing the
+   * recording measured.
+   */
+  pushBanner?: { kind: PushBannerKind; ms: number };
 };
 
 function clamp01(v: number) { return Math.max(0, Math.min(1, v)); }
@@ -651,9 +735,23 @@ function makeGroup(frame: SceneFrame) {
   frame.messages = clone(groupChat);
 }
 
-/** The five photos, on one outgoing message, which every photo-viewer scenario opens from. */
-function photoMessage(): FixtureMessage {
-  return { id: "ph", direction: "outgoing", minutesAgo: 1, text: "Photos", images: viewerPhotos.map(photo => ({ ...photo })) };
+/**
+ * The five photos every photo-viewer scenario opens from — as FIVE MESSAGES, which is the shape a
+ * send of five photos actually takes (`references/simulator-cases.md` §3.4, and the same run of
+ * single-photo balloons the `photo-run` scene draws).
+ *
+ * They used to be one five-image message, which meant the viewer opened out of a five-up grid inside
+ * one balloon and paged inside one message. Neither is a shape the device produces, and the viewer's
+ * own contract is the run: measured in ChatKit,
+ * `-[CKChatController(QuickLook) previewItemsForMediaObject:currentItemIndex:containsRestoring:]`
+ * collects every chat item in the transcript sharing the tapped one's `layoutGroupIdentifier`. So
+ * these scenes now exercise the path that matters — a viewer whose pages come from five different
+ * messages, and an exit that has to find the right one of five separate balloons to fly back into.
+ */
+function photoMessages(): FixtureMessage[] {
+  return viewerPhotos.map((photo, index) => ({
+    id: `ph${index}`, direction: "outgoing", minutesAgo: 1, text: "", images: [{ ...photo }],
+  }));
 }
 
 export function frameAt(id: ScenarioId, milliseconds: number): SceneFrame {
@@ -741,9 +839,80 @@ export function frameAt(id: ScenarioId, milliseconds: number): SceneFrame {
     // plain ones for the badge and the download copy to be read against. Incoming, because an
     // undownloaded attachment is one somebody else sent — and because the download label is drawn in
     // `--im-incoming-text`, so on an outgoing bubble it would be measured against the wrong ground.
+    case "photo-tail-texture":
+      frame.messages = [
+        { id: "photo-incoming", direction: "incoming", minutesAgo: 2, text: "", images: [{ src: "/showcase/lake.jpg", alt: "Lake, received" }] },
+        { id: "photo-outgoing", direction: "outgoing", minutesAgo: 1, text: "", images: [{ src: "/showcase/lake.jpg", alt: "Lake, sent" }] },
+      ];
+      break;
     case "photo-one":
       frame.messages.push({ id: "ph1", direction: "outgoing", minutesAgo: 1, text: "Photos",
         images: [{ src: "/fixtures/shore.jpg", alt: "Shore" }] });
+      break;
+    case "theme-to-dark":
+    case "theme-to-light":
+      // The list is what was on screen when the recording was driven, so it is what the checkpoint
+      // has to be asked against. `t` is real milliseconds here, not a normalized progress.
+      frame.screen = "list";
+      frame.themeCrossfade = { to: id === "theme-to-dark" ? "dark" : "light", ms: t };
+      break;
+    case "push-banner-short":
+    case "push-banner-long":
+    case "push-banner-group":
+      /*
+       * What is *under* the banner is not part of the claim: the recordings are frame diffs bounding
+       * the banner's own region, and they do not record which screen the push landed on. The list is
+       * the stage because that is where a push you have not opened yet arrives.
+       *
+       * `ms` is real milliseconds on the recorded table, not a normalized progress — see `pushBanner`
+       * on `SceneFrame` for why the three shapes cannot share one.
+       */
+      frame.screen = "list";
+      frame.pushBanner = { kind: id === "push-banner-long" ? "long" : id === "push-banner-group" ? "group" : "short", ms: t };
+      break;
+    case "photo-run":
+      // **Three photos, as iOS 26 actually sends them: three messages, not one balloon.**
+      //
+      // Captured off an iPhone 17 Pro on iOS 26 by driving Messages through XCUITest — attach N
+      // photos in the picker and tap Send once, and the transcript gets N cells, each a single-photo
+      // balloon with its own "Includes picture" label. Verified at N = 1, 3 and 10. No fan, no cards
+      // behind, no "+N Items" pill in the pixels or in any accessibility dump. Only the last balloon
+      // of the run carries a tail, and consecutive ones sit ~4 pt apart. See
+      // `references/simulator-cases.md`.
+      for (const [index, fixture] of ["shore", "ridge", "bloom"].entries()) {
+        // No caption: a photo sent on its own carries none, and the device's own accessibility label
+        // for each of these cells is just "Your iMessage, Includes picture, <time>".
+        frame.messages.push({ id: `pr${index}`, direction: "outgoing", minutesAgo: 1, text: "",
+          images: [{ src: `/fixtures/${fixture}.jpg`, alt: `Photo ${index + 1}` }] });
+      }
+      break;
+    // One photo with one Tapback on it. Outgoing and tailed, which is what a photo you just sent is,
+    // and the only scene in the harness where a balloon hangs off a photograph rather than off a
+    // bubble's flat fill.
+    case "photo-tapback":
+      frame.messages.push({ id: "pt", direction: "outgoing", minutesAgo: 1, text: "",
+        images: [{ src: "/fixtures/shore.jpg", alt: "Shore" }], reactions: [{ type: "love", byMe: true }] });
+      break;
+    // A run of three, with a balloon on the middle message and another on the last. Each photo in a
+    // run is its own message, so each takes its own Tapback on its own corner; the middle balloon has
+    // no tail under it and the last one does, and this is the scene that shows both at once.
+    case "photo-run-tapback":
+      for (const [index, fixture] of ["shore", "ridge", "bloom"].entries()) {
+        frame.messages.push({ id: `prt${index}`, direction: "outgoing", minutesAgo: 1, text: "",
+          images: [{ src: `/fixtures/${fixture}.jpg`, alt: `Photo ${index + 1}` }],
+          reactions: index === 1 ? [{ type: "love", byMe: true }] : index === 2 ? [{ type: "like", byMe: false }] : undefined });
+      }
+      break;
+    // The same run of three, with the LAST balloon pressed — the one the device capture
+    // (`references/ios/light/photo-long-press-0.png`) was taken on, so its numbers read straight off this
+    // scene: preview x 60.000..386.000, bar y 166.333..230.667 starting at x 6.000, menu
+    // x 136.000..386.000 y 686.000..832.000 reading Save / Copy / More…
+    case "photo-long-press":
+      for (const [index, fixture] of ["shore", "ridge", "bloom"].entries()) {
+        frame.messages.push({ id: `plp${index}`, direction: "outgoing", minutesAgo: 1, text: "",
+          images: [{ src: `/fixtures/${fixture}.jpg`, alt: `Photo ${index + 1}` }] });
+      }
+      frame.longPress = { id: "plp2", progress: 1 };
       break;
     case "photo-many":
       frame.messages.push({ id: "ph10", direction: "outgoing", minutesAgo: 1, text: "Photos",
@@ -761,25 +930,25 @@ export function frameAt(id: ScenarioId, milliseconds: number): SceneFrame {
           { src: "/fixtures/dusk.jpg", alt: "Dusk" },
         ] });
       break;
-    // The viewer opens out of the third tile, which is the case worth checking: `rectForIndex` is
-    // what stops photo 3 flying back into photo 1's thumbnail on the way out.
+    // The viewer opens out of the third photo of the run — the case worth checking, because
+    // `rectForIndex` is what stops photo 3 flying back into photo 1's balloon on the way out, and
+    // the run's photos now live in three different messages.
     case "photo-viewer":
-      frame.messages.push(photoMessage());
-      frame.photoViewer = { id: "ph", index: 2, progress: clamp01(t / frameworkMotion.photoViewer) };
+      frame.messages.push(...photoMessages());
+      frame.photoViewer = { id: "ph2", index: 2, progress: clamp01(t / frameworkMotion.photoViewer) };
       break;
-    // Settled, paging from item 1 to item 2. The track's own transition is `timing.page` = 300, and
-    // the shell hands the viewer a new `index` rather than a scrubbed offset, so the halfway point
-    // is where the page commits: before it the track is on 1, after it on 2.
+    // Hold the actual strip between pages, including its 40pt gap and parallax. The last checkpoint
+    // commits to the next index; earlier checkpoints retain the starting item and seek the drag.
     case "photo-viewer-page":
-      frame.messages.push(photoMessage());
-      frame.photoViewer = { id: "ph", index: t < frameworkMotion.photoViewer / 2 ? 1 : 2, progress: 1 };
+      frame.messages.push(...photoMessages());
+      frame.photoViewer = { id: "ph1", index: t < frameworkMotion.photoViewer ? 1 : 2, progress: 1, pageOffset: t < frameworkMotion.photoViewer ? -clamp01(t / frameworkMotion.photoViewer) : 0 };
       break;
     // `dismissProgress` holds the drop pose without a synthesised drag: the photo runs to
     // `dismiss.minScale` 0.6 and the ground dims to `interactiveTransitionBackgroundDimming` 0.5.
     // Chrome off, because `hideChromeOnZoom` has already taken it by the time a drag starts.
     case "photo-viewer-dismiss":
-      frame.messages.push(photoMessage());
-      frame.photoViewer = { id: "ph", index: 1, progress: 1, chrome: false, dismiss: clamp01(t / frameworkMotion.photoViewer) };
+      frame.messages.push(...photoMessages());
+      frame.photoViewer = { id: "ph1", index: 1, progress: 1, chrome: false, dismiss: clamp01(t / frameworkMotion.photoViewer) };
       break;
     case "audio":
       frame.messages.push({ id: "au1", direction: "incoming", minutesAgo: 2, text: "Audio message", audio: { duration: 9 } });
@@ -810,6 +979,9 @@ export function frameAt(id: ScenarioId, milliseconds: number): SceneFrame {
       break;
     case "failed":
       frame.messages.push({ id: "fx", direction: "outgoing", minutesAgo: 1, text: "This one did not go through.", failed: true });
+      break;
+    case "rich-link-preview":
+      frame.messages.push({ id: "rich-link", direction: "incoming", text: "https://www.visitdolomites.com/", minutesAgo: 1, link: { url: "https://www.visitdolomites.com/", host: "visitdolomites.com", title: "A weekend in the Dolomites", image: "/showcase/lake.jpg" } });
       break;
     case "link-preview":
       frame.messages.push({ id: "link", direction: "incoming", text: "https://ui.shadcn.com", minutesAgo: 1, link: { url: "https://ui.shadcn.com", host: "ui.shadcn.com", title: "Build your component library." } });
@@ -926,6 +1098,20 @@ export function frameAt(id: ScenarioId, milliseconds: number): SceneFrame {
     case "new-message-sheet":
       frame.screen = "new-message";
       frame.screenTransition = { from: "list", progress: clamp01(t / unverifiedMotion.sheet) };
+      break;
+    // The sheet is leaving, so the shell is already on the list with the sheet still over it: that is
+    // `screen: "list"` arriving `from: "new-message"`, which is the shell's `dismiss`. The recording
+    // was driven the same way round — an `sms:` deep link sent to a device with the sheet up.
+    case "sheet-dismiss":
+      frame.screen = "list";
+      frame.screenTransition = { from: "new-message", progress: clamp01(t / nativeMotion.sheetDismiss) };
+      break;
+    // The second presentation, which is not a timeline: `progress: 1` because there is nothing to
+    // seek, and `represent` because a single frame cannot tell the shell that this sheet has been up
+    // before — and that is the whole difference between the animated present and this.
+    case "sheet-represent":
+      frame.screen = "new-message";
+      frame.screenTransition = { from: "list", progress: 1, represent: true };
       break;
     // The query is empty for both transitions on purpose: the recordings were made by pressing ⌘F on
     // an empty field, so at t = 0 the pill still shows the mic and the placeholder, and the clear

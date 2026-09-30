@@ -29,7 +29,12 @@ import { fontStack } from "@/registry/imessage/tokens";
  * no "Recents" label, no Albums button, no camera tile, no search field, no send or count button,
  * and no selection badge on any tile.** The last one is a measurement in its own right and this file
  * relies on it: an unselected tile in this picker carries no empty ring, unlike the Photos app's
- * select mode, so the badge is only ever drawn on a selected tile.
+ * select mode, so the badge is only ever drawn on a selected tile. The device confirms that directly -
+ * in `scratchpad/photostates/state0.png` one tile of twelve is picked and only that tile has a badge.
+ *
+ * That list of absences is true **of the collapsed detent**. Every one of them except the camera tile
+ * and the search field turns out to exist in the expanded one: a title, a Clear button, a
+ * Photos/Collections segmented control and a blue confirm button. See `expandedDetent`.
  *
  * The capture shows two rows with empty white under them. That is the library, not the layout: the
  * simulator ships six sample photos. The grid scrolls vertically; at this panel height a third row
@@ -44,10 +49,10 @@ import { fontStack } from "@/registry/imessage/tokens";
  * | Top corners | superellipse n 2.204, R **39.0** (rms 0.84 px) | 109 sub-pixel boundary points, top-right |
  * | Bottom corners | superellipse n 2.204, R **57.5833** (rms 0.90 px) | 183 points, bottom-left |
  * | Shadow / dim | none | the blurred backdrop reads a flat 244-246 right up to the panel edge |
- * | Grid gap | 1.6207 (4.862 px) | three independent seam fits: 4.870, 4.859 across, 4.858 down |
- * | Tile | 129.364 x 129.5633 | columns average 388.09 device px, rows 388.69 |
+ * | Grid gap | **1.6667** (5 px exactly) | superseded: see the device note under `gap` |
+ * | Tile | **129.3333** x 129.5325 | follows from the 5 px gap; the capture's own column average was 388.09 px against this 388.0 |
  * | Tile corner | **2.3** | see below |
- * | Grabber | **35 x 4.6667**, top **5.0**, centred | see below |
+ * | Grabber | **36 x 5**, top **5.0**, centred | superseded: see the device note under `grabber` |
  * | Composer above it | field bottom 463.6667, so 21.3333 of backdrop above the panel | the composer stays *full*: `+`, "iMessage" and the mic are all still drawn, unlike the plus-menu state |
  *
  * The plain circle is fitted separately, because it is what the panel actually renders (see the
@@ -55,24 +60,20 @@ import { fontStack } from "@/registry/imessage/tokens";
  * 1.27 px). The bottom corner is the device's own corner made concentric with the panel: 57.58 + 5.33
  * = 62.9, the iPhone 17 Pro display radius.
  *
- * **The grabber, re-measured.** A 2D area fit over 2640 pixels of the capture (a rounded rect whose
- * five parameters are solved at once against the sub-pixel coverage, with the local background
- * modelled per column between the clean rows above and below the pill) puts it at
- * **105.000 x 14.000 device px**, its top **15.000 px** below the panel top, centred on x 603.000
- * against a panel centre of 603.000, rms 0.028 of coverage. That is 35 x 4.6667 at top 5.0. The
- * width and the height hold at exactly 105.000 and 14.000 whatever corner radius the fit is given,
- * and rows 1469 and 1484 carry *zero* ink at every x sampled, so there is no anti-aliased rim to
- * subtract: the pill is 14 device px tall, not 15. The corner is shallow to fit (rms 0.0255 at 6.4
- * device px, 0.0307 at 7.0); a capsule, radius = height / 2 = 2.3333, sits in that band and is what
- * the framework draws, so that is what this file uses.
+ * **The grabber went 36 x 5 -> 35 x 4.6667 -> 36 x 5, and the last move is the one that sticks.**
+ * A 2D area fit over 2640 pixels of *this* capture (five parameters solved at once against sub-pixel
+ * coverage, with the background modelled per column) read the pill at **105.000 x 14.000 device px**
+ * and that is what this file carried. It was fitting a `_UILumaTrackingBackdropView` **over
+ * photographs**: the grid is flush to the panel's top edge here, so the pill has a picture behind it,
+ * its own colour changes across it, and the fit has to invent the background before it can find the
+ * ink.
  *
- * This supersedes the `-[_UIGrabber intrinsicContentSize]` value of `{36, 5}` that this file and
- * `sticker-picker.tsx` used to carry. A Catalyst probe confirms the framework number is real -
- * `_UIGrabber` is 36 x 5 at `cornerRadius` 2.5 with two full-bleed subviews that inset nothing, and
- * `-[CKAppGrabberView layoutSubviews]` places one at **y 5.0**, horizontally centred, in a
- * 391.3333-wide header - so the *top* agrees with the capture exactly. The size does not: 36 x 5 at
- * 3x is 108 x 15 device px against a measured 105 x 14, and 105/108 = 0.972 while 14/15 = 0.933, so
- * it is not a scaled `_UIGrabber` either. Per this repo's rule the capture wins.
+ * The expanded detent puts the same pill on the panel's flat fill, and there it needs no fit at all -
+ * see `grabber` below for the row-by-row numbers. It is **108 x 15 device px** with hard edges on all
+ * four sides, i.e. exactly `-[_UIGrabber intrinsicContentSize]` {36, 5} at its `cornerRadius` 2.5, and
+ * `-[CKAppGrabberView layoutSubviews]`'s y 5.0 was always corroborated. Three sources agree against
+ * one fit over a photograph, so the framework number is restored and 105 x 14 is recorded as what a
+ * vibrancy composite measures rather than as the layer's box.
  *
  * **The tile corner, re-measured.** Nine tile corners that meet clean white (the bottom row's
  * bottom edges and both sides of every gap junction) were each fitted with the same 2D coverage
@@ -95,8 +96,14 @@ import { fontStack } from "@/registry/imessage/tokens";
  * | badge ink **O 22.0**, white rim **1.5449**, blue disc **O 18.9102**, fill **#0088ff** | the badge is a `UIImage`, and its `CGImage` is 52 x 52 at scale 2, so it is read at that native size rather than upscaled. The alpha edge is hard: the disc spans exactly 44 of the 52 px in both axes and in both centre rows and columns. The rim integrates to 3.0898 px of white coverage inward from that edge; the blue is exactly `rgb(0 136 255)`, the kit's measured iOS blue |
  * | check stroke **1.4248**, vertices (-4.408, 0.941) (-1.334, 4.670) (3.957, -3.645) from the badge centre | a seven-parameter least-squares fit of a round-capped, round-joined polyline against the white coverage of 928 pixels of that same native image, supersampled 8 x 8: rms 0.0125 of coverage |
  *
- * Because the badge sits 3.5 inside a 26 box whose ink is 22, the visible disc is **5.5** from the
- * tile's trailing and bottom edges, which is what `badge.inset` records.
+ * **Superseded by a device capture — see `badge` below.** The reasoning that used to close this
+ * section ("the badge sits 3.5 inside a 26 box whose ink is 22, so the visible disc is 5.5 from the
+ * tile's trailing and bottom edges") is arithmetic over two readings that do not belong to this
+ * sheet. `scratchpad/photostates/state0.png` shows a selected tile in the Messages picker with the
+ * badge over a flat magenta fill, and it measures **ink O 23.00, blue disc O 20.00, rim 1.50, inset
+ * 13 device px = 4.3333** - none of which the {26, 26} / 3.5 pair produces. `PUPhotosGridCell` is the
+ * Photos *app's* grid cell; this is not that grid. The two framework rows above are kept because they
+ * are true of what they name, not because they describe this badge.
  *
  * The search row, if the expanded detent draws one, reuses `sticker-picker.tsx`'s framework numbers
  * (row 44, field 34, SF Medium 17, `tertiarySystemFill`), which this file's own probe re-read:
@@ -148,32 +155,106 @@ export const photoPickerMetrics = {
   roundTopRadius: 36.1667,
   roundBottomRadius: 53.5,
   columns: 3,
-  gap: 1.6207,
-  /** Implied by width, columns and gap; quoted because the capture measures it directly. */
-  tileWidth: 129.364,
+  /**
+   * **Exactly 5 device px.** The collapsed capture's three seam fits averaged 1.6207 (4.862 px), but
+   * they were fitting a seam between two photographs. `scratchpad/photostates/state0.png` catches the
+   * same grid in the expanded detent with flat-colour tiles, and the seams there have **no
+   * anti-aliasing at all**: at rows 600, 900, 1000, 1100, 1400 and 1500 the white run is x 399-403
+   * and x 802-806, five pixels each, with x 398 and x 404 fully saturated tile colour on either side.
+   * A gap that wide cannot be 4.862 px, so the value is **5 px = 1.6667 pt** and the earlier fit was
+   * reading the photographs' own edges into the seam.
+   */
+  gap: 1.6667,
+  /**
+   * Implied by width, columns and gap: (1174 - 2 x 5) / 3 = 388.0 device px. The collapsed capture's
+   * own column average was 388.09, so the two agree to 0.09 px and this is the arithmetic one.
+   */
+  tileWidth: 129.3333,
   /**
    * Tiles are not quite square in the capture, and both axes are measured over 100+ boundary points:
    * columns average 388.09 device px, rows 388.69. `tileAspect` is that ratio, so a second row lands
    * on the measured 2237.24 instead of 1.2 px above it.
+   *
+   * The expanded detent in `scratchpad/photostates/state0.png` reads the same lean the other way and
+   * smaller: rows there are a hard 399 px tall on a 404 px pitch, columns 399/398/399 on a 403 px
+   * pitch, so height / width is 1.00084 against this file's 1.00154. Both are inside one pixel of
+   * frame rounding - the layout takes a fractional tile and snaps each frame to the device grid, which
+   * is why the three columns are not even the same width as each other - so neither reading falsifies
+   * the other and the fitted one is kept. What the expanded capture does settle is that the tile is
+   * *meant* to be square and the lean is rounding, not design.
    */
   tileHeight: 129.5633,
   tileAspect: 129.364 / 129.5633,
   /** Median of nine 2D corner fits (6.55-7.97 device px, median 6.87, weighted mean 6.94). */
   tileRadius: 2.3,
   /**
-   * 2D area fit over 2640 capture pixels: 105.000 x 14.000 device px at top 15.000, centred.
-   * `radius` is the capsule the shallow corner fit brackets (6.4-7.0 device px).
+   * **Re-measured on the device, over flat white, and it is the framework's own `{36, 5}` after all.**
+   *
+   * `scratchpad/photostates/state0.png` catches this sheet in its *expanded* detent, where the pill
+   * sits on the panel's plain fill instead of on the photographs the collapsed capture puts under it.
+   * Over white it has **no anti-aliased rim at all**: row 230 is #ffffff, rows 231-245 are a flat
+   * (197,197,198), row 246 is #ffffff again, and the same holds across the seam at x 548/549 and
+   * 656/657. Ink extents row by row are 100, 104, 106, 106, then 108 px for rows 235-242, then back
+   * down 106, 106, 104, 100 - the profile of a capsule of radius height / 2, which is what
+   * `_UIGrabber`'s `cornerRadius` 2.5 draws.
+   *
+   * So the pill is **108 x 15 device px = 36 x 5 pt**, its top 15 px (5.0 pt) below the panel's top
+   * edge (216 px, itself a hard edge), centred on 602.5 against a screen centre of 603.
+   *
+   * This supersedes the 35 x 4.6667 that a 2D area fit read off the collapsed capture. That fit was
+   * careful, but it was fitting a **luma-tracking vibrancy view over a photograph**, where the pill's
+   * own colour changes across it and the fit has to model the background per column; here the pill is
+   * over one flat colour with hard edges and the box is read directly. Three sources now agree -
+   * `-[_UIGrabber intrinsicContentSize]` {36, 5}, its `cornerRadius` 2.5, and this capture - against
+   * one fit over a photograph, so the framework number wins and the earlier 105 x 14 is recorded here
+   * as what a vibrancy composite measures rather than as the layer's box.
+   *
+   * The pill's colour came off the same rows - (197,197,198) on a ground that is #ffffff for at least
+   * nine pixels on every side, so over white the fill is (255 - 197) / 255 = 0.227 of black. That
+   * lives on `--ios-pp-grabber` with the rest of the palette rather than here, so there is one source
+   * for it; see the note above `vars`.
    */
-  grabber: { width: 35, height: 4.6667, radius: 2.3333, top: 5 },
+  grabber: { width: 36, height: 5, radius: 2.5, top: 5 },
   /**
-   * `box`, `inset`, `size`, `rim` and `checkStroke` come from PhotosUICore through a Catalyst probe,
-   * not from a capture: the 26 pt box is `+[PXSelectionBadgeUIViewTile preferredSize]`, the 3.5 pt
-   * cell inset is `-[PUPhotosGridCell layoutSubviews]`, and the ink is measured off the badge's own
-   * `UIImage` at its native 52 x 52 at scale 2. `inset` is the visible disc's distance from the tile
-   * edge: the 3.5 pt frame inset plus the 2 pt margin the 22 pt ink leaves inside a 26 pt box.
-   * @unverified fontSize - nothing shows a numbered badge in this picker.
+   * **Measured on the device**, off the numbered badge in `scratchpad/photostates/state0.png`: a
+   * selected tile whose flat magenta fill puts the badge's white rim against a single known colour,
+   * so both edges are read to a hundredth of a pixel rather than fitted.
+   *
+   * Through the badge's centre row (y 915) and centre column (x 351), with coverage taken in the
+   * channel of largest contrast:
+   *
+   * | | device px | pt |
+   * |---|---|---|
+   * | outer white ink | 316.896 - 385.906 across, 881.230 - 950.225 down: **69.01 / 68.99** | **23.00** |
+   * | blue disc | 321.396 - 381.400 across, 885.733 - 945.729 down: **60.00 / 60.00** | **20.00** |
+   * | white rim | (69.0 - 60.0) / 2 = 4.5 | **1.50** |
+   * | ink inset from the tile's trailing edge | 399 - 385.906 = 13.09 | 4.365 |
+   * | ink inset from the tile's bottom edge | 963 - 950.225 = 12.78 | 4.258 |
+   *
+   * The two insets agree to 0.3 px on **13 device px = 4.3333 pt**, and the fill samples exactly
+   * `rgb(0 136 255)`, which is the blue the Catalyst probe already read. The blue disc is not a field
+   * of its own because `size - 2 x rim` already is it, to the measurement: 23 - 3 = **20.00**.
+   *
+   * **What this overturns.** The probe's `+[PXSelectionBadgeUIViewTile preferredSize]` {26, 26} and
+   * `-[PUPhotosGridCell layoutSubviews]` 3.5 pt cell inset are real, but composing them - 3.5 plus the
+   * 2 pt margin a 22 pt ink leaves inside a 26 pt box - gives an ink of 22.0 at an inset of 5.5, and
+   * the device draws **23.0 at 4.3333**. The measured pair does not decompose into that {26, 26} / 3.5
+   * pair at all (a 23 ink in a 26 box would sit at 2.833, in a 24 box at 3.833), so the composition was
+   * the error, not either reading: `PUPhotosGridCell` is the *Photos app's* grid cell, and this sheet
+   * is not it. The capture wins, and `box` is dropped because nothing here measures a box.
+   *
+   * **The badge in this picker is numbered, not a checkmark.** The device draws "1" in the disc on the
+   * first-picked tile, which is why `ordered` now defaults to true - see the prop.
+   *
+   * `fontSize` 13 is no longer a guess either. Masking the white ink to a circle of radius 26 px inside
+   * the disc, the device's "1" measures **12 x 27 device px** and ours at 13 pt semibold measures
+   * **13 x 27** - the same 27 px (9.0 pt) cap height, one pixel apart on the flag. What is still off by
+   * a hair is where the glyph sits: the device centres its ink 0.27 px *below* the badge centre and
+   * ours lands 1.16 px above it, a 1.4 px (0.47 pt) lift that comes out of `lineHeight: 1` against SF's
+   * own metrics. Left as it is rather than nudged, because a hard-coded offset would be fitting one
+   * digit's ink box rather than the layout rule.
    */
-  badge: { box: 26, size: 22, inset: 5.5, rim: 1.5449, checkStroke: 1.4248, fill: "#0088ff", fontSize: 13 },
+  badge: { size: 23, inset: 4.3333, rim: 1.5, checkStroke: 1.4248, fill: "#0088ff", fontSize: 13 },
   /**
    * Where the panel sits relative to the composer in the capture, which nothing else records: the
    * composer's field ends at 463.6667 and the panel starts at 485, and the composer keeps its `+`,
@@ -182,8 +263,42 @@ export const photoPickerMetrics = {
    */
   composer: { fieldBottom: 463.6667, gap: 21.3333 },
   /**
-   * `collapsed` is the capture's own height. `expanded` is chosen so the panel's top lands on 165,
-   * clear of the nav bar (whose name pill ends at 148.33), and `handle` is a touch-sized strip.
+   * **The expanded detent, measured on the device at last** — from `scratchpad/photostates/state0.png`,
+   * the Messages picker dragged open with one photo picked. Everything in `detents.expanded` and in
+   * `header` above was invented against a collapsed-only capture, and almost none of it survives.
+   *
+   * | Part | Device | What this file draws today |
+   * |---|---|---|
+   * | panel top | **72.0** (216 px, a hard edge) | 165 |
+   * | side and bottom inset | **0** — the grid runs to x 0 and x 1205, and the panel reaches the screen's bottom | 5.3333 on all three |
+   * | grid top | **188.0** (564 px) | the panel top |
+   * | header height | **116.0** (panel top to grid top) | 76-ish of title + search row |
+   * | grabber | unchanged: 36 x 5 at top 5.0, centred | same |
+   * | tile | 398.667 x 399 device px = **132.889 x 133.0** | 129.33 square-ish |
+   * | gap | 5 device px, same as collapsed | same |
+   * | search row | **none** | a 44 pt row with a 34 pt field |
+   *
+   * The header holds, top to bottom: the grabber; a centred title, "Select up to 20 items." (dark ink
+   * spanning y 313-348 device px); then one row of controls at y 380-507 — a white "Clear" capsule on
+   * the left starting at x 48, a "Photos | Collections" segmented control in the middle, and a **blue
+   * circular confirm button** on the right carrying a white check. That button measures **O 131.3
+   * device px = 43.8 pt** (its edge is soft over ~3 px, so 44 is inside the reading), centred on
+   * (1091.5, 443.9) px = (363.83, 147.97) pt, with its right edge 48.4 px = 16.1 pt inside the screen.
+   *
+   * **Why `detents.expanded` was not just changed to match.** The height is the smallest part of this:
+   * the device's expanded detent is a different *surface*, with a title, a Clear button, a two-way
+   * segmented control and a confirm button that this component does not draw, and whose grid is full
+   * bleed rather than inset. Moving the panel top from 165 to 72 without any of that would put 116 pt
+   * of empty white above the grid and call it measured. So the numbers are recorded here as the spec
+   * for building that state, and the invented ones above are left flagged as invented until someone
+   * does. What *is* fixed from this capture is everything that the two detents share: the grabber, the
+   * gap, and the selection badge.
+   */
+  expandedDetent: { top: 72, inset: 0, gridTop: 188, headerHeight: 116, tileWidth: 132.889, tileHeight: 133, confirmSize: 43.8, confirmCentre: { x: 363.83, y: 147.97 }, confirmInset: 16.1 },
+  /**
+   * `collapsed` is the capture's own height. `expanded` is still the invented one, and it is now known
+   * to be wrong - see `expandedDetent` below for what the device does and why this was not simply
+   * swapped for it.
    * @unverified expanded, handle
    */
   detents: { collapsed: 383.6667, expanded: 703.6667, handle: 24 },
@@ -191,6 +306,8 @@ export const photoPickerMetrics = {
    * The expanded detent's header. Every number here is judgement except the search row, which is
    * `sticker-picker.tsx`'s framework pair (`-[UISearchBar sizeThatFits:]` 44 and
    * `-[UISearchTextField sizeThatFits:]` 34) at SF Medium 17.
+   *
+   * The device's expanded header is **not this**: it has no search row at all. See `expandedDetent`.
    * @unverified everything except rowHeight and fieldHeight
    */
   header: { titleTop: 16, titleSize: 17, actionSize: 17, searchTop: 8, rowHeight: 44, fieldHeight: 34, fieldRadius: 17, fieldSize: 17, inset: 12, bottom: 8 },
@@ -472,12 +589,20 @@ function useHostPlatform(root: RefObject<HTMLElement | null>, override?: PhotoPi
 /**
  * Light values are measured off the capture, except the two `tertiarySystemFill` alphas, which are
  * `+[UIColor tertiarySystemFillColor]` read in both styles (that family does come back with the iOS
- * values under Catalyst). The dark panel, tile and grabber are unverified: see the file comment for
- * why the probe cannot settle them. They are custom properties so a `.dark` ancestor flips the panel
- * without the caller passing anything.
+ * values under Catalyst). The dark panel and tile are unverified: see the file comment for why the
+ * probe cannot settle them. They are custom properties so a `.dark` ancestor flips the panel without
+ * the caller passing anything.
+ *
+ * `--ios-pp-grabber` is no longer one of the unverified ones **in light**. In the expanded detent the
+ * pill sits on the panel's own flat fill, and `scratchpad/photostates/state0.png` reads it at
+ * (197,197,198) with #ffffff on every side of it for at least nine pixels - so over white the fill is
+ * (255 - 197) / 255 = **0.227** of black, not the 0.3 this file used to carry, which composites to
+ * 178.5 and is 18.5/255 too dark. The blue channel wants 0.222 rather than 0.227, a 1/255 lean that a
+ * single alpha cannot carry and that is not worth a second token. The **dark** value is still a
+ * guess: no dark capture of this panel exists.
  */
 const vars =
-  "[--ios-pp-panel:#ffffff] [--ios-pp-grabber:rgba(0,0,0,0.3)] [--ios-pp-tile:#e9e9eb] [--ios-pp-badge:#0088ff] [--ios-pp-glyph:#ffffff] [--ios-pp-label:#000000] [--ios-pp-muted:#8a8a8e] [--ios-pp-field:rgba(118,118,128,0.12)] " +
+  "[--ios-pp-panel:#ffffff] [--ios-pp-grabber:rgba(0,0,0,0.227)] [--ios-pp-tile:#e9e9eb] [--ios-pp-badge:#0088ff] [--ios-pp-glyph:#ffffff] [--ios-pp-label:#000000] [--ios-pp-muted:#8a8a8e] [--ios-pp-field:rgba(118,118,128,0.12)] " +
   "dark:[--ios-pp-panel:#1c1c1e] dark:[--ios-pp-grabber:rgba(255,255,255,0.3)] dark:[--ios-pp-tile:#2c2c2e] dark:[--ios-pp-badge:#0088ff] dark:[--ios-pp-glyph:#ffffff] dark:[--ios-pp-label:#f4f3f4] dark:[--ios-pp-muted:#97979d] dark:[--ios-pp-field:rgba(118,118,128,0.24)]";
 
 /** Keeps a hidden string in the accessible name without depending on the consumer's utility classes. */
@@ -539,7 +664,12 @@ export type PhotoPickerProps = Omit<ComponentProps<"div">, "onSelect" | "childre
   onSelectionChange?: (selected: string[], photo: PhotoPickerPhoto, isSelected: boolean) => void;
   /** False keeps one tile chosen at a time. */
   multiple?: boolean;
-  /** Number the badges in pick order, the way an ordered multi-select does. */
+  /**
+   * Number the badges in pick order. **Defaults to true, because the device does it**: the Messages
+   * picker in `scratchpad/photostates/state0.png` draws "1" inside the badge on the first-picked tile,
+   * not a checkmark. Pass `false` for the plain check badge, which is what the Photos app's own select
+   * mode draws and what `PhotoPickerSelectionBadge` still renders.
+   */
   ordered?: boolean;
   columns?: number;
   /** Panel box. Defaults are the capture's; the tile size follows from `width`, `columns` and the gap. */
@@ -621,7 +751,7 @@ export function PhotoPicker({
   defaultSelected,
   onSelectionChange,
   multiple = true,
-  ordered = false,
+  ordered = true,
   columns = photoPickerMetrics.columns,
   width = photoPickerMetrics.width,
   height = photoPickerMetrics.height,
@@ -1075,7 +1205,16 @@ export function PhotoPicker({
                 >
                   {ordered ? (
                     <>
-                      <span className="absolute inset-0 rounded-full" style={{ background: "var(--ios-pp-badge)", boxShadow: `0 0 0 ${m.badge.rim}px var(--ios-pp-glyph)` }} />
+                      {/*
+                        The rim is drawn *inside* the box, not as a spread shadow outside it, so the
+                        numbered badge and the check badge are the same circle: `size` is the outer
+                        white ink the device measures at 23.0, and the blue disc is that less the rim
+                        on each side, which lands on the measured 20.0. The old spread shadow made the
+                        blue disc the full `size` and pushed the ink out to size + 2 x rim, so the two
+                        branches drew badges of different diameters from the same constant.
+                      */}
+                      <span className="absolute inset-0 rounded-full" style={{ background: "var(--ios-pp-glyph)" }} />
+                      <span className="absolute rounded-full" style={{ inset: m.badge.rim, background: "var(--ios-pp-badge)" }} />
                       <span className="relative" style={{ color: "var(--ios-pp-glyph)", fontSize: m.badge.fontSize, fontWeight: 600, lineHeight: 1 }}>
                         {isSelected ? order + 1 : ""}
                       </span>

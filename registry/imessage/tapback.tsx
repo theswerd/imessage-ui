@@ -152,6 +152,20 @@ export type BalloonGeometry = { main: number; medium: number; small: number; med
  * put the trail at Ø8.57 and Ø4.12, 6% and 3% larger. The heart ink (rows y 103–129, columns x 259–288)
  * measures 14.64 × 12.96 with its centre 0.53 below the circle's, of which 0.07 comes from the glyph
  * box itself, so the box is nudged 0.46.
+ *
+ * **ChatKit agrees with both captures, once its rim is taken off.** Read out of the live framework on
+ * 2026-09-10 with the Catalyst probe in `references/tapback-details.md` (`CKUIBehaviorPhone` and
+ * `CKUIBehaviorMac`, one process, no scaling):
+ * `-[CKUIBehavior messageAcknowledgmentTranscriptBalloonSize]` is **{36, 36} on iPhone and {29, 29} on
+ * Mac**, against the Ø34 and Ø28 measured here. The difference is exactly the rim `aggregateStack`
+ * below already documents from the artwork — `AcknowledgmentStackBackground-*` is the silhouette 1.0
+ * (phone) / 0.5 (Mac) larger on every side — so 34 + 2×1 = 36 and 28 + 2×0.5 = 29. The framework sizes
+ * the balloon *view*; `main` is the ink inside it. Two independent readings, no disagreement.
+ *
+ * `-[CKUIBehavior messageAcknowledgmentTranscriptGlyphInset]` is **4 on iPhone, 3 on Mac**, so the
+ * glyph's image box is 36 − 8 = 28 and 29 − 6 = 23. `glyph` is the heart's *ink* inside that box
+ * (18.34 of 28, 14.64 of 23), which is what a capture can see; the two are not the same number and
+ * neither contradicts the other.
  */
 export const balloonGeometry: Record<Platform, BalloonGeometry> = {
   ios: { main: 34, medium: 10.4, small: 5, mediumOffset: [-10.82, 15.2], smallOffset: [-17.49, 23.46], glyph: 18.34, glyphOffsetY: 0.8 },
@@ -171,8 +185,28 @@ export const balloonGeometry: Record<Platform, BalloonGeometry> = {
  * (86.92 px) sits 22.05 above the body top (131.01 px) and its leading edge (245.46 px) 11.79 outside
  * the body's leading edge (269.03 px).
  *
- * `message-bubble` carries its own copy of these numbers and is the one that actually places a
- * balloon; its macOS row still reads { 19.6, −19.1, −9.9 } and is 7.8 / 3.0 / 1.9 pt off.
+ * `message-bubble` carries its own copy of these numbers as `reactionOffsets` and is the one that
+ * actually places a balloon — for a photo, a link card, an audio row and a bare emoji as well as for
+ * a text bubble. Its macOS row used to read { 19.6, −19.1, −9.9 }, 7.8 / 3.0 / 1.9 pt off; it now
+ * carries this pair, and `tests/unit/tapback-slot.test.ts` holds the three copies together.
+ *
+ * **ChatKit carries a position too, and it does NOT reproduce these captures.**
+ * `-[CKUIBehavior messageAcknowledgmentTranscriptBalloonRelativePosition]` is {12.5, −15.5} on iPhone
+ * and {9, −13} on Mac (same probe as `balloonGeometry`). Four readings of what that point could be
+ * were tried against the iOS capture, whose Ø34 ink sits at (−13.85, −27.39) from the body's top
+ * corner, i.e. ink centre (+3.15, −10.39) and 36-pt view centre the same:
+ *
+ * | reading of the point                          | ink left | ink top | capture |
+ * |-----------------------------------------------|----------|---------|---------|
+ * | view centre at corner + (−12.5, −15.5)        | −29.50   | −32.50  | −13.85 / −27.39 |
+ * | view centre at corner + (+12.5, −15.5)        |  −4.50   | −32.50  | −13.85 / −27.39 |
+ * | view top-left at corner + (−12.5, −15.5)      | −11.50   | −14.50  | −13.85 / −27.39 |
+ * | 12.5 of the 36-wide view overlapping the body | −22.50   | —       | −13.85 |
+ *
+ * None lands. The capture is what this kit keeps (two captures, outgoing and incoming, agreeing to
+ * 0.16 / 0.34 pt), and the framework number is recorded here rather than used. Whatever coordinate
+ * space it is in, it is not "offset from the balloon's top corner in points", and nothing was found
+ * that says which space it is.
  */
 export const balloonSlot: Record<Platform, { marginTop: number; top: number; side: number }> = {
   ios: { marginTop: 28, top: -27.39, side: -13.85 },

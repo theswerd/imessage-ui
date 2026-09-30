@@ -4,7 +4,7 @@ A voice message bubble with a waveform, play control, and a seekable position.
 
 ## Requirements
 
-React 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor.
+React 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor. Standalone primitives need PaletteStyle inside a data-im-platform wrapper; full conversation and app shells include it. Setup: http://localhost:3100/onboard.md
 
 ## Install
 
@@ -15,7 +15,39 @@ npx shadcn@latest add http://localhost:3100/r/message-audio.json
 ## Usage
 
 ```tsx
-Install the full collection, then import the components you need from @/components/imessage/.
+"use client";
+
+import { useRef, useState } from "react";
+import { MessageAudio } from "@/components/message-ui/message-audio";
+
+export function AudioExample({ src }: { src: string }) {
+  const audio = useRef<HTMLAudioElement>(null);
+  const [duration, setDuration] = useState(0);
+  const [position, setPosition] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [error, setError] = useState("");
+
+  return <>
+    <audio ref={audio} src={src} preload="metadata"
+      onLoadedMetadata={e => setDuration(e.currentTarget.duration)}
+      onTimeUpdate={e => setPosition(e.currentTarget.currentTime)}
+      onPlay={() => setPlaying(true)}
+      onPause={() => setPlaying(false)}
+      onEnded={() => setPlaying(false)}
+      onError={() => { setPlaying(false); setError("Audio unavailable."); }} />
+    <MessageAudio duration={duration} position={position} playing={playing}
+      onSeek={seconds => { if (audio.current) audio.current.currentTime = seconds; }}
+      onPlayChange={async next => {
+        if (!audio.current) return;
+        setError("");
+        if (!next) return audio.current.pause();
+        if (audio.current.ended) audio.current.currentTime = 0;
+        try { await audio.current.play(); }
+        catch { setError("Playback failed. Please try again."); }
+      }} />
+    {error && <p role="alert">{error}</p>}
+  </>;
+}
 ```
 
-Components render UI only. Supply your own message data, persistence, uploads, and send handlers. No iMessage or Apple service connection is included.
+Components render UI only. Supply your own message data, persistence, uploads, and send handlers. Connect your own messaging service.

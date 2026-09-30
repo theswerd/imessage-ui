@@ -1,18 +1,18 @@
 {
   "$schema": "https://ui.shadcn.com/schema/registry.json",
-  "name": "imessage",
+  "name": "message-ui",
   "homepage": "http://localhost:3100",
   "items": [
     {
       "name": "platform",
       "type": "registry:ui",
       "title": "Platform context",
-      "description": "Tells every iMessage component whether to render iOS 26 or macOS 26 metrics.",
+      "description": "Tells every Message UI component whether to render iOS 26 or macOS 26 metrics.",
       "files": [
         {
           "path": "registry/imessage/platform.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/platform.tsx"
+          "target": "components/message-ui/platform.tsx"
         }
       ]
     },
@@ -22,13 +22,13 @@
       "title": "Design tokens",
       "description": "Measured colors, screen-space bubble gradients, type scale, and spacing for iOS and macOS.",
       "registryDependencies": [
-        "@imessage/platform"
+        "@message-ui/platform"
       ],
       "files": [
         {
           "path": "registry/imessage/tokens.ts",
           "type": "registry:ui",
-          "target": "components/imessage/tokens.ts"
+          "target": "components/message-ui/tokens.ts"
         }
       ]
     },
@@ -41,7 +41,7 @@
         {
           "path": "registry/imessage/bubble-shape.ts",
           "type": "registry:ui",
-          "target": "components/imessage/bubble-shape.ts"
+          "target": "components/message-ui/bubble-shape.ts"
         }
       ]
     },
@@ -54,7 +54,7 @@
         {
           "path": "registry/imessage/use-screen-space.ts",
           "type": "registry:ui",
-          "target": "components/imessage/use-screen-space.ts"
+          "target": "components/message-ui/use-screen-space.ts"
         }
       ]
     },
@@ -64,15 +64,15 @@
       "title": "Message bubble",
       "description": "Native iOS 26 and macOS 26 bubbles: traced outline and tail, screen-space gradient fill, status, edited, reactions, and emoji-only messages.",
       "registryDependencies": [
-        "@imessage/bubble-shape",
-        "@imessage/platform",
-        "@imessage/tokens"
+        "@message-ui/bubble-shape",
+        "@message-ui/platform",
+        "@message-ui/tokens"
       ],
       "files": [
         {
           "path": "registry/imessage/message-bubble.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/message-bubble.tsx"
+          "target": "components/message-ui/message-bubble.tsx"
         }
       ]
     },
@@ -82,14 +82,14 @@
       "title": "Tapback",
       "description": "The native reaction balloon: six classic Tapbacks and custom emoji, own and others' colors, counts, and the selected state.",
       "registryDependencies": [
-        "@imessage/platform",
-        "@imessage/tokens"
+        "@message-ui/platform",
+        "@message-ui/tokens"
       ],
       "files": [
         {
           "path": "registry/imessage/tapback.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/tapback.tsx"
+          "target": "components/message-ui/tapback.tsx"
         }
       ]
     },
@@ -99,16 +99,16 @@
       "title": "Tapback details",
       "description": "The surface \"Tapback Details\u2026\" opens: who reacted and with what, as a sheet on iOS and an anchored popover on macOS, with your own reaction removable.",
       "registryDependencies": [
-        "@imessage/avatar",
-        "@imessage/platform",
-        "@imessage/tapback",
-        "@imessage/tokens"
+        "@message-ui/avatar",
+        "@message-ui/platform",
+        "@message-ui/tapback",
+        "@message-ui/tokens"
       ],
       "files": [
         {
           "path": "registry/imessage/tapback-details.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/tapback-details.tsx"
+          "target": "components/message-ui/tapback-details.tsx"
         }
       ]
     },
@@ -118,15 +118,15 @@
       "title": "Typing indicator",
       "description": "The native typing bubble with its three staggered dots and trailing circles.",
       "registryDependencies": [
-        "@imessage/bubble-shape",
-        "@imessage/platform",
-        "@imessage/tokens"
+        "@message-ui/bubble-shape",
+        "@message-ui/platform",
+        "@message-ui/tokens"
       ],
       "files": [
         {
           "path": "registry/imessage/typing-indicator.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/typing-indicator.tsx"
+          "target": "components/message-ui/typing-indicator.tsx"
         }
       ]
     },
@@ -136,14 +136,14 @@
       "title": "Date separator",
       "description": "Date headers: the iOS two-line header with its service line, the mid-list one-liner, and the macOS variant.",
       "registryDependencies": [
-        "@imessage/platform",
-        "@imessage/tokens"
+        "@message-ui/platform",
+        "@message-ui/tokens"
       ],
       "files": [
         {
           "path": "registry/imessage/date-separator.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/date-separator.tsx"
+          "target": "components/message-ui/date-separator.tsx"
         }
       ]
     },
@@ -153,14 +153,14 @@
       "title": "Link preview",
       "description": "The measured compact link card, plus a rich variant with an image, title and host.",
       "registryDependencies": [
-        "@imessage/platform",
-        "@imessage/tokens"
+        "@message-ui/platform",
+        "@message-ui/tokens"
       ],
       "files": [
         {
           "path": "registry/imessage/link-preview.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/link-preview.tsx"
+          "target": "components/message-ui/link-preview.tsx"
         }
       ]
     },
@@ -170,14 +170,14 @@
       "title": "Attachment",
       "description": "The document card Messages draws instead of a text bubble, with the file icon, name and size, in the bubble's own shape.",
       "registryDependencies": [
-        "@imessage/bubble-shape",
-        "@imessage/platform"
+        "@message-ui/bubble-shape",
+        "@message-ui/platform"
       ],
       "files": [
         {
           "path": "registry/imessage/message-attachment.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/message-attachment.tsx"
+          "target": "components/message-ui/message-attachment.tsx"
         }
       ]
     },
@@ -187,21 +187,22 @@
       "title": "Conversation",
       "description": "A complete, composable conversation for either platform: header, scrolling log with clusters and reactions, typing state, and a composer. Bring your own data and send handler.",
       "registryDependencies": [
-        "@imessage/group-avatar",
-        "@imessage/ios-composer",
-        "@imessage/ios-nav-bar",
-        "@imessage/macos-composer",
-        "@imessage/macos-header",
-        "@imessage/message-list",
-        "@imessage/palette",
-        "@imessage/platform",
-        "@imessage/tapback"
+        "@message-ui/group-avatar",
+        "@message-ui/ios-composer",
+        "@message-ui/ios-nav-bar",
+        "@message-ui/macos-composer",
+        "@message-ui/macos-header",
+        "@message-ui/message-list",
+        "@message-ui/message-motion",
+        "@message-ui/palette",
+        "@message-ui/platform",
+        "@message-ui/tapback"
       ],
       "files": [
         {
           "path": "registry/imessage/conversation.tsx",
           "type": "registry:component",
-          "target": "components/imessage/conversation.tsx"
+          "target": "components/message-ui/conversation.tsx"
         }
       ]
     },
@@ -211,15 +212,15 @@
       "title": "Message motion",
       "description": "The measured send and receive animations, seekable so a harness can scrub them.",
       "registryDependencies": [
-        "@imessage/bubble-shape",
-        "@imessage/platform",
-        "@imessage/tokens"
+        "@message-ui/bubble-shape",
+        "@message-ui/platform",
+        "@message-ui/tokens"
       ],
       "files": [
         {
           "path": "registry/imessage/message-motion.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/message-motion.tsx"
+          "target": "components/message-ui/message-motion.tsx"
         }
       ]
     },
@@ -229,14 +230,14 @@
       "title": "FaceTime card",
       "description": "A FaceTime link card in the native card style, plus the call states an application may want to show around it.",
       "registryDependencies": [
-        "@imessage/platform",
-        "@imessage/tokens"
+        "@message-ui/platform",
+        "@message-ui/tokens"
       ],
       "files": [
         {
           "path": "registry/imessage/facetime-card.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/facetime-card.tsx"
+          "target": "components/message-ui/facetime-card.tsx"
         }
       ]
     },
@@ -249,7 +250,7 @@
         {
           "path": "registry/imessage/avatar.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/avatar.tsx"
+          "target": "components/message-ui/avatar.tsx"
         }
       ]
     },
@@ -262,7 +263,7 @@
         {
           "path": "registry/imessage/macos-window.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/macos-window.tsx"
+          "target": "components/message-ui/macos-window.tsx"
         }
       ]
     },
@@ -272,14 +273,14 @@
       "title": "macOS sidebar",
       "description": "The conversation list sidebar with search, pinned conversations, rows, and selection states.",
       "registryDependencies": [
-        "@imessage/avatar",
-        "@imessage/group-avatar"
+        "@message-ui/avatar",
+        "@message-ui/group-avatar"
       ],
       "files": [
         {
           "path": "registry/imessage/macos-sidebar.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/macos-sidebar.tsx"
+          "target": "components/message-ui/macos-sidebar.tsx"
         }
       ]
     },
@@ -289,14 +290,14 @@
       "title": "macOS header",
       "description": "The translucent conversation header with compose, contact, and video controls.",
       "registryDependencies": [
-        "@imessage/avatar",
-        "@imessage/group-avatar"
+        "@message-ui/avatar",
+        "@message-ui/group-avatar"
       ],
       "files": [
         {
           "path": "registry/imessage/macos-header.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/macos-header.tsx"
+          "target": "components/message-ui/macos-header.tsx"
         }
       ]
     },
@@ -309,7 +310,7 @@
         {
           "path": "registry/imessage/macos-composer.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/macos-composer.tsx"
+          "target": "components/message-ui/macos-composer.tsx"
         }
       ]
     },
@@ -319,14 +320,14 @@
       "title": "Tapback bar",
       "description": "The iOS Tapback picker pill with recent emoji and the emoji-picker bubble, plus the macOS two-row layout.",
       "registryDependencies": [
-        "@imessage/tapback",
-        "@imessage/tokens"
+        "@message-ui/tapback",
+        "@message-ui/tokens"
       ],
       "files": [
         {
           "path": "registry/imessage/tapback-bar.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/tapback-bar.tsx"
+          "target": "components/message-ui/tapback-bar.tsx"
         }
       ]
     },
@@ -336,13 +337,13 @@
       "title": "Context menu",
       "description": "iOS tinted message menu and the macOS NSMenu-style menu with Tapback rows.",
       "registryDependencies": [
-        "@imessage/tokens"
+        "@message-ui/tokens"
       ],
       "files": [
         {
           "path": "registry/imessage/context-menu.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/context-menu.tsx"
+          "target": "components/message-ui/context-menu.tsx"
         }
       ]
     },
@@ -352,16 +353,16 @@
       "title": "Message actions",
       "description": "The iOS long-press overlay: dim and blur, lifted bubble, Tapback bar, and menu, with the measured transition.",
       "registryDependencies": [
-        "@imessage/context-menu",
-        "@imessage/tapback",
-        "@imessage/tapback-bar",
-        "@imessage/tokens"
+        "@message-ui/context-menu",
+        "@message-ui/tapback",
+        "@message-ui/tapback-bar",
+        "@message-ui/tokens"
       ],
       "files": [
         {
           "path": "registry/imessage/message-actions.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/message-actions.tsx"
+          "target": "components/message-ui/message-actions.tsx"
         }
       ]
     },
@@ -374,7 +375,7 @@
         {
           "path": "registry/imessage/use-long-press.ts",
           "type": "registry:ui",
-          "target": "components/imessage/use-long-press.ts"
+          "target": "components/message-ui/use-long-press.ts"
         }
       ]
     },
@@ -384,28 +385,28 @@
       "title": "Message list",
       "description": "The scrolling log: clusters and tails, date headers, status labels, sender names, emoji-only rows, link cards, attachments, and the typing indicator.",
       "registryDependencies": [
-        "@imessage/date-separator",
-        "@imessage/group-avatar",
-        "@imessage/ios-notices",
-        "@imessage/ios-swipe-times",
-        "@imessage/link-preview",
-        "@imessage/message-attachment",
-        "@imessage/message-audio",
-        "@imessage/message-bubble",
-        "@imessage/message-effects",
-        "@imessage/message-image",
-        "@imessage/message-reply",
-        "@imessage/platform",
-        "@imessage/system-message",
-        "@imessage/tokens",
-        "@imessage/typing-indicator",
-        "@imessage/use-screen-space"
+        "@message-ui/date-separator",
+        "@message-ui/group-avatar",
+        "@message-ui/ios-notices",
+        "@message-ui/ios-swipe-times",
+        "@message-ui/link-preview",
+        "@message-ui/message-attachment",
+        "@message-ui/message-audio",
+        "@message-ui/message-bubble",
+        "@message-ui/message-effects",
+        "@message-ui/message-image",
+        "@message-ui/message-reply",
+        "@message-ui/platform",
+        "@message-ui/system-message",
+        "@message-ui/tokens",
+        "@message-ui/typing-indicator",
+        "@message-ui/use-screen-space"
       ],
       "files": [
         {
           "path": "registry/imessage/message-list.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/message-list.tsx"
+          "target": "components/message-ui/message-list.tsx"
         }
       ]
     },
@@ -418,8 +419,24 @@
         {
           "path": "registry/imessage/ios-status-bar.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/ios-status-bar.tsx"
+          "target": "components/message-ui/ios-status-bar.tsx"
         }
+      ]
+    },
+    {
+      "name": "ios-push-banner",
+      "type": "registry:ui",
+      "title": "Notification banner",
+      "description": "The iOS 26 push banner, expanding out of the Dynamic Island on its recorded frames.",
+      "files": [
+        {
+          "path": "registry/imessage/ios-push-banner.tsx",
+          "type": "registry:ui",
+          "target": "components/message-ui/ios-push-banner.tsx"
+        }
+      ],
+      "registryDependencies": [
+        "@message-ui/tokens"
       ]
     },
     {
@@ -431,7 +448,7 @@
         {
           "path": "registry/imessage/ios-nav-bar.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/ios-nav-bar.tsx"
+          "target": "components/message-ui/ios-nav-bar.tsx"
         }
       ]
     },
@@ -444,7 +461,7 @@
         {
           "path": "registry/imessage/ios-scroll-edge.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/ios-scroll-edge.tsx"
+          "target": "components/message-ui/ios-scroll-edge.tsx"
         }
       ]
     },
@@ -457,7 +474,7 @@
         {
           "path": "registry/imessage/ios-composer.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/ios-composer.tsx"
+          "target": "components/message-ui/ios-composer.tsx"
         }
       ]
     },
@@ -467,15 +484,15 @@
       "title": "iOS conversation list",
       "description": "The Messages list screen: large title, rows with avatars and previews, search pill, and compose button.",
       "registryDependencies": [
-        "@imessage/group-avatar",
-        "@imessage/ios-composer",
-        "@imessage/ios-nav-bar"
+        "@message-ui/group-avatar",
+        "@message-ui/ios-composer",
+        "@message-ui/ios-nav-bar"
       ],
       "files": [
         {
           "path": "registry/imessage/ios-conversation-list.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/ios-conversation-list.tsx"
+          "target": "components/message-ui/ios-conversation-list.tsx"
         }
       ]
     },
@@ -488,7 +505,7 @@
         {
           "path": "registry/imessage/ios-new-message-sheet.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/ios-new-message-sheet.tsx"
+          "target": "components/message-ui/ios-new-message-sheet.tsx"
         }
       ]
     },
@@ -498,15 +515,15 @@
       "title": "Palette",
       "description": "Emits the measured light and dark palette as CSS variables for one platform.",
       "registryDependencies": [
-        "@imessage/platform",
-        "@imessage/tapback",
-        "@imessage/tokens"
+        "@message-ui/platform",
+        "@message-ui/tapback",
+        "@message-ui/tokens"
       ],
       "files": [
         {
           "path": "registry/imessage/palette.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/palette.tsx"
+          "target": "components/message-ui/palette.tsx"
         }
       ]
     },
@@ -516,45 +533,46 @@
       "title": "iOS Messages app",
       "description": "The complete iOS 26 Messages app: list, conversation, New Message sheet, and the long-press overlay.",
       "registryDependencies": [
-        "@imessage/audio-recorder",
-        "@imessage/group-avatar",
-        "@imessage/group-details",
-        "@imessage/image-viewer",
-        "@imessage/ios-composer",
-        "@imessage/ios-conversation-list",
-        "@imessage/ios-details",
-        "@imessage/ios-effects-picker",
-        "@imessage/ios-nav-bar",
-        "@imessage/ios-new-message-sheet",
-        "@imessage/ios-plus-menu",
-        "@imessage/ios-scroll-edge",
-        "@imessage/ios-search",
-        "@imessage/ios-select-mode",
-        "@imessage/ios-status-bar",
-        "@imessage/link-preview",
-        "@imessage/message-actions",
-        "@imessage/message-attachment",
-        "@imessage/message-audio",
-        "@imessage/message-bubble",
-        "@imessage/message-image",
-        "@imessage/message-list",
-        "@imessage/message-motion",
-        "@imessage/message-reply",
-        "@imessage/palette",
-        "@imessage/photo-picker",
-        "@imessage/platform",
-        "@imessage/sticker-picker",
-        "@imessage/system-message",
-        "@imessage/tapback",
-        "@imessage/tapback-bar",
-        "@imessage/tapback-details",
-        "@imessage/tokens"
+        "@message-ui/audio-recorder",
+        "@message-ui/context-menu",
+        "@message-ui/group-avatar",
+        "@message-ui/group-details",
+        "@message-ui/image-viewer",
+        "@message-ui/ios-composer",
+        "@message-ui/ios-conversation-list",
+        "@message-ui/ios-details",
+        "@message-ui/ios-effects-picker",
+        "@message-ui/ios-nav-bar",
+        "@message-ui/ios-new-message-sheet",
+        "@message-ui/ios-plus-menu",
+        "@message-ui/ios-scroll-edge",
+        "@message-ui/ios-search",
+        "@message-ui/ios-select-mode",
+        "@message-ui/ios-status-bar",
+        "@message-ui/link-preview",
+        "@message-ui/message-actions",
+        "@message-ui/message-attachment",
+        "@message-ui/message-audio",
+        "@message-ui/message-bubble",
+        "@message-ui/message-image",
+        "@message-ui/message-list",
+        "@message-ui/message-motion",
+        "@message-ui/message-reply",
+        "@message-ui/palette",
+        "@message-ui/photo-picker",
+        "@message-ui/platform",
+        "@message-ui/sticker-picker",
+        "@message-ui/system-message",
+        "@message-ui/tapback",
+        "@message-ui/tapback-bar",
+        "@message-ui/tapback-details",
+        "@message-ui/tokens"
       ],
       "files": [
         {
           "path": "registry/imessage/ios-messages-app.tsx",
           "type": "registry:component",
-          "target": "components/imessage/ios-messages-app.tsx"
+          "target": "components/message-ui/ios-messages-app.tsx"
         }
       ]
     },
@@ -564,27 +582,27 @@
       "title": "macOS Messages app",
       "description": "The complete macOS 26 Messages window: sidebar, header, message log, composer, and the right-click menu.",
       "registryDependencies": [
-        "@imessage/context-menu",
-        "@imessage/ios-messages-app",
-        "@imessage/macos-composer",
-        "@imessage/macos-details",
-        "@imessage/macos-header",
-        "@imessage/macos-plus-menu",
-        "@imessage/macos-sidebar",
-        "@imessage/macos-window",
-        "@imessage/message-list",
-        "@imessage/message-motion",
-        "@imessage/palette",
-        "@imessage/photo-picker",
-        "@imessage/platform",
-        "@imessage/sticker-picker",
-        "@imessage/tapback-bar"
+        "@message-ui/context-menu",
+        "@message-ui/ios-messages-app",
+        "@message-ui/macos-composer",
+        "@message-ui/macos-details",
+        "@message-ui/macos-header",
+        "@message-ui/macos-plus-menu",
+        "@message-ui/macos-sidebar",
+        "@message-ui/macos-window",
+        "@message-ui/message-list",
+        "@message-ui/message-motion",
+        "@message-ui/palette",
+        "@message-ui/photo-picker",
+        "@message-ui/platform",
+        "@message-ui/sticker-picker",
+        "@message-ui/tapback-bar"
       ],
       "files": [
         {
           "path": "registry/imessage/macos-messages-app.tsx",
           "type": "registry:component",
-          "target": "components/imessage/macos-messages-app.tsx"
+          "target": "components/message-ui/macos-messages-app.tsx"
         }
       ]
     },
@@ -597,7 +615,7 @@
         {
           "path": "registry/imessage/macos-plus-menu.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/macos-plus-menu.tsx"
+          "target": "components/message-ui/macos-plus-menu.tsx"
         }
       ]
     },
@@ -607,13 +625,13 @@
       "title": "macOS conversation details",
       "description": "The inspector pane that slides in from the right of the window: contact, call actions, shared photos, links and documents, and the conversation options.",
       "registryDependencies": [
-        "@imessage/avatar"
+        "@message-ui/avatar"
       ],
       "files": [
         {
           "path": "registry/imessage/macos-details.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/macos-details.tsx"
+          "target": "components/message-ui/macos-details.tsx"
         }
       ]
     },
@@ -626,7 +644,7 @@
         {
           "path": "registry/imessage/message-effects.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/message-effects.tsx"
+          "target": "components/message-ui/message-effects.tsx"
         }
       ]
     },
@@ -636,13 +654,13 @@
       "title": "Screen effects",
       "description": "The full-screen send effects, drawn deterministically on a canvas so they can be scrubbed and screenshotted.",
       "registryDependencies": [
-        "@imessage/message-effects"
+        "@message-ui/message-effects"
       ],
       "files": [
         {
           "path": "registry/imessage/screen-effects.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/screen-effects.tsx"
+          "target": "components/message-ui/screen-effects.tsx"
         }
       ]
     },
@@ -652,14 +670,14 @@
       "title": "iOS effects picker",
       "description": "The iOS \"Send with effect\" screen: the Bubble/Screen tabs, the effect rail, the preview bubble and its caption.",
       "registryDependencies": [
-        "@imessage/message-effects",
-        "@imessage/tokens"
+        "@message-ui/message-effects",
+        "@message-ui/tokens"
       ],
       "files": [
         {
           "path": "registry/imessage/ios-effects-picker.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/ios-effects-picker.tsx"
+          "target": "components/message-ui/ios-effects-picker.tsx"
         }
       ]
     },
@@ -669,16 +687,16 @@
       "title": "Inline reply",
       "description": "The quoted stub above a reply, the reply-count affordance, and the focused thread view.",
       "registryDependencies": [
-        "@imessage/bubble-shape",
-        "@imessage/message-bubble",
-        "@imessage/platform",
-        "@imessage/tokens"
+        "@message-ui/bubble-shape",
+        "@message-ui/message-bubble",
+        "@message-ui/platform",
+        "@message-ui/tokens"
       ],
       "files": [
         {
           "path": "registry/imessage/message-reply.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/message-reply.tsx"
+          "target": "components/message-ui/message-reply.tsx"
         }
       ]
     },
@@ -688,15 +706,15 @@
       "title": "Photo message",
       "description": "Photos and videos in the bubble's shape, tail included, with the native multi-photo grid.",
       "registryDependencies": [
-        "@imessage/bubble-shape",
-        "@imessage/platform",
-        "@imessage/tokens"
+        "@message-ui/bubble-shape",
+        "@message-ui/platform",
+        "@message-ui/tokens"
       ],
       "files": [
         {
           "path": "registry/imessage/message-image.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/message-image.tsx"
+          "target": "components/message-ui/message-image.tsx"
         }
       ]
     },
@@ -706,17 +724,17 @@
       "title": "Photo viewer",
       "description": "The full-screen viewer a photo opens into: zoom out of the tile, swipe between the message's photos, pinch and pan, react, and drag down to close.",
       "registryDependencies": [
-        "@imessage/ios-status-bar",
-        "@imessage/platform",
-        "@imessage/tapback",
-        "@imessage/tapback-bar",
-        "@imessage/tokens"
+        "@message-ui/ios-status-bar",
+        "@message-ui/platform",
+        "@message-ui/tapback",
+        "@message-ui/tapback-bar",
+        "@message-ui/tokens"
       ],
       "files": [
         {
           "path": "registry/imessage/image-viewer.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/image-viewer.tsx"
+          "target": "components/message-ui/image-viewer.tsx"
         }
       ]
     },
@@ -726,15 +744,15 @@
       "title": "Audio message",
       "description": "A voice message bubble with a waveform, play control, and a seekable position.",
       "registryDependencies": [
-        "@imessage/message-bubble",
-        "@imessage/platform",
-        "@imessage/tokens"
+        "@message-ui/message-bubble",
+        "@message-ui/platform",
+        "@message-ui/tokens"
       ],
       "files": [
         {
           "path": "registry/imessage/message-audio.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/message-audio.tsx"
+          "target": "components/message-ui/message-audio.tsx"
         }
       ]
     },
@@ -744,15 +762,15 @@
       "title": "Edit and undo send",
       "description": "Edit a sent message in place, the Edited label, and the undo-send removal.",
       "registryDependencies": [
-        "@imessage/bubble-shape",
-        "@imessage/platform",
-        "@imessage/tokens"
+        "@message-ui/bubble-shape",
+        "@message-ui/platform",
+        "@message-ui/tokens"
       ],
       "files": [
         {
           "path": "registry/imessage/message-edit.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/message-edit.tsx"
+          "target": "components/message-ui/message-edit.tsx"
         }
       ]
     },
@@ -765,7 +783,7 @@
         {
           "path": "registry/imessage/ios-details.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/ios-details.tsx"
+          "target": "components/message-ui/ios-details.tsx"
         }
       ]
     },
@@ -775,15 +793,15 @@
       "title": "iOS group details",
       "description": "A group conversation's details screen: the stacked group photo, an editable name, the members, and the shared photos and links.",
       "registryDependencies": [
-        "@imessage/avatar",
-        "@imessage/group-avatar",
-        "@imessage/ios-details"
+        "@message-ui/avatar",
+        "@message-ui/group-avatar",
+        "@message-ui/ios-details"
       ],
       "files": [
         {
           "path": "registry/imessage/group-details.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/group-details.tsx"
+          "target": "components/message-ui/group-details.tsx"
         }
       ]
     },
@@ -796,7 +814,7 @@
         {
           "path": "registry/imessage/ios-plus-menu.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/ios-plus-menu.tsx"
+          "target": "components/message-ui/ios-plus-menu.tsx"
         }
       ]
     },
@@ -806,13 +824,13 @@
       "title": "iOS photo picker",
       "description": "The Photos panel under the composer: a scrolling three-column grid with the sheet grabber and tile selection.",
       "registryDependencies": [
-        "@imessage/tokens"
+        "@message-ui/tokens"
       ],
       "files": [
         {
           "path": "registry/imessage/photo-picker.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/photo-picker.tsx"
+          "target": "components/message-ui/photo-picker.tsx"
         }
       ]
     },
@@ -822,13 +840,13 @@
       "title": "iOS sticker picker",
       "description": "The sheet the plus menu's Stickers row opens: category tabs, a search field, the sticker grid, and drag to place a sticker on a message.",
       "registryDependencies": [
-        "@imessage/tokens"
+        "@message-ui/tokens"
       ],
       "files": [
         {
           "path": "registry/imessage/sticker-picker.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/sticker-picker.tsx"
+          "target": "components/message-ui/sticker-picker.tsx"
         }
       ]
     },
@@ -841,7 +859,7 @@
         {
           "path": "registry/imessage/ios-select-mode.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/ios-select-mode.tsx"
+          "target": "components/message-ui/ios-select-mode.tsx"
         }
       ]
     },
@@ -851,15 +869,15 @@
       "title": "iOS search",
       "description": "The search state of the conversation list: the field rising under the nav, a Cancel button, and results grouped into Conversations, Messages, Photos and Links.",
       "registryDependencies": [
-        "@imessage/avatar",
-        "@imessage/ios-composer",
-        "@imessage/use-screen-space"
+        "@message-ui/avatar",
+        "@message-ui/ios-composer",
+        "@message-ui/use-screen-space"
       ],
       "files": [
         {
           "path": "registry/imessage/ios-search.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/ios-search.tsx"
+          "target": "components/message-ui/ios-search.tsx"
         }
       ]
     },
@@ -872,7 +890,7 @@
         {
           "path": "registry/imessage/ios-swipe-times.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/ios-swipe-times.tsx"
+          "target": "components/message-ui/ios-swipe-times.tsx"
         }
       ]
     },
@@ -882,13 +900,13 @@
       "title": "Conversation notices",
       "description": "The unknown-sender notice, the failed-send badge, and the Not Delivered label.",
       "registryDependencies": [
-        "@imessage/platform"
+        "@message-ui/platform"
       ],
       "files": [
         {
           "path": "registry/imessage/ios-notices.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/ios-notices.tsx"
+          "target": "components/message-ui/ios-notices.tsx"
         }
       ]
     },
@@ -898,15 +916,15 @@
       "title": "System message",
       "description": "The centred grey lines that are not bubbles: group renames, joins and leaves, the group photo, a missed call, a reaction summary, and the unknown-sender sentence.",
       "registryDependencies": [
-        "@imessage/platform",
-        "@imessage/tapback",
-        "@imessage/tokens"
+        "@message-ui/platform",
+        "@message-ui/tapback",
+        "@message-ui/tokens"
       ],
       "files": [
         {
           "path": "registry/imessage/system-message.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/system-message.tsx"
+          "target": "components/message-ui/system-message.tsx"
         }
       ]
     },
@@ -916,13 +934,13 @@
       "title": "Group avatar",
       "description": "The stacked faces a group conversation shows in the list, the nav bar, the details header and the macOS sidebar.",
       "registryDependencies": [
-        "@imessage/avatar"
+        "@message-ui/avatar"
       ],
       "files": [
         {
           "path": "registry/imessage/group-avatar.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/group-avatar.tsx"
+          "target": "components/message-ui/group-avatar.tsx"
         }
       ]
     },
@@ -932,52 +950,67 @@
       "title": "Audio recorder",
       "description": "The composer turning into a voice-message recorder: live waveform, running timer, and the send, stop and cancel controls.",
       "registryDependencies": [
-        "@imessage/platform",
-        "@imessage/tokens"
+        "@message-ui/platform",
+        "@message-ui/tokens"
       ],
       "files": [
         {
           "path": "registry/imessage/audio-recorder.tsx",
           "type": "registry:ui",
-          "target": "components/imessage/audio-recorder.tsx"
+          "target": "components/message-ui/audio-recorder.tsx"
         }
       ]
     },
     {
       "name": "index",
       "type": "registry:style",
-      "title": "iMessage UI",
+      "title": "Message UI",
       "description": "The whole kit: every component plus the conversation pane and both app shells.",
       "registryDependencies": [
-        "@imessage/audio-recorder",
-        "@imessage/conversation",
-        "@imessage/facetime-card",
-        "@imessage/group-avatar",
-        "@imessage/group-details",
-        "@imessage/image-viewer",
-        "@imessage/ios-details",
-        "@imessage/ios-messages-app",
-        "@imessage/ios-notices",
-        "@imessage/ios-plus-menu",
-        "@imessage/ios-search",
-        "@imessage/ios-select-mode",
-        "@imessage/ios-swipe-times",
-        "@imessage/link-preview",
-        "@imessage/macos-details",
-        "@imessage/macos-messages-app",
-        "@imessage/message-attachment",
-        "@imessage/message-audio",
-        "@imessage/message-edit",
-        "@imessage/message-effects",
-        "@imessage/message-image",
-        "@imessage/message-motion",
-        "@imessage/message-reply",
-        "@imessage/photo-picker",
-        "@imessage/screen-effects",
-        "@imessage/sticker-picker",
-        "@imessage/system-message",
-        "@imessage/tapback-details",
-        "@imessage/use-long-press"
+        "@message-ui/audio-recorder",
+        "@message-ui/conversation",
+        "@message-ui/facetime-card",
+        "@message-ui/group-avatar",
+        "@message-ui/group-details",
+        "@message-ui/image-viewer",
+        "@message-ui/ios-details",
+        "@message-ui/ios-messages-app",
+        "@message-ui/ios-notices",
+        "@message-ui/ios-plus-menu",
+        "@message-ui/ios-push-banner",
+        "@message-ui/ios-search",
+        "@message-ui/ios-select-mode",
+        "@message-ui/ios-swipe-times",
+        "@message-ui/link-preview",
+        "@message-ui/macos-details",
+        "@message-ui/macos-messages-app",
+        "@message-ui/message-attachment",
+        "@message-ui/message-audio",
+        "@message-ui/message-edit",
+        "@message-ui/message-effects",
+        "@message-ui/message-image",
+        "@message-ui/message-motion",
+        "@message-ui/message-reply",
+        "@message-ui/photo-picker",
+        "@message-ui/screen-effects",
+        "@message-ui/sticker-picker",
+        "@message-ui/system-message",
+        "@message-ui/tapback-details",
+        "@message-ui/theme-transition",
+        "@message-ui/use-long-press"
+      ]
+    },
+    {
+      "name": "theme-transition",
+      "type": "registry:ui",
+      "title": "Appearance switch",
+      "description": "The system light/dark switch as iOS 26 plays it: a crossfade of about half a second, on two different curves in the two directions, from the recorded ramps.",
+      "files": [
+        {
+          "path": "registry/imessage/theme-transition.tsx",
+          "type": "registry:ui",
+          "target": "components/message-ui/theme-transition.tsx"
+        }
       ]
     }
   ]

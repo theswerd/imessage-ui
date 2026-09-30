@@ -9,7 +9,7 @@ import { IosNavBar } from "@/registry/imessage/ios-nav-bar";
 import { IosScrollEdge } from "@/registry/imessage/ios-scroll-edge";
 import { IosComposer } from "@/registry/imessage/ios-composer";
 import { IosConversationList, type IosConversation } from "@/registry/imessage/ios-conversation-list";
-import { IosNewMessageSheet } from "@/registry/imessage/ios-new-message-sheet";
+import { IosNewMessageSheet, iosSheetDismissal, iosSheetDismissKeyframes } from "@/registry/imessage/ios-new-message-sheet";
 import { MessageList, messageListMetrics, type Message, type MessageListHandle } from "@/registry/imessage/message-list";
 import { isEmojiOnly, MessageBubble } from "@/registry/imessage/message-bubble";
 import { LinkPreview } from "@/registry/imessage/link-preview";
@@ -19,7 +19,8 @@ import { MessageImages } from "@/registry/imessage/message-image";
 import { bubbleMetrics, emojiFontStack, fontStack } from "@/registry/imessage/tokens";
 import { ReplyThread, replyThreadMetrics, replyThreadMotion } from "@/registry/imessage/message-reply";
 import { Tapback, type TapbackType } from "@/registry/imessage/tapback";
-import { MessageActions, type Rect } from "@/registry/imessage/message-actions";
+import { MessageActions, messageActionsMetrics, photoLiftScale, type Rect } from "@/registry/imessage/message-actions";
+import { iosPhotoMenu } from "@/registry/imessage/context-menu";
 import { useArrivalAnimation, type ArrivalAnimation } from "@/registry/imessage/message-motion";
 import { IosEffectsPicker, type EffectsPickerSelection } from "@/registry/imessage/ios-effects-picker";
 import type { TapbackSelection } from "@/registry/imessage/tapback-bar";
@@ -48,12 +49,25 @@ export type IosScreen = "list" | "conversation" | "new-message";
 /**
  * Moving between screens. A conversation is pushed in from the trailing edge while the list follows
  * it part of the way out and dims under it; going back plays that backwards; the New Message sheet
- * comes up from the bottom while its dim fades in.
+ * comes up from the bottom while its dim fades in, and leaves on `iosSheetDismissal`'s table.
  *
- * UNVERIFIED. Nothing in `references/` captures a screen change, so not one of these numbers is
- * measured. They are kept in the family of the motion that is: the send flight that settles by
- * ~520 ms, the 380 ms long-press entrance, the 260 ms effects screen and its 320 ms move. Replace
- * them from a recording before describing any of it as measured.
+ * UNVERIFIED, except `dismiss` and `represent`. Nothing in `references/` captures a push, a pop or a
+ * sheet arriving, so those three numbers are not measured: they are kept in the family of the motion
+ * that is (the send flight that settles by ~520 ms, the 380 ms long-press entrance, the 260 ms
+ * effects screen and its 320 ms move). Replace them from a recording before describing any of it as
+ * measured.
+ *
+ * `dismiss` **is** measured — 200 ms, twice, off an iPhone 17 Pro on iOS 26 — and the duration is
+ * the lesser half of what was measured: the panel's travel is a table of recorded samples rather
+ * than an ease, so the sheet branch below plays `iosSheetDismissKeyframes()` linearly instead of the
+ * presentation reversed.
+ *
+ * `represent` is 0 because the device does not animate one. `newmsg-sheet-open` re-opens this sheet
+ * by deep link with the list bare from 216 to 613 ms and the sheet fully in place at 643 ms, with no
+ * intermediate frames at all — on a recorder that emits a frame per screen change, where a 300 ms
+ * slide would have left ~18 of them. So a sheet the app has already built snaps back into place.
+ * NOT MEASURED: the recording re-opens it by **deep link**, and nothing records a second tap of
+ * Compose. This treats the two alike, which is a guess about the tap and a reading about the link.
  *
  * Each one is a Web Animations timeline rather than a transition or a rAF loop, so
  * `screenTransition.progress` can seek a frame instead of playing it, and `document.getAnimations()`
@@ -63,7 +77,8 @@ export const iosScreenTransition = {
   push: 350,
   pop: 320,
   present: 400,
-  dismiss: 280,
+  dismiss: iosSheetDismissal.duration,
+  represent: 0,
   /** How far the screen underneath follows the one on top, as a share of the screen width. */
   parallax: 0.3,
   /** Black over the screen that slid back, at the end of the push. */
@@ -71,17 +86,21 @@ export const iosScreenTransition = {
   ease: "cubic-bezier(0.32, 0.72, 0, 1)",
 } as const;
 
-export type IosScreenTransitionKind = "push" | "pop" | "present" | "dismiss";
+export type IosScreenTransitionKind = "push" | "pop" | "present" | "dismiss" | "represent";
 
 /**
  * Which transition takes the app from one screen to another. The list and a conversation are a
  * navigation stack; the sheet is presented over whichever of them is showing. Going from the sheet
  * straight into a conversation (a recipient was chosen) pushes from the list underneath it, so the
  * sheet leaves with the screen it was presented over.
+ *
+ * `built` is whether this app has put the New Message sheet up before. A second presentation of a
+ * sheet the app has already built is a **represent**, which the device does not animate — see
+ * `iosScreenTransition.represent`.
  */
-export function screenTransitionKind(from: IosScreen, to: IosScreen): IosScreenTransitionKind | null {
+export function screenTransitionKind(from: IosScreen, to: IosScreen, options?: { built?: boolean }): IosScreenTransitionKind | null {
   if (from === to) return null;
-  if (to === "new-message") return "present";
+  if (to === "new-message") return options?.built ? "represent" : "present";
   if (from === "new-message" && to === "list") return "dismiss";
   return to === "conversation" ? "push" : "pop";
 }
@@ -93,7 +112,7 @@ export type IosMessagesAppProps = {
   time?: string;
   screen?: IosScreen;
   conversations?: IosConversation[];
-  contact: { name: string; initials?: string };
+  contact: { name: string; initials?: string; photo?: string };
   group?: boolean;
   /**
    * The people in the conversation, when it is a group. Two or more of them turn the nav bar's Ø60
@@ -105,14 +124,18 @@ export type IosMessagesAppProps = {
   typing?: boolean | { sender?: string };
   /** Reference time for "Today"/"Yesterday". */
   now?: Date | number;
-  composer?: { value?: string; placeholder?: string; disabled?: boolean; onChange?: (value: string) => void; onSend?: (text: string) => void | Promise<void>; onAttach?: () => void; onMic?: () => void };
+  composer?: { value?: string; placeholder?: string; disabled?: boolean; onChange?: (value: string) => void; onSend?: (text: string, photos: PhotoPickerPhoto[]) => void | Promise<void>; onAttach?: () => void; onMic?: () => void };
   /**
    * Scrub a screen change instead of playing it: the app is on `screen`, arriving from `from`, and
    * `progress` (0..1) seeks the push, the pop or the sheet. Leave it out and the app runs the
    * transition itself whenever `screen` changes, which is what an application wants; a harness that
    * renders one frame at a time has nothing to observe changing and states it instead.
+   *
+   * `represent` states the one thing a single frame cannot show: that this presentation is of a
+   * sheet the app has already built, which is not animated. Playing the transitions, the app knows
+   * that for itself; scrubbing, nothing has happened for it to remember.
    */
-  screenTransition?: { from: IosScreen; progress: number } | null;
+  screenTransition?: { from: IosScreen; progress: number; represent?: boolean } | null;
   onBack?: () => void;
   onSelectConversation?: (conversation: IosConversation) => void;
   onCompose?: () => void;
@@ -129,6 +152,7 @@ export type IosMessagesAppProps = {
   /** The thread was dismissed. The overlay stays up for its exit after `thread` clears. */
   onCloseThread?: () => void;
   /**
+   * Omit to animate appended outgoing messages automatically; null disables automatic sends.
    * That message was just sent: the composer's text row becomes its bubble and flies to its slot.
    * With `progress` the animation is seeked to `progress * duration` instead of played.
    */
@@ -216,14 +240,21 @@ export type IosMessagesAppProps = {
   /** Replaces the seven rows of the plus menu. Handlers on a row run before the shell's own. */
   plusMenuItems?: PlusMenuItem[];
   /**
-   * The full-screen photo viewer, on the photos of `id` and showing `index`. `dismiss` holds the
+   * The full-screen photo viewer. `id` is the message that was TAPPED; the viewer pages over that
+   * photo's whole RUN — see `photoRun`, and `references/image-viewer.md` for the ChatKit reading
+   * behind it — so `index` counts photos across the run, not inside `id`. For the ordinary case of a
+   * message with one photo in a run of one, the two are the same number. `dismiss` holds the
    * drag-to-dismiss pose without a synthesised drag; `chrome` states the bar visibility.
    */
-  photoViewer?: { id: string; index: number; progress?: number; chrome?: boolean; dismiss?: number } | null;
+  photoViewer?: { id: string; index: number; progress?: number; chrome?: boolean; dismiss?: number; pageOffset?: number } | null;
+  /** A photo was tapped. `index` is its index inside `id`'s own message, which is what the tile knows. */
   onOpenPhoto?: (id: string, index: number) => void;
+  /** The viewer paged. `index` counts photos across the run, the same way `photoViewer.index` does. */
   onPhotoIndexChange?: (index: number) => void;
   onClosePhoto?: () => void;
+  /** Share the photo ON SCREEN: after a page that is a different message from the one that was tapped. */
   onSharePhoto?: (id: string, index: number) => void;
+  /** Save the photo ON SCREEN, with its index inside its own message. */
   onSavePhoto?: (id: string, index: number) => void;
   /** The Photos picker under the composer, which the plus menu's "Photos" row opens. */
   photoPicker?: { selected?: string[]; detent?: PhotoPickerDetent; progress?: number } | null;
@@ -292,7 +323,7 @@ export type IosMessagesAppProps = {
    * Search over the conversation list. `closing` runs the measured close table rather than the open
    * one played backwards — the two are different animations and the recordings disprove reversing.
    */
-  search?: { query?: string; sections?: IosSearchSection[]; progress?: number; closing?: boolean } | null;
+  search?: { query?: string; sections?: IosSearchSection[]; maxResults?: number; progress?: number; closing?: boolean } | null;
   onOpenSearch?: () => void;
   onCloseSearch?: () => void;
   onSearchQueryChange?: (query: string) => void;
@@ -444,48 +475,148 @@ function useExit(key: string | null) {
 }
 
 /**
- * Where each of a message's photo tiles sits inside the device frame, in the frame's own
- * coordinates. Read out of the DOM rather than carried in the open event: only the log knows where
- * a tile ended up after wrapping and scrolling, and a rect captured at open time is stale the
- * moment the log moves under it. `rectForIndex` is what stops the fourth photo flying back into the
- * first photo's thumbnail; a tile that is not in the DOM (past `MAX_TILES`) has no rect, and the
- * viewer fades for it, which is what native does for an off-screen item.
+ * The photos the viewer pages over when one of them is tapped. It is NOT the tapped message's
+ * photos — it is the whole RUN those photos belong to, and each photo of a multi-photo send is its
+ * own message.
+ *
+ * MEASURED, in ChatKit on this Mac (macOS 26.5.2), by disassembling the loaded iOSSupport image the
+ * way `references/image-viewer.md` describes:
+ * `-[CKChatController _displayPreviewItemForMediaObject:]` — the method that puts the viewer up —
+ * calls `-previewItemsForMediaObject:currentItemIndex:containsRestoring:`, sets the result on
+ * `CKQLPreviewControllerDataSource.previewItems` (its only ivar, and what
+ * `-numberOfPreviewItemsInPreviewController:` counts), and then sets the mock scene's
+ * `currentPreviewItemIndex` to the index that call handed back.
+ * `-[CKChatController(QuickLook) previewItemsForMediaObject:currentItemIndex:containsRestoring:]`
+ * takes `-_chatItemForMediaObject:`, reads its `layoutGroupIdentifier`, and enumerates
+ * `self.collectionViewController.chatItems` — **the whole transcript** — keeping every chat item
+ * whose own `layoutGroupIdentifier` is `isEqualToString:` that one, skipping
+ * `itemIsReplyContextPreview` items, and appending each kept item's `mediaObject`. The index it
+ * reports back is the position of the item whose `transferGUID` matches the one that was tapped.
+ * So the viewer pages ACROSS MESSAGES, over the tapped photo's layout group, and opens on the
+ * photo that was tapped inside it.
+ *
+ * (Read there too: when the tapped item's `layoutGroupIdentifier` has zero length the identifier
+ * test is skipped and every media chat item in the transcript is taken instead.)
+ *
+ * WHAT IS NOT MEASURED is how `layoutGroupIdentifier` is derived —
+ * `-[IMOrganicAttachmentMessagePartChatItem layoutGroupIdentifier]` is two chained IMCore calls
+ * into functions with no symbol. The run below is this kit's analogue of it: the maximal stretch of
+ * adjacent photo messages around the tapped one, same direction and same sender, unbroken by any
+ * other kind of message. That matches what a send of N photos produces — N adjacent photo messages
+ * laid out as one group — but the rule itself is JUDGEMENT, not a reading.
  */
-function useTileRects(frame: RefObject<HTMLDivElement | null>, messageId: string | null) {
-  const [measured, setMeasured] = useState<{ id: string; rects: ImageViewerRect[] } | null>(null);
+export type PhotoRun = { ids: string[]; photos: NonNullable<Message["images"]>; offsets: number[] };
+/** One entry per photo of a run; `null` where that photo's tile is not in the DOM to fly out of. */
+type TileRects = Array<ImageViewerRect | null>;
+/** How many photos each message of the run owns, in run order. */
+function runSizes(run: PhotoRun): number[] {
+  return run.ids.map((_, index) => (run.offsets[index + 1] ?? run.photos.length) - run.offsets[index]);
+}
+
+export function photoRun(messages: Message[], id: string): PhotoRun {
+  const centre = messages.findIndex(message => message.id === id);
+  const empty = { ids: [] as string[], photos: [] as NonNullable<Message["images"]>, offsets: [] as number[] };
+  if (centre < 0) return empty;
+  // The same test `messageShape` uses for the image row, so the run can only ever contain messages
+  // the log actually drew as photos — a message carrying `images` without `kind: "image"` draws as a
+  // bubble, and a viewer that paged into it would be showing something the transcript never did.
+  const isPhoto = (message: Message | undefined) =>
+    Boolean(message && message.kind === "image" && message.images?.length);
+  if (!isPhoto(messages[centre])) return empty;
+  const joins = (a: Message, b: Message) =>
+    isPhoto(b) && a.direction === b.direction && (a.sender ?? "") === (b.sender ?? "");
+  let first = centre;
+  while (first > 0 && joins(messages[first], messages[first - 1])) first--;
+  let last = centre;
+  while (last + 1 < messages.length && joins(messages[last], messages[last + 1])) last++;
+  const ids: string[] = [];
+  const photos: NonNullable<Message["images"]> = [];
+  const offsets: number[] = [];
+  for (let i = first; i <= last; i++) {
+    ids.push(messages[i].id);
+    offsets.push(photos.length);
+    photos.push(...(messages[i].images ?? []));
+  }
+  return { ids, photos, offsets };
+}
+
+/**
+ * Where each of the run's photo tiles sits inside the device frame, in the frame's own coordinates,
+ * concatenated in the same order as `photoRun`'s photos. Read out of the DOM rather than carried in
+ * the open event: only the log knows where a tile ended up after wrapping and scrolling, and a rect
+ * captured at open time is stale the moment the log moves under it. `rectForIndex` is what stops the
+ * fourth photo flying back into the first photo's thumbnail; a tile that is not in the DOM (past
+ * `MAX_TILES`, or scrolled out of the log) has no rect, and the viewer fades for it, which is what
+ * native does for an off-screen item.
+ */
+function useTileRects(frame: RefObject<HTMLDivElement | null>, run: PhotoRun) {
+  const key = run.ids.join(" ");
+  const counts = runSizes(run).join(",");
+  const [measured, setMeasured] = useState<{ id: string; rects: TileRects } | null>(null);
   useLayoutEffect(() => {
-    if (!messageId) return;
+    if (!key) return;
+    const ids = key.split(" ");
+    const sizes = counts.split(",").map(Number);
     const measure = () => {
-      const next = readTileRects(frame.current, messageId);
-      if (next) setMeasured(current => (current?.id === messageId && sameRects(current.rects, next) ? current : { id: messageId, rects: next }));
+      const next = readTileRects(frame.current, ids, sizes);
+      if (next) setMeasured(current => (current?.id === key && sameRects(current.rects, next) ? current : { id: key, rects: next }));
     };
     measure();
     const observer = new ResizeObserver(measure);
     const root = frame.current;
     if (root) observer.observe(root);
     return () => observer.disconnect();
-  }, [frame, messageId]);
+  }, [frame, key, counts]);
   // The setter is handed back so the tap that opens the viewer can seed it in the same event, before
   // the state that mounts the viewer commits: without that seed the viewer's first frame has no
   // source rect and it opens on the fade path instead of growing out of the tile that was tapped.
-  return [measured?.id === messageId ? measured.rects : [], setMeasured] as const;
+  return [measured?.id === key ? measured.rects : [], setMeasured] as const;
 }
 
-/** Every photo tile of one message, in the frame's own coordinates. Null when the row is not drawn. */
-function readTileRects(root: HTMLElement | null, id: string): ImageViewerRect[] | null {
-  const row = root?.querySelector<HTMLElement>(`[data-message-id="${cssEscape(id)}"]`);
-  if (!root || !row) return null;
+/**
+ * Every photo tile of a run of messages, in the frame's own coordinates and in run order — one entry
+ * per photo of the run, `null` where that tile is not in the DOM.
+ *
+ * The nulls are the point. A run spans messages and the log only keeps the rows near the viewport, so
+ * packing the survivors would slide every later photo's rect onto the wrong photo and the exit would
+ * fly the third photo back into the second one's balloon. `sizes` says how many slots each message
+ * owns, so a row that is not drawn leaves holes instead of closing the gap, and `rectForIndex`
+ * already reads a missing rect as "fade instead of fly" — which is what native does for an
+ * off-screen item anyway.
+ */
+// DOM rectangles include an embedding preview's transform; overlay positions use local CSS pixels.
+function rectInFrame(root: HTMLElement, box: Pick<DOMRect, "left" | "top" | "width" | "height">): Rect {
   const host = root.getBoundingClientRect();
-  return Array.from(row.querySelectorAll<HTMLElement>('[data-slot="photo-tile"]')).map(tile => {
-    const box = tile.getBoundingClientRect();
-    return { x: box.left - host.left, y: box.top - host.top, width: box.width, height: box.height };
-  });
+  const scaleX = host.width / root.clientWidth || 1;
+  const scaleY = host.height / root.clientHeight || 1;
+  return { x: (box.left - host.left) / scaleX, y: (box.top - host.top) / scaleY, width: box.width / scaleX, height: box.height / scaleY };
 }
 
-function sameRects(a: ImageViewerRect[], b: ImageViewerRect[]): boolean {
-  return a.length === b.length && a.every((rect, index) =>
-    Math.abs(rect.x - b[index].x) < 0.5 && Math.abs(rect.y - b[index].y) < 0.5 &&
-    Math.abs(rect.width - b[index].width) < 0.5 && Math.abs(rect.height - b[index].height) < 0.5);
+function readTileRects(root: HTMLElement | null, ids: readonly string[], sizes: readonly number[]): TileRects | null {
+  if (!root || !ids.length) return null;
+  const rects: TileRects = [];
+  let drewAny = false;
+  ids.forEach((id, index) => {
+    const row = root.querySelector<HTMLElement>(`[data-message-id="${cssEscape(id)}"]`);
+    const tiles = row ? Array.from(row.querySelectorAll<HTMLElement>('[data-slot="photo-tile"]')) : [];
+    if (row) drewAny = true;
+    for (let slot = 0; slot < (sizes[index] ?? 0); slot++) {
+      const tile = tiles[slot];
+      if (!tile) { rects.push(null); continue; }
+      const box = tile.getBoundingClientRect();
+      rects.push(rectInFrame(root, box));
+    }
+  });
+  return drewAny ? rects : null;
+}
+
+function sameRects(a: TileRects, b: TileRects): boolean {
+  return a.length === b.length && a.every((rect, index) => {
+    const other = b[index];
+    if (!rect || !other) return rect === other;
+    return Math.abs(rect.x - other.x) < 0.5 && Math.abs(rect.y - other.y) < 0.5 &&
+      Math.abs(rect.width - other.width) < 0.5 && Math.abs(rect.height - other.height) < 0.5;
+  });
 }
 
 /** The top edge of one element inside the frame, in the frame's own coordinates. */
@@ -497,7 +628,7 @@ function useFrameTop(frame: RefObject<HTMLDivElement | null>, selector: string |
       const root = frame.current;
       const target = root?.querySelector<HTMLElement>(selector);
       if (!root || !target) return;
-      const next = target.getBoundingClientRect().top - root.getBoundingClientRect().top;
+      const next = rectInFrame(root, target.getBoundingClientRect()).y;
       setTop(current => (current !== null && Math.abs(current - next) < 0.5 ? current : next));
     };
     measure();
@@ -602,24 +733,36 @@ export function IosMessagesApp({
   // during render, because an effect would leave one committed frame with it already unmounted and
   // the push out would never run.
   const [seenScreen, setSeenScreen] = useState<IosScreen>(screen);
-  const [nav, setNav] = useState<{ from: IosScreen; to: IosScreen; run: number } | null>(null);
+  // Whether the New Message sheet has ever been up in this app. The device animates the first
+  // presentation and snaps every one after it (`iosScreenTransition.represent`), so the difference
+  // is not which screen is arriving but whether the sheet already exists to arrive.
+  const [sheetBuilt, setSheetBuilt] = useState(false);
+  const [nav, setNav] = useState<{ from: IosScreen; to: IosScreen; run: number; built: boolean } | null>(null);
   if (seenScreen !== screen) {
     setSeenScreen(screen);
-    setNav(screenTransition ? null : current => ({ from: seenScreen, to: screen, run: (current?.run ?? 0) + 1 }));
+    // `built` is frozen into the transition rather than read back on every render: the sheet becomes
+    // built the moment this presentation puts it up, and re-deriving the kind from that would turn
+    // the presentation into a re-present halfway through and cut its own animation off.
+    setNav(screenTransition ? null : current => ({ from: seenScreen, to: screen, run: (current?.run ?? 0) + 1, built: sheetBuilt }));
   }
   // A stated transition replaces a derived one. Leaving the derived one behind would replay it the
   // moment the caller stopped stating transitions.
   if (screenTransition && nav) setNav(null);
   const moving = screenTransition
-    ? { from: screenTransition.from, kind: screenTransitionKind(screenTransition.from, screen), run: -1, progress: screenTransition.progress }
+    ? { from: screenTransition.from, kind: screenTransitionKind(screenTransition.from, screen, { built: screenTransition.represent }), run: -1, progress: screenTransition.progress }
     : nav
-      ? { from: nav.from, kind: screenTransitionKind(nav.from, nav.to), run: nav.run, progress: undefined }
+      ? { from: nav.from, kind: screenTransitionKind(nav.from, nav.to, { built: nav.built }), run: nav.run, progress: undefined }
       : null;
   const kind = moving?.kind ?? null;
   const from = kind ? moving!.from : null;
   const showList = screen === "list" || screen === "new-message" || from === "list" || from === "new-message";
   const showConversation = screen === "conversation" || from === "conversation";
   const showSheet = screen === "new-message" || kind === "dismiss";
+  // Recorded after `kind`, never before: the presentation that builds the sheet has to see `false`.
+  if (showSheet && !sheetBuilt) setSheetBuilt(true);
+  // A re-present has no timeline, so nothing ever finishes to clear `nav` the way every other kind
+  // does — it is over in the frame it starts in.
+  if (nav && kind === "represent") setNav(null);
   const listLayer = useRef<HTMLDivElement>(null);
   const conversationLayer = useRef<HTMLDivElement>(null);
   const screenDim = useRef<HTMLDivElement>(null);
@@ -627,14 +770,18 @@ export function IosMessagesApp({
   const movingProgress = moving?.progress;
   useLayoutEffect(() => {
     if (!kind) return;
+    // A re-present is not animated on the device, so there is nothing to run and nothing to seek:
+    // the sheet is simply there, at rest, in the frame it appears in.
+    if (kind === "represent") return;
     const t = iosScreenTransition;
     const duration = t[kind];
     const running: Animation[] = [];
-    const play = (element: Element | null | undefined, keyframes: Keyframe[]) => {
-      if (element) running.push(element.animate(keyframes, { duration, easing: t.ease, fill: "both" }));
+    const play = (element: Element | null | undefined, keyframes: Keyframe[], easing: string = t.ease) => {
+      if (element) running.push(element.animate(keyframes, { duration, easing, fill: "both" }));
     };
-    // A pop is the push played backwards and a dismissal is the sheet's presentation played
-    // backwards, so each pair is written once, in the forward direction, and the frames are swapped.
+    // A pop is the push played backwards, so that pair is written once, in the forward direction,
+    // and the frames are swapped. The sheet's *panel* is no longer such a pair — the dismissal is
+    // measured and the presentation is not — but its dim still is, so `order` still serves both.
     const forward = kind === "push" || kind === "present";
     const order = (a: Keyframe, b: Keyframe) => (forward ? [a, b] : [b, a]);
     if (kind === "push" || kind === "pop") {
@@ -648,7 +795,10 @@ export function IosMessagesApp({
       const sheet = frame.current?.querySelector<HTMLElement>('[data-slot="ios-new-message-sheet"]');
       const panel = sheet?.querySelector<HTMLElement>('[data-slot="sheet"]');
       const dim = sheet ? getComputedStyle(sheet).backgroundColor : "rgba(0, 0, 0, 0)";
-      play(panel, order({ transform: "translateY(100%)" }, { transform: "translateY(0%)" }));
+      // Leaving, the panel runs the recorded table — linearly, because the curve is in the samples
+      // and an ease over the whole effect would re-time them. Arriving, it runs the shell's guess.
+      if (kind === "dismiss") play(panel, iosSheetDismissKeyframes(), "linear");
+      else play(panel, [{ transform: "translateY(100%)" }, { transform: "translateY(0%)" }]);
       play(sheet, order({ backgroundColor: "rgba(0, 0, 0, 0)" }, { backgroundColor: dim }));
     }
     if (movingProgress !== undefined) {
@@ -709,7 +859,7 @@ export function IosMessagesApp({
     return () => animation.cancel();
   }, [threadShown, threadOpen, threadProgress]);
 
-  useArrivalAnimation({ frame, send: sendAnimation, receive: receiveAnimation, onSendEnd: onSendAnimationEnd });
+  useArrivalAnimation({ frame: conversationLayer, messages, send: sendAnimation, receive: receiveAnimation, onSendEnd: onSendAnimationEnd });
 
   // Measure the pressed bubble's body inside the frame so the overlay can lift a copy of it in place.
   // The first render after `longPress` opens has no layout yet, so measure on the next frame; the
@@ -725,14 +875,16 @@ export function IosMessagesApp({
       // several cards, so take the union rather than the first: the lift covers all of them.
       const bodies = Array.from(row.querySelectorAll<HTMLElement>(messageBodySelector)).filter(element => !insideQuotedStub(element));
       if (!bodies.length) return;
-      const f = root.getBoundingClientRect();
       const boxes = bodies.map(element => element.getBoundingClientRect());
       const left = Math.min(...boxes.map(b => b.left)), top = Math.min(...boxes.map(b => b.top));
-      const rect = { x: left - f.left, y: top - f.top, width: Math.max(...boxes.map(b => b.right)) - left, height: Math.max(...boxes.map(b => b.bottom)) - top };
+      const rect = rectInFrame(root, { left, top, width: Math.max(...boxes.map(b => b.right)) - left, height: Math.max(...boxes.map(b => b.bottom)) - top });
       // Read the tail off the message rather than assuming one: a bubble in the middle of a cluster
       // has none, and an emoji-only message has no bubble to hang one from.
       const tail = Array.from(row.querySelectorAll<HTMLElement>('[data-slot="tail"]')).some(element => !insideQuotedStub(element));
-      setPressedRect(current => (current?.id === pressedId && current.tail === tail && Math.abs(current.rect.x - rect.x) < 0.5 && Math.abs(current.rect.y - rect.y) < 0.5 && Math.abs(current.rect.width - rect.width) < 0.5 ? current : { id: pressedId, rect, tail }));
+      // Height is part of "the same rect": it used to be left out, so a body that grew without moving
+      // its top-left corner or changing its width was never picked up — which is exactly what a photo
+      // does when it loads and swaps the 4:3 placeholder for its own aspect.
+      setPressedRect(current => (current?.id === pressedId && current.tail === tail && Math.abs(current.rect.x - rect.x) < 0.5 && Math.abs(current.rect.y - rect.y) < 0.5 && Math.abs(current.rect.width - rect.width) < 0.5 && Math.abs(current.rect.height - rect.height) < 0.5 ? current : { id: pressedId, rect, tail }));
     };
     const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measure); };
     // Measure synchronously so the overlay is on screen at the first paint after the press. Deferring
@@ -741,9 +893,12 @@ export function IosMessagesApp({
     measure();
     const observer = new ResizeObserver(schedule);
     if (frame.current) observer.observe(frame.current);
+    const row = frame.current?.querySelector(`[data-message-id="${pressedId}"]`);
+    if (row) observer.observe(row);
+    window.addEventListener("resize", schedule);
     document.fonts?.ready.then(schedule).catch(() => {});
-    return () => { observer.disconnect(); cancelAnimationFrame(raf); };
-  }, [pressedId, frame, messages]);
+    return () => { observer.disconnect(); cancelAnimationFrame(raf); window.removeEventListener("resize", schedule); };
+  }, [pressedId, frame, messages, width, height]);
   const pressedBody = pressedRect && pressedRect.id === overlayId ? pressedRect : null;
 
   // ---------------------------------------------------------------------------------------------
@@ -755,7 +910,10 @@ export function IosMessagesApp({
   // The Ø60 slot the details screen's entrance morphs out of, so a group grows out of its own faces.
   const navAvatar = participants && participants.length > 1
     ? <GroupAvatar participants={participants} size={groupAvatarMetrics.phone.groupAvatar} name={contact.name} />
-    : undefined;
+    : contact.photo ? (
+      // eslint-disable-next-line @next/next/no-img-element -- framework-neutral registry component
+      <img src={contact.photo} alt="" className="size-full object-cover" draggable={false} />
+    ) : undefined;
 
   const [ownPlusMenu, setOwnPlusMenu] = useState(false);
   const plusValue = plusMenu === undefined ? (ownPlusMenu ? openMarker : null) : plusMenu;
@@ -767,10 +925,17 @@ export function IosMessagesApp({
   const viewerId = viewerLatch.mounted;
   // The photo that is showing, held by the shell whether or not the caller controls the viewer, so
   // the exit lands on the tile of the photo the reader paged to rather than the one it opened on.
+  // The number counts photos in the RUN, not in one message — see `photoRun`.
   const [viewerIndex, setViewerIndex] = useState(0);
-  const shownIndex = viewerValue?.index ?? viewerIndex;
-  const viewerMessage = viewerId ? messages.find(message => message.id === viewerId) : undefined;
-  const [viewerRects, seedTileRects] = useTileRects(frame, viewerId);
+  const viewerRun = useMemo(() => photoRun(messages, viewerId ?? ""), [messages, viewerId]);
+  const shownIndex = Math.min(Math.max(viewerValue?.index ?? viewerIndex, 0), Math.max(viewerRun.photos.length - 1, 0));
+  // Which message of the run the photo on screen belongs to: the share, the save, the reply and the
+  // tapback all act on the item that is showing, not on the one the reader happened to tap.
+  const shownRunIndex = viewerRun.offsets.reduce((found, offset, index) => (offset <= shownIndex ? index : found), 0);
+  const shownMessageId = viewerRun.ids[shownRunIndex] ?? viewerId;
+  const shownMessage = shownMessageId ? messages.find(message => message.id === shownMessageId) : undefined;
+  const shownPhotoIndex = shownIndex - (viewerRun.offsets[shownRunIndex] ?? 0);
+  const [viewerRects, seedTileRects] = useTileRects(frame, viewerRun);
 
   const [ownPhotoPicker, setOwnPhotoPicker] = useState<NonNullable<IosMessagesAppProps["photoPicker"]> | null>(null);
   const photoPickerValue = photoPicker === undefined ? ownPhotoPicker : photoPicker;
@@ -846,13 +1011,20 @@ export function IosMessagesApp({
   const searchListLayer = useRef<HTMLDivElement>(null);
 
   const closePlusMenu = () => { setOwnPlusMenu(false); onPlusMenuClose?.(); };
+  /**
+   * `index` arrives as the tile's index inside `id`'s own message, because that is all the tile
+   * knows. The viewer counts in run photos, so it is rebased here — and `onOpenPhoto` keeps
+   * reporting the message-local index it was handed, which is the number its caller can act on.
+   */
   const openPhoto = (id: string, index: number) => {
+    const run = photoRun(messages, id);
+    const runIndex = (run.offsets[run.ids.indexOf(id)] ?? 0) + index;
     // Read the tiles in the same event that mounts the viewer, so its very first frame already has
     // the box it grows out of; both writes batch into one commit.
-    const rects = readTileRects(frame.current, id);
-    if (rects) seedTileRects({ id, rects });
-    setViewerIndex(index);
-    setOwnViewer({ id, index });
+    const rects = readTileRects(frame.current, run.ids, runSizes(run));
+    if (rects) seedTileRects({ id: run.ids.join(" "), rects });
+    setViewerIndex(runIndex);
+    setOwnViewer({ id, index: runIndex });
     onOpenPhoto?.(id, index);
   };
   const openTapbackDetails = (id: string) => { setOwnTapbackDetails(id); onOpenTapbackDetails?.(id); };
@@ -876,6 +1048,8 @@ export function IosMessagesApp({
 
   const recorderUp = recorderLatch.mounted !== null;
   const pickerUp = photoPickerLatch.mounted !== null;
+  // Keep the measured gap above the bottom-anchored picker in shorter app previews too.
+  const pickerComposerTop = photoPickerComposerTop + height - iosScreen.height;
   /**
    * The composer's own band is 68 tall and the recorder's root is
    * `composer.bottom + rowHeight` = 80, so the log gives up another 12 while a take is being made.
@@ -927,7 +1101,7 @@ export function IosMessagesApp({
             carries no transform: a transform node makes Chrome snap its descendants to whole CSS px,
             which would move text by a fraction of a point against the captures. */}
         {showList && (
-          <div ref={listLayer} data-slot="screen-list" className="absolute inset-0" style={{ pointerEvents: screen === "conversation" ? "none" : undefined }}>
+          <div ref={listLayer} data-slot="screen-list" className="absolute inset-0" inert={screen !== "list" || searchShown || undefined} aria-hidden={screen !== "list" || searchShown || undefined} style={{ pointerEvents: screen === "conversation" ? "none" : undefined }}>
             {/* The layer search rises and falls: the list itself, without its bottom bar, because
                 `IosSearch` draws that bar. Leaving both would paint the glass fill and its
                 `0 6px 36px spread 4` shadow twice, which measures 1.04% against `list-light.png`
@@ -948,6 +1122,7 @@ export function IosMessagesApp({
             query={searchValue?.query}
             onQueryChange={query => { setOwnSearch({ query }); onSearchQueryChange?.(query); }}
             sections={searchValue?.sections ?? []}
+            maxResults={searchValue?.maxResults}
             onSelect={onSearchSelect}
             onSeeAll={onSearchSeeAll}
             onCancel={() => { setOwnSearch(null); onCloseSearch?.(); }}
@@ -958,7 +1133,7 @@ export function IosMessagesApp({
             listRef={searchListLayer} />
         )}
         {showConversation && (
-          <div ref={conversationLayer} data-slot="screen-conversation" className="absolute inset-0" style={{ pointerEvents: screen === "conversation" ? undefined : "none" }}>
+          <div ref={conversationLayer} data-slot="screen-conversation" inert={screen !== "conversation" || !!viewerLatch.mounted || undefined} aria-hidden={screen !== "conversation" || !!viewerLatch.mounted || undefined} className="absolute inset-0" style={{ background: "var(--im-bg)", pointerEvents: screen === "conversation" ? undefined : "none" }}>
             {/* Select mode wraps the whole screen rather than being mounted beside it: it generates
                 no box (`display: contents`), it publishes the one `--ios-sel-t` every piece below
                 animates off, and it is what cross-fades the nav bar's back button out. It stays
@@ -1019,12 +1194,22 @@ export function IosMessagesApp({
                 onPlayChange={playing => setOwnRecorder(current => (current ? { ...current, state: playing ? "playing" : "stopped" } : current))}
                 onSend={take => { onAudioSend?.(take); setOwnRecorder(null); onAudioRecorderClose?.(); }} />
             ) : (
-              <IosComposer className={cn("absolute left-0", !pickerUp && "bottom-0")} style={pickerUp ? { top: photoPickerComposerTop } : undefined}
+              <IosComposer className={cn("absolute left-0", !pickerUp && "bottom-0")} style={pickerUp ? { top: pickerComposerTop } : undefined}
                 // Dropped by `selectModeRules`, not unmounted: it has to be on screen to be seen
                 // leaving. `inert` once it has, so the toolbar over it is the only thing reachable.
                 inert={(selecting && selectTransition.t > 0.5) || undefined}
                 value={composer?.value} placeholder={composer?.placeholder} disabled={composer?.disabled}
-                onChange={composer?.onChange} onSend={composer?.onSend}
+                onChange={composer?.onChange} hasAttachments={picked.length > 0}
+                onSend={async text => {
+                  if (!composer?.onSend) return;
+                  const attachments = pickerPhotos.filter((photo, index) => picked.includes(photo.id ?? String(index)));
+                  await composer.onSend(text, attachments);
+                  if (attachments.length) {
+                    changePhotoSelection([]);
+                    setOwnPhotoPicker(null);
+                    if (photoPicker !== undefined) onPhotoPickerClose?.();
+                  }
+                }}
                 attachExpanded={plusLatch.open}
                 // The picker and the sticker sheet have no dismissal of their own in the capture, so
                 // the control that opened them is the way back out; otherwise the `+` opens the menu.
@@ -1042,7 +1227,7 @@ export function IosMessagesApp({
               // UNMEASURED: the capture that pins the panel and the composer has no chips in it, so
               // the row's own 8 pt of air above the composer is invented, as is every number in
               // `photoPickerChipMetrics` it sits on.
-              <div className="absolute" style={{ left: photoPickerChipMetrics.rowInset, top: photoPickerComposerTop - photoPickerChipMetrics.size - 8 }}>
+              <div className="absolute" style={{ left: photoPickerChipMetrics.rowInset, top: pickerComposerTop - photoPickerChipMetrics.size - 8 }}>
                 <PhotoPickerAttachments photos={pickerPhotos.filter((photo, index) => picked.includes(photo.id ?? String(index)))}
                   onRemove={id => changePhotoSelection(picked.filter(entry => entry !== id))} />
               </div>
@@ -1163,7 +1348,7 @@ export function IosMessagesApp({
             backdrop={detailsBackdrop()} />
         ) : (
           <IosDetails className="absolute inset-0 z-30"
-            name={contact.name} initials={contact.initials} actions={detailsActions}
+            name={contact.name} initials={contact.initials} avatar={navAvatar} actions={detailsActions}
             phone={detailsContent?.phone} phoneLabel={detailsContent?.phoneLabel} tag={detailsContent?.tag}
             hideAlerts={detailsContent?.hideAlerts} onHideAlertsChange={detailsContent?.onHideAlertsChange}
             photos={detailsContent?.photos} sharedLinks={detailsContent?.sharedLinks} attachments={detailsContent?.attachments}
@@ -1177,7 +1362,7 @@ export function IosMessagesApp({
         <IosStatusBar time={time} className="absolute left-0 top-0" />
         {showSheet && (
           <IosNewMessageSheet onClose={onCloseNewMessage} caret style={{ pointerEvents: screen === "new-message" ? undefined : "none" }}>
-            <IosComposer placeholder="" value={composer?.value} onChange={composer?.onChange} onSend={composer?.onSend} />
+            <IosComposer placeholder="" value={composer?.value} onChange={composer?.onChange} onSend={text => composer?.onSend?.(text, [])} />
           </IosNewMessageSheet>
         )}
         {/* The overlay lifts a copy of the pressed message at the same spot, so hide the original. */}
@@ -1186,6 +1371,17 @@ export function IosMessagesApp({
           <MessageActions rect={pressedBody.rect} frame={{ width, height }} direction={overlayMessage.direction} service={overlayMessage.service ?? "imessage"}
             progress={longPress?.progress} autoFocus={longPress?.progress === undefined && !closing}
             open={!closing} onExited={() => setClosing(null)}
+            // A photo's menu is Save / Copy / More…, not the text bubble's Copy / Translate / Select /
+            // More… — measured on the device, see `iosPhotoMenu`.
+            items={messageShape(overlayMessage) === "image" ? iosPhotoMenu : undefined}
+            // Measured on the device, and both photo-only: a photo's preview lifts to a fixed 326 pt
+            // width rather than by the bubble rule, its tapback pill starts 6 from the screen edge
+            // rather than 10.83, and the preview carries NO TAIL even when the balloon it came from
+            // has one (so the menu's gap is taken from the preview's own bottom edge — passing
+            // `tail={false}` is what stops the layout adding the scaled 6.8 pt hang below it).
+            {...(messageShape(overlayMessage) === "image"
+              ? { scale: photoLiftScale(pressedBody.rect), barEdgeInset: messageActionsMetrics.photoBarEdgeInset, tail: false }
+              : { tail: pressedBody.tail })}
             // The menu's glass picks up the bubble behind it, and a message with no bubble has none to
             // give: an emoji-only message, a photo, a link card and a file card all take the plain glass.
             wash={liftsABubble(overlayMessage) ? undefined : null}
@@ -1195,7 +1391,9 @@ export function IosMessagesApp({
             // nothing wired; the caller still hears the action, as it does for every other row.
             onAction={action => { if (action === "select") openSelectMode(overlayMessage.id); onMenuAction?.(overlayMessage.id, action); }}
             onClose={onLongPressClose}>
-            <LiftedMessage message={overlayMessage} tail={pressedBody.tail} screenBottom={pressedBody.rect.y + pressedBody.rect.height} />
+            {/* A photo's preview drops its tail: the last balloon of a run carries one at rest and the
+                capture shows a plain rounded corner in its place once it is lifted. */}
+            <LiftedMessage message={overlayMessage} tail={pressedBody.tail && messageShape(overlayMessage) !== "image"} screenBottom={pressedBody.rect.y + pressedBody.rect.height} />
           </MessageActions>
         )}
         {/* Who reacted. It paints its own `--im-dim` scrim over the whole frame and traps Tab, so it
@@ -1216,26 +1414,31 @@ export function IosMessagesApp({
         )}
         {/* The photo viewer is last: it fills the frame, draws its own status bar (`allowStatusBar`
             is 1) and covers everything, including the shell's. `rectForIndex` is what lands the exit
-            on the photo that is showing rather than on the tile the entrance grew out of. */}
-        {viewerId && viewerMessage?.images?.length ? (
+            on the photo that is showing rather than on the tile the entrance grew out of.
+            `photos` is the whole run, not the tapped message's: measured in ChatKit, the viewer
+            pages across the tapped photo's layout group. See `photoRun`. Every callback below
+            reports the message the photo ON SCREEN belongs to, which after a page is not the one
+            that was tapped. */}
+        {viewerId && viewerRun.photos.length ? (
           <ImageViewer
-            photos={viewerMessage.images}
+            photos={viewerRun.photos}
             index={shownIndex}
             onIndexChange={index => { setViewerIndex(index); setOwnViewer(current => (current ? { ...current, index } : current)); onPhotoIndexChange?.(index); }}
             open={viewerLatch.open}
             progress={viewerValue?.progress}
             chrome={viewerValue?.chrome}
             dismissProgress={viewerValue?.dismiss}
+            pageOffset={viewerValue?.pageOffset}
             sourceRect={viewerRects[shownIndex] ?? null}
             rectForIndex={index => viewerRects[index] ?? null}
             time={time}
             onClose={() => { setOwnViewer(null); onClosePhoto?.(); }}
             onExited={viewerLatch.exited}
-            onShare={onSharePhoto && (() => onSharePhoto(viewerId, shownIndex))}
-            onSave={onSavePhoto && (() => onSavePhoto(viewerId, shownIndex))}
-            onReply={onOpenThread && (() => onOpenThread(viewerId))}
-            reaction={ownReactionOf(viewerMessage)}
-            onReact={onTapback && (selection => onTapback(viewerId, selection))} />
+            onShare={onSharePhoto && (() => onSharePhoto(shownMessageId, shownPhotoIndex))}
+            onSave={onSavePhoto && (() => onSavePhoto(shownMessageId, shownPhotoIndex))}
+            onReply={onOpenThread && (() => onOpenThread(shownMessageId))}
+            reaction={ownReactionOf(shownMessage)}
+            onReact={onTapback && (selection => onTapback(shownMessageId, selection))} />
         ) : null}
         {overlay}
       </div>
@@ -1446,7 +1649,8 @@ function SelectionCircleLayer({ frame, messages, selected, onToggle, active, pro
     const follow = () => { if (track.current) track.current.style.transform = `translateY(${-log.scrollTop}px)`; };
     const measure = () => {
       // The content's own origin: where row 0 would sit however far the log is scrolled.
-      const origin = log.getBoundingClientRect().top - log.scrollTop;
+      const bounds = log.getBoundingClientRect();
+      const scaleY = bounds.height / log.clientHeight || 1;
       const next = Array.from(log.querySelectorAll<HTMLElement>('[data-slot="message-row"][data-message-id]')).map(row => {
         // Every body this message drew, minus anything inside its quoted stub — a file message can
         // carry several cards, and the circle belongs on the middle of all of them.
@@ -1454,7 +1658,7 @@ function SelectionCircleLayer({ frame, messages, selected, onToggle, active, pro
           .filter(element => !insideQuotedStub(element)).map(element => element.getBoundingClientRect());
         const top = boxes.length ? Math.min(...boxes.map(box => box.top)) : row.getBoundingClientRect().top;
         const bottom = boxes.length ? Math.max(...boxes.map(box => box.bottom)) : row.getBoundingClientRect().bottom;
-        return { id: row.getAttribute("data-message-id")!, y: (top + bottom) / 2 - origin };
+        return { id: row.getAttribute("data-message-id")!, y: ((top + bottom) / 2 - bounds.top) / scaleY + log.scrollTop };
       });
       setSpots(current => (current.length === next.length && current.every((spot, index) => spot.id === next[index].id && Math.abs(spot.y - next[index].y) < 0.5) ? current : next));
       follow();
@@ -1539,7 +1743,7 @@ function LongPressLayer({ frame, onLongPress }: { frame: RefObject<HTMLDivElemen
     };
     const onPointerMove = (event: PointerEvent) => { if (timer && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > 8) cancel(); };
     const onContextMenu = (event: MouseEvent) => { const id = idAt(event.target); if (id) { event.preventDefault(); cancel(); latest.current(id); } };
-    const onDoubleClick = (event: MouseEvent) => { const id = idAt(event.target); if (id) latest.current(id); };
+    const onDoubleClick = (event: MouseEvent) => { const id = idAt(event.target); if (id) { event.preventDefault(); cancel(); latest.current(id); } };
     // The keyboard equivalent of the hold: the log's arrow keys focus a message, and these keys open
     // its actions. Without this the overlay would be reachable by pointer only.
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1556,6 +1760,10 @@ function LongPressLayer({ frame, onLongPress }: { frame: RefObject<HTMLDivElemen
     log.addEventListener("pointermove", onPointerMove);
     log.addEventListener("pointerup", cancel);
     log.addEventListener("pointercancel", cancel);
+    log.addEventListener("pointerleave", cancel);
+    log.addEventListener("scroll", cancel, { passive: true });
+    window.addEventListener("pointerup", cancel);
+    window.addEventListener("blur", cancel);
     log.addEventListener("contextmenu", onContextMenu);
     log.addEventListener("dblclick", onDoubleClick);
     log.addEventListener("keydown", onKeyDown);
@@ -1565,6 +1773,10 @@ function LongPressLayer({ frame, onLongPress }: { frame: RefObject<HTMLDivElemen
       log.removeEventListener("pointermove", onPointerMove);
       log.removeEventListener("pointerup", cancel);
       log.removeEventListener("pointercancel", cancel);
+      log.removeEventListener("pointerleave", cancel);
+      log.removeEventListener("scroll", cancel);
+      window.removeEventListener("pointerup", cancel);
+      window.removeEventListener("blur", cancel);
       log.removeEventListener("contextmenu", onContextMenu);
       log.removeEventListener("dblclick", onDoubleClick);
       log.removeEventListener("keydown", onKeyDown);

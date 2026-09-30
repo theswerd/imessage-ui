@@ -4,7 +4,7 @@ A complete, composable conversation for either platform: header, scrolling log w
 
 ## Requirements
 
-React 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor.
+React 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor. Standalone primitives need PaletteStyle inside a data-im-platform wrapper; full conversation and app shells include it. Setup: http://localhost:3100/onboard.md
 
 ## Install
 
@@ -18,8 +18,8 @@ npx shadcn@latest add http://localhost:3100/r/conversation.json
 "use client";
 
 import { useState } from "react";
-import { Conversation } from "@/components/imessage/conversation";
-import type { Message } from "@/components/imessage/message-list";
+import { Conversation } from "@/components/message-ui/conversation";
+import type { Message } from "@/components/message-ui/message-list";
 
 export function Chat() {
   const [messages, setMessages] = useState<Message[]>([
@@ -40,4 +40,4 @@ export function Chat() {
 }
 ```
 
-Components render UI only. Supply your own message data, persistence, uploads, and send handlers. No iMessage or Apple service connection is included.
+Components render UI only. Supply your own message data, persistence, uploads, and send handlers. Connect your own messaging service.

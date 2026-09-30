@@ -915,17 +915,24 @@ test("a macOS attachment popover opened by clicking lands on its button", async 
 });
 
 /**
- * Opening a photo from a stack must leave the stack behind it. The cards carry a `zIndex` so the
- * front one paints last, and a `zIndex` on an absolutely positioned element hoists it to the nearest
+ * Opening a photo must leave the transcript behind it.
+ *
+ * This was written when several photos were one fanned stack: the cards carried a `zIndex` so the
+ * front one painted last, and a `zIndex` on an absolutely positioned element hoists it to the nearest
  * ancestor *stacking context* — which, with none between the stack and the screen, was above the
- * photo viewer: tapping a photo opened the viewer with the stack still floating over the full-screen
- * image it had just opened. `isolation: isolate` on the stack is what contains them, and this is the
- * check that keeps it there.
+ * photo viewer. Tapping a photo opened the viewer with a card still floating over the full-screen
+ * image it had just opened.
+ *
+ * The stack is gone — several photos are several balloons now, which is what the device draws — but
+ * the check is kept rather than deleted, because the thing it guards is not the stack. It is that
+ * *whatever the transcript paints* stays under a full-screen viewer, and every balloon still carries
+ * a positioned tile that could hoist out of its container. The locator had to be narrowed: each
+ * balloon now has its own tile at index 0, so an unscoped `[data-index="0"]` matches one per photo.
  */
-test("opening a photo from the stack leaves the stack behind the viewer", async ({ page }, info) => {
-  test.skip(platformFor(info) !== "ios", "the transcript stack and its viewer are driven here on the phone");
+test("opening a photo leaves the transcript behind the viewer", async ({ page }, info) => {
+  test.skip(platformFor(info) !== "ios", "the transcript and its viewer are driven here on the phone");
   await openScene(page, info, "photos");
-  const front = page.locator('[data-slot="photo-tile"][data-index="0"]');
+  const front = page.locator('[data-slot="photo-tile"][data-index="0"]').first();
   const box = (await front.boundingBox())!;
   await front.tap();
   await expect(page.locator('[data-slot="image-viewer"]')).toBeVisible();
@@ -942,12 +949,9 @@ test("opening a photo from the stack leaves the stack behind the viewer", async 
   }, { x: box.x + box.width / 2, y: box.y + box.height / 2 });
   expect(owner.inViewer, `the viewer owns that point, not ${owner.slot}`).toBe(true);
 
-  // And the stack itself is contained: a stacking context of its own, so its cards cannot climb out.
-  const isolated = await page.evaluate(() => {
-    const stack = document.querySelector('[data-slot="photo-stack"]');
-    return stack ? getComputedStyle(stack).isolation : null;
-  });
-  expect(isolated, "the stack makes its own stacking context").toBe("isolate");
+  // Check the visible result. A photo run no longer needs the old fan's stacking context.
+  await expect(page.locator('[data-slot="image-viewer"]')).toBeVisible();
+  await expect(front).toBeAttached();
 });
 
 /**
@@ -1103,4 +1107,89 @@ test("a message sent with an effect can be played again", async ({ page }, info)
   await control.click();
   await expect.poll(async () => await bubble.evaluate(el => getComputedStyle(el).transform),
     { message: "the effect runs again" }).not.toBe("matrix(1, 0, 0, 1, 0, 0)");
+});
+
+/**
+ * **The macOS conversation list does not animate when you click a row.**
+ *
+ * This kit used to slide a 300 × 80.5 blue tile between rows over 140 ms, cross-fade both rows' text
+ * over 110 ms, and fade the four bracketing separators — six-plus animations. Native runs none of
+ * them. Measured against the live ChatKit 26 / UIKitCore at idiom 5: the list is a `UICollectionView`
+ * of `CKConversationListCollectionViewConversationCell`, and its user-click path creates zero
+ * `CAAnimation`s — reproduced both on the collection list and on the `UITableViewCell` that list cell
+ * embeds as its content — with no shared highlight view anywhere in it to travel between rows.
+ *
+ * A screenshot suite cannot catch an invented animation: every frame of one looks plausible, and the
+ * endpoints are correct. Only driving the click and watching for motion can, which is what this does.
+ */
+test("clicking a sidebar row changes the selection in one frame, with no motion", async ({ page }, info) => {
+  test.skip(platformFor(info) === "ios", "the sidebar is a macOS surface");
+  await openScene(page, info, "conversation");
+  const sidebar = page.getByRole("navigation", { name: "Conversations" });
+  const target = sidebar.getByRole("button", { name: /^Jamie Chen/ });
+  await expect(target).not.toHaveAttribute("aria-current", "true");
+
+  // Watch three ways at once, because the invented motion used all three: the Web Animations API, a
+  // CSS transition, and an element inserted for the duration of the switch.
+  await page.evaluate(() => {
+    const nav = document.querySelector('[data-slot="sidebar-rows"]')?.closest("nav");
+    const seen: string[] = [];
+    const inserted: string[] = [];
+    Object.assign(window, { __seen: seen, __inserted: inserted });
+    const native = Element.prototype.animate;
+    Element.prototype.animate = function animate(this: Element, ...args: Parameters<Element["animate"]>) {
+      if (nav?.contains(this)) seen.push(this.getAttribute("data-slot") ?? this.tagName.toLowerCase());
+      return native.apply(this, args);
+    };
+    if (nav) new MutationObserver(records => {
+      for (const record of records) for (const node of record.addedNodes) {
+        if (node instanceof Element) inserted.push(node.getAttribute("data-slot") ?? node.tagName.toLowerCase());
+      }
+    }).observe(nav, { childList: true, subtree: true });
+  });
+
+  await target.click();
+  await expect(target).toHaveAttribute("aria-current", "true");
+
+  expect(await page.evaluate(() => (window as unknown as { __seen: string[] }).__seen),
+    "nothing under the sidebar starts an animation").toEqual([]);
+  expect(await page.evaluate(() => (window as unknown as { __inserted: string[] }).__inserted),
+    "and no travelling highlight is inserted to carry one").toEqual([]);
+
+  // The fill and the separators arrive instantly rather than easing in — the same claim, read off the
+  // style rather than off the animation, so a transition added later cannot slip past the hooks above.
+  const durations = await page.evaluate(() => {
+    const nav = document.querySelector('[data-slot="sidebar-rows"]')?.closest("nav");
+    return [...(nav?.querySelectorAll('[data-slot="sidebar-row"] button, .mac-sidebar-separator') ?? [])]
+      .map(element => getComputedStyle(element).transitionDuration)
+      .filter(duration => duration !== "0s");
+  });
+  expect(durations, "no row fill or separator eases").toEqual([]);
+});
+
+/**
+ * Native iOS capture evidence: references/simulator-cases.md §3.4. Ten selected photos become ten
+ * balloons in order, with one tail at the end. The Mac currently shares that presentation; its
+ * native multi-photo appearance remains unverified. Test the public result on both platforms.
+ */
+test("a ten-photo message keeps every photo in order and inside its row", async ({ page }, info) => {
+  await openScene(page, info, "photo-many");
+  const run = page.getByRole("group", { name: "10 Photos", exact: true });
+  const tiles = run.locator('[data-slot="photo-tile"]');
+  await expect(tiles).toHaveCount(10);
+  await expect(run.locator('[data-slot="tail"]')).toHaveCount(1);
+  await expect(run.locator('[data-slot="photo-stack"]')).toHaveCount(0);
+  for (let i = 0; i < 10; i++) await expect(tiles.nth(i)).toHaveAccessibleName(`Photo ${i + 1}`);
+  const geometry = await tiles.evaluateAll(elements => elements.map(element => {
+    const rect = element.getBoundingClientRect();
+    const row = element.closest('[data-slot="message-row"]')!.getBoundingClientRect();
+    return { top: rect.top, bottom: rect.bottom, width: rect.width, overflow: Math.max(row.left - rect.left, rect.right - row.right) };
+  }));
+  expect(geometry.every(item => item.width > 0 && item.overflow <= 0.5)).toBe(true);
+  expect(geometry.every((item, index) => index === 0 || item.top > geometry[index - 1].bottom)).toBe(true);
+  // The first and last balloons can both be reached even when the run exceeds the viewport.
+  await tiles.first().scrollIntoViewIfNeeded();
+  await expect(tiles.first()).toBeInViewport();
+  await tiles.last().scrollIntoViewIfNeeded();
+  await expect(tiles.last()).toBeInViewport();
 });

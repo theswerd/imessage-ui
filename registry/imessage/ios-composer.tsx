@@ -50,6 +50,8 @@ export type IosComposerProps = Omit<ComponentProps<"form">, "onSubmit" | "onChan
   defaultValue?: string;
   onChange?: (value: string) => void;
   onSend?: (message: string) => void | Promise<void>;
+  /** Show Send when attachments are ready, even without a text caption. */
+  hasAttachments?: boolean;
   onAttach?: () => void;
   /** Whether the attachments sheet (`IosPlusMenu`) is open; sets the `+` button's aria-expanded. */
   attachExpanded?: boolean;
@@ -224,7 +226,7 @@ function ComposerMicIcon() {
 }
 
 export function IosComposer({
-  value, defaultValue = "", onChange, onSend, onAttach, attachExpanded, onMic, placeholder = "iMessage", disabled = false, raised = false, maxLines = 8, className, style, ...props
+  value, defaultValue = "", onChange, onSend, hasAttachments = false, onAttach, attachExpanded, onMic, placeholder = "Message", disabled = false, raised = false, maxLines = 8, className, style, ...props
 }: IosComposerProps) {
   const [draft, setDraft] = useState(defaultValue);
   const text = value ?? draft;
@@ -255,7 +257,7 @@ export function IosComposer({
 
   async function send() {
     const message = text.trim();
-    if (!message || disabled || sending.current || composing.current) return;
+    if ((!message && !hasAttachments) || disabled || sending.current || composing.current) return;
     sending.current = true;
     try {
       await onSend?.(message);
@@ -293,7 +295,7 @@ export function IosComposer({
           onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
           className="relative block w-full resize-none border-0 bg-transparent outline-none select-text placeholder:text-[var(--ios-cmp-placeholder)]"
           style={{ padding: `${PAD_Y}px 48px ${PAD_Y}px 16px`, fontFamily: font, fontSize: 17, lineHeight: `${LINE}px`, letterSpacing: 0, color: "var(--ios-cmp-text)", caretColor: "var(--ios-cmp-caret)", boxSizing: "border-box", margin: 0 }} />
-        {hasText ? (
+        {hasText || hasAttachments ? (
           <button type="submit" data-slot="send" aria-label="Send message" disabled={disabled}
             data-pressed={sendPress.pressed || undefined} {...sendPress.handlers}
             className={cn("absolute flex items-center justify-center rounded-full bg-[#0088ff] text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500", pressTransition)}

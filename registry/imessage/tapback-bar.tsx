@@ -33,6 +33,32 @@ import { BalloonTrail, pickerBalloonGeometry, TapbackGlyph, tapbackColors, tapba
  * that much left inside their own boxes (row 1's art in `tapback.tsx`, row 2's by the emoji
  * rasteriser), and correcting the grid alone moves every ink centre in both rows away from the
  * capture. Correct them together, not the grid on its own.
+ *
+ * **ChatKit corroborates the iOS row exactly.** Read out of the live framework on 2026-09-10 with the
+ * Catalyst probe in `references/tapback-details.md`, `CKUIBehaviorPhone`:
+ * `messageAcknowledgmentPickerBarSize` = **{310, 74}** and `messageAcknowledgmentPickerBarPadding` =
+ * **5**. Both numbers fall straight out of the values measured above:
+ *
+ * - height: 74 − 2×5 = **64**, against the 64.33 measured on the capture's centre line.
+ * - width: six `slot` of 49 is 294, and `firstCenter` 32.5 leaves 32.5 − 49/2 = **8** of lead, which
+ *   the trailing spacer repeats, so 294 + 2×8 = **310** to the point. ChatKit even names that 8:
+ *   `messageAcknowledgmentPickerBarItemSectionPush` = 8.
+ *
+ * So `slot`, `firstCenter` and `height` are each confirmed twice, by a capture and by the framework.
+ *
+ * What does **not** agree is that 310 is a *fixed* width there, while `message-actions.tsx` stretches
+ * the pill from the screen margin to the bubble's trailing edge — 375.17 pt beside a balloon whose
+ * right edge is 386. The capture is what that file measured and what this kit keeps; the framework's
+ * 310 is recorded here because a bar that is 310 wide and merely *anchored* beside the bubble would
+ * explain the same capture, and nothing measured so far separates the two. A long-press over a
+ * NARROW bubble would: a stretched pill shrinks with the bubble, a 310 pill does not.
+ *
+ * Three more picker constants, for whoever measures the emoji row next, none of them used here:
+ * `messageAcknowledgmentPickerBarAcknowledgmentItemBalloonSize` {42, 42},
+ * `messageAcknowledgmentPickerBarItemSectionScaleFactor` 0.85, and `emojiTapbackScaleFactor` 0.8125
+ * (0.8125 × 42 = 34.125, which is neither this file's `glyph` 25.33 nor its `emojiSize` 25, so what it
+ * scales is NOT established). `messageAcknowledgmentPickerBarArrowWidth` 24 / `…ArrowPadding` 8 size a
+ * scroll arrow this bar does not draw and no capture shows.
  */
 export const tapbackBarMetrics = {
   ios: { height: 64.33, slot: 49, firstCenter: 32.5, glyph: 25.33, selectedRing: 44, pickerDrop: 14.67, edgeInset: 10.83, emojiSize: 25 },

@@ -1,7 +1,32 @@
 {
   "platform": "ios",
-  "osVersion": null,
-  "status": "awaiting-native-captures",
-  "viewport": { "width": 390, "height": 760, "scale": 1 },
-  "captures": []
+  "osVersion": "iOS 26.0 (23A343)",
+  "status": "partial-native-captures",
+  "viewport": {
+    "width": 402,
+    "height": 874,
+    "scale": 3
+  },
+  "captures": [
+    {
+      "scene": "photo-long-press",
+      "time": 0,
+      "theme": "light",
+      "image": "light/photo-long-press-0.png",
+      "scale": 3,
+      "source": "iPhone 17 Pro simulator 525CB796-F5C9-41C3-92FC-D760CA5CE9DC driven through XCUITest (scratchpad/uitest/drive.sh): three photos sent into +1 (555) 564-8583 in one picker send, picker sheet swiped away, then a 1.0 s press at (260, 601) on the last balloon. The press kills the XCUITest runner the moment the menu opens, so the frame is a host screenshot taken from scratchpad/tbp/burst.sh while the menu was still on the glass, status bar pinned 9:41 / 100% discharging / 4 cellular / 3 wifi.",
+      "capturedAt": "2026-09-11T06:48:21.481Z",
+      "sha256": "521d7a087385e5567ba02aae915c5ef2863e13d66dd21436c9a668891583e10d"
+    },
+    {
+      "scene": "photo-run",
+      "time": 0,
+      "theme": "light",
+      "image": "light/photo-run-0.png",
+      "scale": 3,
+      "source": "iPhone 17 Pro simulator 525CB796-F5C9-41C3-92FC-D760CA5CE9DC driven through XCUITest (scratchpad/uitest/drive.sh): three library tiles (4:3, 1:1, 3:4) attached in the photo picker and sent with one tap, picker sheet swiped away. The same run dump-tree gives the cells: y -17.7/176.0/432.7, heights 189.7/252.7/337.0, every balloon 252.667 wide with its right edge on 386.0, tail on the last only. Status bar pinned 9:41 / 100% discharging / 4 cellular / 3 wifi.",
+      "capturedAt": "2026-09-11T06:48:30.945Z",
+      "sha256": "6163005db5958a874c70925393dd06e3fc635b7da493082b27e6911e749b63ff"
+    }
+  ]
 }

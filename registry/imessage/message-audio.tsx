@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type SetStateAction } from "react";
 import { cn } from "@/lib/utils";
 import { usePlatform, type Platform } from "@/registry/imessage/platform";
 import { bubbleMetrics, fontStack, type Direction } from "@/registry/imessage/tokens";
@@ -102,7 +102,7 @@ export function MessageAudio({ peaks, duration, direction = "outgoing", tail = f
   const played = duration > 0 ? Math.max(0, Math.min(1, position / duration)) : 0;
   const track = useRef<HTMLSpanElement>(null);
   const outgoing = direction === "outgoing";
-  const ink = outgoing ? "#ffffff" : "var(--im-incoming-text)";
+  const ink = outgoing ? "var(--im-outgoing-text, #ffffff)" : "var(--im-incoming-text)";
 
   const seek = (clientX: number) => {
     const element = track.current;
@@ -167,20 +167,29 @@ export function MessageAudio({ peaks, duration, direction = "outgoing", tail = f
 /** Drives `position` while `playing`, without pulling in an audio element. */
 export function useAudioProgress(duration: number, playing: boolean) {
   const [position, setPosition] = useState(0);
-  const started = useRef(0);
+  const positionRef = useRef(0);
+  const [seekVersion, setSeekVersion] = useState(0);
+  const seek = useCallback((value: SetStateAction<number>) => {
+    const next = typeof value === "function" ? value(positionRef.current) : value;
+    positionRef.current = Math.max(0, Math.min(duration, next));
+    setPosition(positionRef.current);
+    // Restart the clock from the seek position, including after reaching the end.
+    setSeekVersion(version => version + 1);
+  }, [duration]);
   useEffect(() => {
     if (!playing) return;
     let raf = 0;
-    const base = position;
+    let started: number | undefined;
+    const base = positionRef.current;
     const step = (now: number) => {
-      if (!started.current) started.current = now;
-      const next = base + (now - started.current) / 1000;
-      setPosition(next >= duration ? duration : next);
+      started ??= now;
+      const next = Math.min(duration, base + (now - started) / 1000);
+      positionRef.current = next;
+      setPosition(next);
       if (next < duration) raf = requestAnimationFrame(step);
     };
     raf = requestAnimationFrame(step);
-    return () => { cancelAnimationFrame(raf); started.current = 0; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing, duration]);
-  return [position, setPosition] as const;
+    return () => cancelAnimationFrame(raf);
+  }, [playing, duration, seekVersion]);
+  return [position, seek] as const;
 }

@@ -18,13 +18,15 @@ export function useBubbleScreenSpace(container: RefObject<HTMLElement | null>, f
     let raf = 0;
     const update = () => {
       raf = 0;
-      const screen = (frame?.current ?? root).getBoundingClientRect();
+      const screenElement = frame?.current ?? root;
+      const screen = screenElement.getBoundingClientRect();
+      const scaleY = screen.height / screenElement.clientHeight || 1;
       // The typing indicator is an incoming bubble too, so it needs the same screen-space fill.
       root.querySelectorAll<HTMLElement>('[data-slot="message-bubble"], [data-slot="typing-indicator"]').forEach(bubble => {
         // The typing indicator is its own body; a message bubble keeps its body in a child.
         const body = bubble.querySelector<HTMLElement>('[data-slot="bubble"], [data-slot="emoji"]') ?? (bubble.dataset.slot === "typing-indicator" ? bubble : null);
         if (!body) return;
-        const bottom = body.getBoundingClientRect().bottom - screen.top;
+        const bottom = (body.getBoundingClientRect().bottom - screen.top) / scaleY;
         bubble.style.setProperty("--bubble-bottom", `${bottom.toFixed(2)}px`);
       });
     };

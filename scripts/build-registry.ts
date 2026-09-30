@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { registryItemSchema, registrySchema } from "shadcn/schema";
 import { usage } from "../lib/catalog";
+import { siteCatalog } from "../lib/site-catalog";
 import { attachmentText } from "../harness/fixtures";
 
 const origin = new URL(process.env.REGISTRY_URL ?? "http://localhost:3100");
@@ -36,7 +37,7 @@ for (const entry of source.items) {
     owner.set(file.path, entry.name);
     if (!sourceFiles.includes(file.path)) { problems.push(`${entry.name}: ${file.path} does not exist`); continue; }
     for (const [, specifier] of (await readFile(file.path, "utf8")).matchAll(importSpecifier)) {
-      if (specifier.startsWith(`@/${componentDir}/`)) imported.add(`@imessage/${specifier.slice(componentDir.length + 3)}`);
+      if (specifier.startsWith(`@/${componentDir}/`)) imported.add(`@message-ui/${specifier.slice(componentDir.length + 3)}`);
       else if (specifier.startsWith("@/components/ui/")) imported.add(specifier.slice("@/components/ui/".length));
       else if (specifier.startsWith("@/") || specifier.startsWith(".")) continue;
       else {
@@ -45,9 +46,9 @@ for (const entry of source.items) {
       }
     }
   }
-  imported.delete(`@imessage/${entry.name}`);
+  imported.delete(`@message-ui/${entry.name}`);
   for (const dependency of declared) {
-    if (dependency.startsWith("@imessage/") && !names.has(dependency.slice("@imessage/".length))) problems.push(`${entry.name}: depends on ${dependency}, which is not an item`);
+    if (dependency.startsWith("@message-ui/") && !names.has(dependency.slice("@message-ui/".length))) problems.push(`${entry.name}: depends on ${dependency}, which is not an item`);
     else if (entry.files?.length && !dependency.includes("://") && !imported.has(dependency)) problems.push(`${entry.name}: declares ${dependency} but never imports it`);
   }
   for (const dependency of imported) if (!declared.has(dependency)) problems.push(`${entry.name}: imports ${dependency} but does not declare it`);
@@ -59,7 +60,7 @@ const reachable = new Set<string>();
 const reach = (name: string) => {
   if (reachable.has(name)) return;
   reachable.add(name);
-  for (const dependency of source.items.find(entry => entry.name === name)?.registryDependencies ?? []) if (dependency.startsWith("@imessage/")) reach(dependency.slice("@imessage/".length));
+  for (const dependency of source.items.find(entry => entry.name === name)?.registryDependencies ?? []) if (dependency.startsWith("@message-ui/")) reach(dependency.slice("@message-ui/".length));
 };
 reach("index");
 for (const entry of source.items) if (!reachable.has(entry.name)) problems.push(`${entry.name}: not reachable from index, so "add index.json" leaves it out`);
@@ -71,22 +72,26 @@ if (result.status !== 0) throw new Error(`shadcn build exited with ${result.stat
 
 await mkdir("public/llms", { recursive: true });
 await writeFile("public/design-notes.txt", attachmentText);
+await writeFile("public/onboard.md", (await readFile("content/onboard.md", "utf8")).replaceAll("{{REGISTRY_URL}}", base));
 const items = [];
 for (const entry of source.items) {
   const item = registryItemSchema.parse(JSON.parse(await readFile(`public/r/${entry.name}.json`, "utf8")));
-  item.registryDependencies = item.registryDependencies?.map(dependency => dependency.replace(/^@imessage\//, `${base}/r/`) + (dependency.startsWith("@imessage/") ? ".json" : ""));
+  item.registryDependencies = item.registryDependencies?.map(dependency => dependency.replace(/^@message-ui\//, `${base}/r/`) + (dependency.startsWith("@message-ui/") ? ".json" : ""));
   for (const file of item.files ?? []) {
-    file.content = file.content?.replaceAll("@/registry/imessage/", "@/components/imessage/");
+    file.content = file.content?.replaceAll("@/registry/imessage/", "@/components/message-ui/");
   }
   await writeFile(`public/r/${item.name}.json`, JSON.stringify(item, null, 2) + "\n");
   items.push(item);
-  const doc = `# ${item.title}\n\n${item.description}\n\n## Requirements\n\nReact 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor.\n\n## Install\n\n\`\`\`sh\nnpx shadcn@latest add ${base}/r/${item.name}.json\n\`\`\`\n\n## Usage\n\n\`\`\`tsx\n${usage[item.name] ?? "Install the full collection, then import the components you need from @/components/imessage/."}\n\`\`\`\n\nComponents render UI only. Supply your own message data, persistence, uploads, and send handlers. No iMessage or Apple service connection is included.\n`;
+  const sourceUrl = siteCatalog.some(component => component.name === item.name)
+    ? `${base}/components/${item.name}#source`
+    : `${base}/r/${item.name}.json`;
+  const doc = `# ${item.title}\n\n${item.description}\n\n## Requirements\n\nReact 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor. Standalone primitives need PaletteStyle inside a data-im-platform wrapper; full conversation and app shells include it. Setup: ${base}/onboard.md\n\n## Install\n\n\`\`\`sh\nnpx shadcn@latest add ${base}/r/${item.name}.json\n\`\`\`\n\n## Usage\n\n\`\`\`tsx\n${usage[item.name] ?? `// Exported props and source: ${sourceUrl}`}\n\`\`\`\n\nComponents render UI only. Supply your own message data, persistence, uploads, and send handlers. Connect your own messaging service.\n`;
   await writeFile(`public/llms/${item.name}.txt`, doc);
 }
 const output = registrySchema.parse({ ...source, homepage: base, items });
 await writeFile("public/r/registry.json", JSON.stringify(output, null, 2) + "\n");
 await writeFile("public/registry.json", JSON.stringify(output, null, 2) + "\n");
-await writeFile("public/llms.txt", `# iMessage UI\n\nA shadcn registry of Messages components for the web, measured against iOS 26 and macOS 26.\n\nRegistry: ${base}/r/registry.json\nNamespace: @imessage → ${base}/r/{name}.json\n\n${items.filter(item => item.name !== "index").map(item => `- [${item.title}](${base}/llms/${item.name}.txt): ${item.description}`).join("\n")}\n`);
+await writeFile("public/llms.txt", `# Message UI\n\nA shadcn registry of Messages-style components for the web. Native captures and framework measurements inform many surfaces; source comments document approximations and remaining gaps.\n\nRegistry: ${base}/r/registry.json\nNamespace: @message-ui → ${base}/r/{name}.json\n\n${items.filter(item => item.name !== "index").map(item => `- [${item.title}](${base}/llms/${item.name}.txt): ${item.description}`).join("\n")}\n`);
 
 // public/ is served as-is and is committed, so a renamed or dropped item must stop answering at its
 // old URL instead of installing a component the source no longer has.

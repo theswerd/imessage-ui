@@ -185,7 +185,7 @@ export type MessageListProps = Omit<ComponentProps<"div">, "children" | "ref"> &
   /** The element that represents the device screen (for the screen-space bubble fill). Defaults to the list itself. */
   frameRef?: RefObject<HTMLElement | null>;
   platform?: Platform;
-  /** Service line shown above the first date header on iOS. Defaults to "iMessage", or "Text Message" for all-SMS threads. */
+  /** Service line shown above the first date header on iOS. Defaults to "Messages", or "Text Message" for all-SMS threads. */
   serviceLabel?: ReactNode | null;
   /** Render tapback balloons for a message (see tapback.tsx). */
   renderReactions?: (message: Message) => ReactNode;
@@ -380,7 +380,7 @@ export function MessageList({
   const [mountedAt] = useState(() => Date.now());
   const nowMs = now === undefined ? messages.reduce((latest, message) => Math.max(latest, ms(message.sentAt)), mountedAt) : ms(now);
   const typingInfo = useMemo(() => (typing === false ? null : typing === true ? {} : typing), [typing]);
-  const service = serviceLabel === undefined ? (messages.length && messages.every(message => message.service === "sms") ? "Text Message" : "iMessage") : serviceLabel;
+  const service = serviceLabel === undefined ? (messages.length && messages.every(message => message.service === "sms") ? "Text Message" : "Messages") : serviceLabel;
   const rows = useMemo(() => buildRows(messages, { platform, now: nowMs, group, serviceLabel: service, firstDateHeader, typing: typingInfo }), [messages, platform, nowMs, group, service, firstDateHeader, typingInfo]);
   // A listbox of rows only exists once the shell owns a selection; without it the log keeps the plain
   // roles it has always had, so iOS and every uncontrolled consumer are untouched.
@@ -583,11 +583,22 @@ export function MessageList({
           let content: ReactNode;
           // MessageBubble hangs its own reactions; every other kind needs them hung below.
           let isTextBubble = false;
+          // …and so does MessageImages, which is the one kind that can be several balloons. Both own
+          // their own hanging, so the generic wrapper below must skip them or the slot opens twice.
+          let hangsOwnReactions = false;
           if (message.kind === "link" && message.link) {
             const link = message.link;
             content = <LinkPreview href={link.url} title={link.title} host={link.host} image={link.image} platform={platform} />;
           } else if (message.kind === "image" && message.images?.length) {
+            // The photos get the reaction handed to them rather than hung by the wrapper below.
+            // A message of several photos renders as a RUN of balloons (that is what the device does
+            // with a multi-photo send), and the wrapper hangs its badge on the top corner of the whole
+            // column — i.e. on the FIRST balloon — while `MessageImages` puts it on the last, beside
+            // the tail, because that is where the message ends. One message, two answers, depending on
+            // which entry point drew it. This makes `MessageImages` the only answer.
+            hangsOwnReactions = true;
             content = <MessageImages images={message.images} direction={message.direction} tail={row.tail} platform={platform}
+              reactions={renderReactions?.(message)}
               onOpenImage={onOpenImage ? (index, rect) => onOpenImage(message.id, index, rect) : undefined} />;
           } else if (message.kind === "audio" && message.audio) {
             content = <MessageAudio duration={message.audio.duration} peaks={message.audio.peaks} direction={message.direction} tail={row.tail} platform={platform} />;
@@ -617,7 +628,7 @@ export function MessageList({
           // container, so without this a reaction applied to a photo, a link card, an audio row, a
           // file card or a bare emoji is stored and never painted.
           const reactions = renderReactions?.(message);
-          if (reactions && !isTextBubble) {
+          if (reactions && !isTextBubble && !hangsOwnReactions) {
             const offset = reactionOffsets[platform];
             content = (
               <div className="relative" style={{ marginTop: offset.marginTop, display: "flex", flexDirection: "column", alignItems: outgoing ? "flex-end" : "flex-start" }}>

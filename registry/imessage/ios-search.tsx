@@ -119,6 +119,7 @@ export type IosSearchConversationResult = {
   id: string;
   name: string;
   initials?: string;
+  photo?: string;
   /** The matching line. The part of it that matches the query is recoloured, not bolded. */
   preview: string;
   time: string;
@@ -696,7 +697,7 @@ function ConversationRow({ result, query, last, onSelect }: { result: IosSearchC
   return (
     <button type="button" onClick={onSelect} aria-label={`${result.name}, ${result.time}, ${result.preview}`}
       className="absolute inset-0 w-full text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-500">
-      <Avatar aria-hidden="true" size={m.avatar} initials={result.initials ?? initialsOf(result.name)} className="absolute" style={{ left: m.avatarLeft, top: m.avatarTop }} />
+      <Avatar aria-hidden="true" size={m.avatar} src={result.photo} initials={result.initials ?? initialsOf(result.name)} className="absolute" style={{ left: m.avatarLeft, top: m.avatarTop }} />
       <span aria-hidden="true" data-slot="name" className="absolute truncate" style={{ left: m.textLeft, right: 96, top: m.nameTop - NAME_BLEED, paddingBlock: NAME_BLEED, transform: "translateY(0.3333px)", fontSize: m.nameSize, lineHeight: 1, fontWeight: m.nameWeight, letterSpacing: 0, color: "var(--ios-search-label)" }}>
         {result.name}
       </span>

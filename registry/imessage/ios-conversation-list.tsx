@@ -45,6 +45,8 @@ export type IosConversation = {
   id: string;
   name: string;
   initials?: string;
+  /** Contact photo, cropped to the existing circular avatar. */
+  photo?: string;
   preview: string;
   time: string;
   unread?: boolean;
@@ -161,6 +163,57 @@ function initialsOf(name: string): string {
   return name.trim().split(/\s+/).slice(0, 2).map(part => part[0] ?? "").join("").toUpperCase();
 }
 
+export type IosConversationRowProps = Omit<ComponentProps<"button">, "onSelect"> & {
+  conversation: IosConversation;
+  onSelect?: (conversation: IosConversation) => void;
+  pressed?: boolean;
+  separator?: boolean;
+};
+
+/** One native-sized row, also usable in a custom list. Inherits the surrounding light/dark theme. */
+export function IosConversationRow({ conversation, onSelect, pressed, separator = true, className, style,
+  onClick, onPointerDown, onPointerUp, onPointerCancel, onPointerLeave, ...props }: IosConversationRowProps) {
+  const [held, setHeld] = useState(false);
+  const highlighted = pressed ?? held;
+  const letters = conversation.initials ?? initialsOf(conversation.name);
+  return (
+    <button type="button" data-slot="ios-conversation-row" data-pressed={highlighted || undefined} onClick={event => { onClick?.(event); if (!event.defaultPrevented) onSelect?.(conversation); }} aria-label={`${conversation.unread ? "Unread. " : ""}${conversation.name}, ${conversation.time}, ${conversation.preview}`}
+      onPointerDown={event => { if (event.button === 0) setHeld(true); onPointerDown?.(event); }}
+      onPointerUp={event => { setHeld(false); onPointerUp?.(event); }}
+      onPointerCancel={event => { setHeld(false); onPointerCancel?.(event); }}
+      onPointerLeave={event => { setHeld(false); onPointerLeave?.(event); }}
+      className={cn("relative block w-full text-left select-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-500", vars, className)}
+      style={{ height: ROW, fontFamily: font, background: highlighted ? "var(--ios-list-highlight)" : "transparent", ...style }} {...props}>
+      {conversation.unread && <span aria-hidden="true" data-slot="unread" className="absolute rounded-full bg-[var(--ios-list-unread)]" style={{ left: UNREAD_LEFT, top: (ROW - UNREAD) / 2, width: UNREAD, height: UNREAD }} />}
+      {conversation.members && conversation.members.length > 1 ? (
+        <GroupAvatar aria-hidden="true" data-slot="avatar" participants={conversation.members} role={undefined}
+          size={groupAvatarMetrics.phone.conversationList} className="absolute" style={{ left: 26, top: 20 }} />
+      ) : (
+        <span aria-hidden="true" data-slot="avatar" className="absolute flex items-center justify-center overflow-hidden rounded-full text-white"
+          style={{ left: 26, top: 20, width: 45, height: 45, fontSize: 21, lineHeight: 1, fontWeight: 600, background: "linear-gradient(var(--ios-list-avatar-top), var(--ios-list-avatar-bottom))" }}>
+          {conversation.photo ? (
+            // eslint-disable-next-line @next/next/no-img-element -- framework-neutral registry component
+            <img src={conversation.photo} alt="" className="size-full object-cover" draggable={false} />
+          ) : letters}
+        </span>
+      )}
+      <span aria-hidden="true" data-slot="name" className="absolute truncate" style={{ left: 83, right: 96, top: 14 - NAME_BLEED, paddingBlock: NAME_BLEED, transform: "translateY(0.3333px)", fontSize: 17, lineHeight: 1, fontWeight: 600, letterSpacing: 0, color: "var(--ios-list-label)" }}>
+        {conversation.name}
+      </span>
+      <span aria-hidden="true" data-slot="time" className="absolute whitespace-nowrap" style={{ right: 37.1167, top: 15, transform: "translateY(0.3333px)", fontSize: 15, lineHeight: 1, letterSpacing: 0, color: "var(--ios-list-secondary)" }}>
+        {conversation.time}
+      </span>
+      <svg aria-hidden="true" data-slot="chevron" className="absolute" style={{ right: 15, top: 15, transform: "translateX(0.3333px)" }} width="11" height="16" viewBox="-2 -2 11 16" fill="none" stroke="var(--ios-list-chevron)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M1 1 6 6 1 11" />
+      </svg>
+      <span aria-hidden="true" data-slot="preview" className="absolute overflow-hidden" style={{ left: 83, right: 34, top: 33, transform: "translateY(-0.3333px)", fontSize: 15, lineHeight: "20px", letterSpacing: 0, color: "var(--ios-list-secondary)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" } as CSSProperties}>
+        {conversation.preview}
+      </span>
+      {separator && <span aria-hidden="true" data-slot="separator" className="absolute" style={{ left: 83, right: 16, bottom: 0, height: 1, transform: "translateY(-0.3333px)", background: "var(--ios-list-separator)" }} />}
+    </button>
+  );
+}
+
 export function IosConversationList({ conversations, onSelect, onCompose, onSearch, title = "Messages", topInset = 54, pressedId, className, style, ...props }: IosConversationListProps) {
   /**
    * The row a finger is on. One id rather than a boolean per row so a second pointer cannot leave a
@@ -194,41 +247,14 @@ export function IosConversationList({ conversations, onSelect, onCompose, onSear
         <IosLargeTitle>{title}</IosLargeTitle>
         <ul data-slot="rows" aria-label={title} className="relative m-0 list-none p-0" style={{ height: conversations.length * ROW }}>
           {conversations.map((conversation, index) => {
-            const letters = conversation.initials ?? initialsOf(conversation.name);
             const held = index === pressedIndex;
             // The pressed row's own separator and the one above it go with the fill, so the highlight
             // is one unbroken band. See the note on `--ios-list-highlight`.
             const separated = !held && index !== pressedIndex - 1;
             return (
               <li key={conversation.id} data-slot="row" data-pressed={held ? "true" : undefined} className="absolute left-0 right-0 top-0" style={{ height: ROW, transform: `translateY(${index * ROW}px)` }}>
-                <button type="button" onClick={() => onSelect?.(conversation)} aria-label={`${conversation.unread ? "Unread. " : ""}${conversation.name}, ${conversation.time}, ${conversation.preview}`}
-                  onPointerDown={event => press(event, conversation.id)} onPointerUp={release} onPointerCancel={release} onPointerLeave={release}
-                  className="absolute inset-0 w-full text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-500"
-                  style={{ background: held ? "var(--ios-list-highlight)" : "transparent" }}>
-                  {conversation.unread && <span aria-hidden="true" data-slot="unread" className="absolute rounded-full bg-[var(--ios-list-unread)]" style={{ left: UNREAD_LEFT, top: (ROW - UNREAD) / 2, width: UNREAD, height: UNREAD }} />}
-                  {conversation.members && conversation.members.length > 1 ? (
-                    <GroupAvatar aria-hidden="true" data-slot="avatar" participants={conversation.members} role={undefined}
-                      size={groupAvatarMetrics.phone.conversationList} className="absolute" style={{ left: 26, top: 20 }} />
-                  ) : (
-                    <span aria-hidden="true" data-slot="avatar" className="absolute flex items-center justify-center overflow-hidden rounded-full text-white"
-                      style={{ left: 26, top: 20, width: 45, height: 45, fontSize: 21, lineHeight: 1, fontWeight: 600, background: "linear-gradient(var(--ios-list-avatar-top), var(--ios-list-avatar-bottom))" }}>
-                      {letters}
-                    </span>
-                  )}
-                  <span aria-hidden="true" data-slot="name" className="absolute truncate" style={{ left: 83, right: 96, top: 14 - NAME_BLEED, paddingBlock: NAME_BLEED, transform: "translateY(0.3333px)", fontSize: 17, lineHeight: 1, fontWeight: 600, letterSpacing: 0, color: "var(--ios-list-label)" }}>
-                    {conversation.name}
-                  </span>
-                  <span aria-hidden="true" data-slot="time" className="absolute whitespace-nowrap" style={{ right: 37.1167, top: 15, transform: "translateY(0.3333px)", fontSize: 15, lineHeight: 1, letterSpacing: 0, color: "var(--ios-list-secondary)" }}>
-                    {conversation.time}
-                  </span>
-                  <svg aria-hidden="true" data-slot="chevron" className="absolute" style={{ left: 376, top: 15, transform: "translateX(0.3333px)" }} width="11" height="16" viewBox="-2 -2 11 16" fill="none" stroke="var(--ios-list-chevron)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M1 1 6 6 1 11" />
-                  </svg>
-                  <span aria-hidden="true" data-slot="preview" className="absolute overflow-hidden" style={{ left: 83, right: 34, top: 33, transform: "translateY(-0.3333px)", fontSize: 15, lineHeight: "20px", letterSpacing: 0, color: "var(--ios-list-secondary)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" } as CSSProperties}>
-                    {conversation.preview}
-                  </span>
-                  {separated && <span aria-hidden="true" data-slot="separator" className="absolute" style={{ left: 83, right: 16, bottom: 0, height: 1, transform: "translateY(-0.3333px)", background: "var(--ios-list-separator)" }} />}
-                </button>
+                <IosConversationRow conversation={conversation} onSelect={onSelect} pressed={held} separator={separated}
+                  onPointerDown={event => press(event, conversation.id)} onPointerUp={release} onPointerCancel={release} onPointerLeave={release} />
               </li>
             );
           })}

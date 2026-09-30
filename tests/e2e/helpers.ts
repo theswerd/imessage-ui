@@ -60,13 +60,55 @@ async function layoutSettled(page: Page) {
     }).join("|");
     const frame = () => new Promise(resolve => requestAnimationFrame(() => resolve(undefined)));
     let previous = sample();
-    // Bounded, because a scene with a looping animation on a positioned element never settles at all
-    // and must not hang the checkpoint — it is the seek that pins those, not this.
+    let stable = 0;
+    // Three consecutive identical frames, not two. One pair is not enough: a scene whose entrance
+    // timeline is built in a `useLayoutEffect` commits a frame or two after the images decode, and a
+    // single matching pair before that commit reads as settled. That is what made
+    // `group-details-open at 0 ms` fail on WebKit in about half of runs — the group avatars sampled
+    // mid-settle, 1637 or 2331 pixels off, with nothing wrong with the page itself. A checkpoint that
+    // is right half the time cannot measure anything.
+    //
+    // The bound stays at 12 frames, and that number is load-bearing rather than arbitrary. A scene
+    // with a looping animation on a positioned element — the audio recorder's waveform is the one
+    // here — never settles at all, so it always runs the bound out, and the bound is therefore what
+    // decides which frame of that loop gets photographed. Raising it to 30 re-phased the waveform and
+    // moved 1,619 pixels in a scene nothing had touched. Wait for stability *within* the same window;
+    // do not widen the window.
     for (let attempt = 0; attempt < 12; attempt++) {
       await frame();
       const next = sample();
-      if (next === previous) return;
-      previous = next;
+      if (next === previous) { if (++stable >= 3) return; } else { stable = 0; previous = next; }
+    }
+  }));
+}
+
+/**
+ * Waits for every animation that is going to end to have ended.
+ *
+ * `layoutSettled` samples boxes, so it is blind to an animation that only moves colour or opacity —
+ * and the audio recorder's row plays a 260 ms entrance that no checkpoint seeks. The capture landed
+ * somewhere inside it, differently each run: `audio-playback at 0 ms` failed about four runs in five,
+ * always by exactly 1637 pixels, because there were two poses and no way to say which one a run got.
+ *
+ * Only *running*, *finite* animations are waited on. A scene that seeks its own motion leaves those
+ * animations `paused`, which is the whole point of seeking them, and an infinite one never finishes
+ * by definition; waiting on either would hang the checkpoint rather than settle it.
+ */
+async function animationsSettled(page: Page) {
+  await evaluateSettled(page, () => page.evaluate(async () => {
+    const pending = () => document.getAnimations().filter(animation => {
+      if (animation.playState !== "running") return false;
+      const duration = animation.effect?.getTiming().duration;
+      return typeof duration === "number" && Number.isFinite(duration);
+    });
+    const deadline = performance.now() + 1500;
+    while (pending().length && performance.now() < deadline) {
+      // `finished` and not a poll: it resolves on the frame the animation ends, so nothing is waited
+      // on for longer than it actually runs. The deadline is the backstop for one that never settles.
+      await Promise.race([
+        Promise.allSettled(pending().map(animation => animation.finished)),
+        new Promise(resolve => setTimeout(resolve, 250)),
+      ]);
     }
   }));
 }
@@ -77,7 +119,25 @@ export async function openScene(page: Page, info: TestInfo, scene = "conversatio
   await expect(page.getByTestId("harness-ready")).toBeVisible();
   await evaluateSettled(page, () => page.evaluate(async () => { await document.fonts.ready; }));
   await imagesDecoded(page);
+  if (scene.startsWith("photo-viewer")) {
+    // The dimmed transcript remains visible during dismissal. Load its lazy photos too, including
+    // tiles below the fold, so a checkpoint cannot capture a partially decoded background image.
+    await page.locator('[data-testid="device"] img').evaluateAll(async nodes => {
+      await Promise.all(nodes.map(async node => {
+        const image = node as HTMLImageElement;
+        image.loading = "eager";
+        await image.decode();
+      }));
+    });
+    await expect(page.locator('[data-slot="photo-tile"][data-state="loading"]')).toHaveCount(0);
+  }
+  // Twice, with the layout pass between. An entrance built in a `useLayoutEffect` can register its
+  // animation *after* the first sample — under a full-suite load on WebKit that race showed up as one
+  // scene in ~880 failing per run, a different one each time, which is the worst kind of failure to
+  // chase. The second pass costs nothing when there is nothing left to wait for.
+  await animationsSettled(page);
   await layoutSettled(page);
+  await animationsSettled(page);
   return page.getByTestId("device");
 }
 

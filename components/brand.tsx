@@ -1,0 +1,5 @@
+export function Brand({ size = 36 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 64 64" fill="none" aria-hidden="true">
+    <path d="M24 8h16c12.15 0 22 9.85 22 22 0 6.94-3.21 13.13-8.23 17.16.53 4.21 2.23 7.6 5.23 10.84-7.08-.15-12.57-2.43-16.47-6.14-.83.09-1.68.14-2.53.14H24C11.85 52 2 42.15 2 30S11.85 8 24 8Z" fill="#007AFF" />
+  </svg>;
+}

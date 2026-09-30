@@ -11,6 +11,7 @@ import { MacHeader, macHeaderMetrics } from "@/registry/imessage/macos-header";
 import { MacComposer, macComposerMetrics } from "@/registry/imessage/macos-composer";
 import { Tapback, type TapbackType } from "@/registry/imessage/tapback";
 import { GroupAvatar, groupAvatarMetrics, type GroupParticipant } from "@/registry/imessage/group-avatar";
+import { useArrivalAnimation, type ArrivalAnimation } from "@/registry/imessage/message-motion";
 
 export type { Message as ConversationMessage };
 
@@ -38,6 +39,10 @@ export type ConversationProps = Omit<ComponentProps<"section">, "children"> & {
   participants?: readonly GroupParticipant[];
   now?: Date | number;
   onSend?: (text: string) => void | Promise<void>;
+  /** Omit for automatic sends, pass null to disable, or pass an ID/progress to control the flight. */
+  sendAnimation?: ArrivalAnimation | null;
+  receiveAnimation?: ArrivalAnimation | null;
+  onSendAnimationEnd?: () => void;
   onAttach?: () => void;
   onBack?: () => void;
   onVideoCall?: () => void;
@@ -53,9 +58,10 @@ export type ConversationProps = Omit<ComponentProps<"section">, "children"> & {
  * A complete conversation pane for either platform: header, the scrolling log with native clusters,
  * tails, date headers and reactions, and the composer. Bring your own data and send handler.
  */
-export function Conversation({ platform = "ios", name, initials, messages, typing = false, group = false, participants, now, onSend, onAttach, onBack, onVideoCall, onDetails, onReaction, renderReactions, width, height, className, style, ...props }: ConversationProps) {
+export function Conversation({ platform = "ios", name, initials, messages, typing = false, group = false, participants, now, onSend, sendAnimation, receiveAnimation, onSendAnimationEnd, onAttach, onBack, onVideoCall, onDetails, onReaction, renderReactions, width, height, className, style, ...props }: ConversationProps) {
   const frame = useRef<HTMLElement>(null);
   const list = useRef<MessageListHandle>(null);
+  useArrivalAnimation({ frame, messages, send: sendAnimation, receive: receiveAnimation, onSendEnd: onSendAnimationEnd });
   const ios = platform === "ios";
   const reactions = renderReactions ?? ((message: Message) => message.reactions?.length ? (
     <div className="flex" style={{ gap: 2 }}>

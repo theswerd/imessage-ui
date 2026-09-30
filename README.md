@@ -1,4 +1,4 @@
-# iMessage UI
+# Message UI
 
 A shadcn registry of Messages components for the web, measured against the real apps: **iOS 26.0** in the
 iPhone 17 Pro simulator and **macOS 26.5 Messages 26.0**. No size, colour, radius or timing in
@@ -17,15 +17,17 @@ bunx playwright install chromium webkit
 bun run dev
 ```
 
+- [localhost:3100](http://localhost:3100) is the component workbench, with a searchable sidebar, live previews, color controls, and an Add to your agent action.
+- [localhost:3100/components](http://localhost:3100/components) opens the same collection. Each item has installation, source, and available previews at `/components/{name}`.
 - [localhost:3100/harness](http://localhost:3100/harness) is the scenario lab: pick iOS or macOS, a
   scenario, a theme, and a checkpoint on the timeline, then keep interacting with the result. Deep
   links are reproducible, for example
   `/harness?platform=ios&scene=long-press&t=880&theme=light`, and `&embed=1` drops the site chrome.
-  There are 66 scenarios in six groups (Messages, Previews, Interactions, Screens, Effects,
+  Scenarios are organized in six groups (Messages, Previews, Interactions, Screens, Effects,
   FaceTime); some are one platform only, and the picker says so. Every timed one is *scrubbed*, not
   played: `/harness?platform=ios&scene=search-open&t=130` renders the same frame every time.
 - `/lab/...` holds the pixel labs, listed below.
-- [localhost:3100/docs](http://localhost:3100/docs) lists the catalog.
+- [localhost:3100/onboard.md](http://localhost:3100/onboard.md) installs the agent skill and covers palette setup, themes, media, and connecting your own data. Generated from `content/onboard.md`; set `REGISTRY_URL` before a public build.
 
 ### The pixel labs
 
@@ -154,9 +156,9 @@ Four findings shape the whole implementation:
 
 ## Components
 
-54 components plus an `index` style that pulls in all of them. Every one installs to
-`components/imessage/<name>.tsx` and is addressable on its own as `@imessage/<name>`.
-[/docs](http://localhost:3100/docs) renders the same list with live previews, and
+57 registry items plus an `index` style that pulls in all of them. Every one installs to
+`components/message-ui/<name>.tsx` and is addressable on its own as `@message-ui/<name>`.
+[/components](http://localhost:3100/components) renders the catalog with featured live previews, and
 `/llms/<name>.txt` is the per-component agent doc.
 
 | Group | Items |
@@ -204,13 +206,13 @@ bunx shadcn@latest add http://localhost:3100/r/index.json
 bunx shadcn@latest add http://localhost:3100/r/ios-messages-app.json
 ```
 
-Or register `@imessage` in the consumer's `components.json`:
+Or register `@message-ui` in the consumer's `components.json`:
 
 ```json
-{ "registries": { "@imessage": "http://localhost:3100/r/{name}.json" } }
+{ "registries": { "@message-ui": "http://localhost:3100/r/{name}.json" } }
 ```
 
-Then `bunx shadcn@latest add @imessage/conversation`. Components install under `components/imessage/`
+Then `bunx shadcn@latest add @message-ui/conversation`. Components install under `components/message-ui/`
 and use the project's own `cn` utility. React 19 and Tailwind CSS 4 are the targets. Apply `.dark` for
 dark styles. Set `REGISTRY_URL=https://your-origin.example` when building for hosting;
 `bun run registry:build` runs the official `shadcn build` and then rewrites dependency URLs and import
@@ -315,7 +317,44 @@ scripts/measure/     Measuring and diffing tools
 references/          Native captures and the measurement spec
 ```
 
-Independent project, not affiliated with Apple. Behaviour references:
+Behaviour references:
 [Tapbacks](https://support.apple.com/guide/iphone/react-with-tapbacks-iph018d3c336/ios),
 [message effects](https://support.apple.com/en-ie/104970),
 [FaceTime](https://support.apple.com/guide/iphone/make-facetime-calls-iph7801d5771/ios).
+
+
+## Registry preview checks
+
+Start a production server before running browser or simulator checks:
+
+```sh
+bun run build
+bun run start
+```
+
+The public-preview matrix captures every listed component at 402px and 1440px, in light and dark,
+with fixed clocks, decoded images and held animation frames. The viewer suite replays opening,
+paging and dismissal after fresh navigations and compares decoded pixels exactly. It also covers
+scaled gestures, cancelled pointers, Safari's coalesced double taps, modal focus and reaction layers.
+
+```sh
+PLAYWRIGHT_BASE_URL=http://localhost:3100 bunx playwright test tests/e2e/registry-previews.spec.ts tests/e2e/photo-viewer.spec.ts tests/e2e/registry-site.spec.ts tests/e2e/conversation-list.spec.ts --project=ios-chromium --project=ios-webkit
+```
+
+For the real simulator, use a dedicated iPhone 17 Pro running iOS 26.0. The native probe presents
+ChatKit's `CKQLPreviewController` over fixture JPEGs. XCTest compares its fit, then drives Safari
+through zoom, paging, dismissal, every public preview in both themes, and sending text and photos.
+The runner saves screenshots, a screen recording, logs and an `.xcresult` bundle under `artifacts/`.
+It boots Safari again after XCTest finishes.
+
+```sh
+bun run test:ios --udid YOUR_SIMULATOR_UDID
+# If Xcode's newer SDK needs an explicit iOS 26.0 runtime mapping:
+bun run test:ios --udid YOUR_SIMULATOR_UDID --runtime-build 23A343
+# Run just the inbox journey: unread, search, opening threads, composing, dark mode and reset.
+bun run test:ios --udid YOUR_SIMULATOR_UDID --initial-path /components/ios-conversation-list --only-testing SimulatorReview/SimulatorReview/testConversationList
+```
+
+The optional runtime mapping is reset to Xcode's default when the runner exits. These tests use
+fixture conversations and do not send real messages. Browser regression screenshots stay under
+`tests/e2e/baselines/`; only captures from Apple software belong in `references/`.

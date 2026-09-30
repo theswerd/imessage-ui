@@ -75,6 +75,36 @@ export const messageActionsDim = "var(--im-dim, rgba(22,21,42,0.21))";
 export const messageActionsMetrics = {
   /** The lift widens the bubble by this much, up to `liftMaxScale`; height follows the same factor. */
   liftWidth: 26.07, liftMaxScale: 1.15, liftY: -0.18, barGap: 5, menuGap: 16.1, tailHang: 6.8, pickerBeside: 28, topInset: 60, bottomInset: 42,
+  /**
+   * **A photo lifts to a fixed width, not by the text bubble's rule.** MEASURED on the device: a
+   * long-pressed photo balloon's preview spans x **60.000 .. 386.000** — 326.000 pt — on both a 1:1
+   * balloon and a 3:4 one, so it is not aspect-driven. Against the 252.667 every photo balloon is
+   * wide (`references/simulator-cases.md` §3.4) that is a uniform **x1.2902**, against the 1.1032
+   * `liftScale` would give it and the 1.15 it caps at. The heights agree: the 3:4 balloon goes
+   * 337.000 -> 434.000 (x1.2878) and the 1:1 one 252.667 -> ~325.9 (x1.281-1.290).
+   *
+   * Two captures, both 1206x2622 host screenshots taken while the menu was up: the last balloon of a
+   * run of three (tailed, 3:4), in the repo as `references/ios/light/photo-long-press-0.png`, and the
+   * middle one (tailless, 1:1), whose numbers are in `references/simulator-cases.md` §3.5. The resting
+   * frame they are measured against is `references/ios/light/photo-run-0.png`, and the same run's
+   * `dump-tree` gives its cells: y -17.7 / 176.0 / 432.7, heights 189.7 / 252.7 / 337.0, all 252.667
+   * wide with their right edge on 386.0.
+   *
+   * Whether native's rule is "scale a photo preview to 326 wide" or "scale it by 1.29" cannot be
+   * told apart from these two, because every photo balloon starts at the same 252.667. The width is
+   * the one of the pair that is directly measured, so that is what this carries.
+   */
+  photoLiftWidth: 326,
+  /**
+   * The tapback pill's leading inset when the pressed message is a photo. MEASURED 6.000 on both
+   * photo captures (the pill's leftmost column over its own vertical middle), against the **10.83**
+   * the same measurement returns on `references/ios/captures/longpress-ok-light.png`, re-checked
+   * here. Nothing explains the difference: the bar is the same 64.333 tall in all three, ends on the
+   * balloon's trailing edge in all three, and carries the same 49 pt slot grid with its first glyph
+   * centred 32.5 from the pill's own left end (measured centres 38.500, 87.167, ~137.8, 185.333,
+   * ~234.2, 283.667 with the pill starting at 6.000). It is recorded, not derived.
+   */
+  photoBarEdgeInset: 6,
 } as const;
 
 export type Rect = { x: number; y: number; width: number; height: number };
@@ -82,6 +112,11 @@ export type Rect = { x: number; y: number; width: number; height: number };
 /** Takes the bubble's unscaled body: the lift is driven by its width, not its height. */
 export function liftScale({ width }: Pick<Rect, "width">): number {
   return Math.min(messageActionsMetrics.liftMaxScale, 1 + messageActionsMetrics.liftWidth / width);
+}
+
+/** The lift a photo balloon takes: a uniform scale onto `photoLiftWidth`. See that constant. */
+export function photoLiftScale({ width }: Pick<Rect, "width">): number {
+  return width > 0 ? messageActionsMetrics.photoLiftWidth / width : 1;
 }
 
 export type MessageActionsProps = {
@@ -107,6 +142,8 @@ export type MessageActionsProps = {
    */
   wash?: string | null;
   recent?: string[];
+  /** The tapback pill's inset from the screen edge it reaches. See `messageActionsMetrics.photoBarEdgeInset`. */
+  barEdgeInset?: number;
   /** Who reacted, for the details popover shown when re-opening a message that already has your tapback. */
   details?: { initials: string; name?: string };
   onSelect?: (selection: TapbackSelection) => void;
@@ -128,7 +165,7 @@ export type MessageActionsProps = {
   style?: CSSProperties;
 };
 
-export function layoutMessageActions({ rect, frame, direction, scale, items, tail = false }: { rect: Rect; frame: { width: number; height: number }; direction: Direction; scale: [number, number]; items: ContextMenuItem[]; tail?: boolean }) {
+export function layoutMessageActions({ rect, frame, direction, scale, items, tail = false, barEdgeInset = tapbackBarMetrics.ios.edgeInset }: { rect: Rect; frame: { width: number; height: number }; direction: Direction; scale: [number, number]; items: ContextMenuItem[]; tail?: boolean; /** The pill's inset from the screen edge it reaches; see `messageActionsMetrics.photoBarEdgeInset`. */ barEdgeInset?: number }) {
   const m = messageActionsMetrics;
   const outgoing = direction === "outgoing";
   const [sx, sy] = scale;
@@ -137,7 +174,7 @@ export function layoutMessageActions({ rect, frame, direction, scale, items, tai
   const lifted = { width: rect.width * sx, height: rect.height * sy, left: 0, top: rect.y + rect.height / 2 - (rect.height * sy) / 2 + m.liftY };
   lifted.left = outgoing ? rect.x + rect.width - lifted.width : rect.x;
   const barH = tapbackBarMetrics.ios.height;
-  const bar = { left: outgoing ? tapbackBarMetrics.ios.edgeInset : rect.x, right: outgoing ? rect.x + rect.width : frame.width - tapbackBarMetrics.ios.edgeInset, top: lifted.top - m.barGap - barH, height: barH };
+  const bar = { left: outgoing ? barEdgeInset : rect.x, right: outgoing ? rect.x + rect.width : frame.width - barEdgeInset, top: lifted.top - m.barGap - barH, height: barH };
   const cm = contextMenuMetrics.ios;
   const menuHeight = iosContextMenuHeight(items);
   // The menu clears the bubble's own bottom edge, so a tail pushes it down by its scaled hang.
@@ -151,14 +188,14 @@ export function layoutMessageActions({ rect, frame, direction, scale, items, tai
   return { outgoing, lifted, bar, menu, shift, bubbleTranslate: shift + m.liftY, pickerX: pickerCenterX - bar.left };
 }
 
-export function MessageActions({ rect, frame, direction = "outgoing", service = "imessage", tail = false, children, items = iosMessageMenu, selected, wash, recent, details, onSelect, onAction, onPickEmoji, onClose, progress, open = true, onExited, autoFocus = true, scale: scaleProp, textScale: textScaleProp, className, style }: MessageActionsProps) {
+export function MessageActions({ rect, frame, direction = "outgoing", service = "imessage", tail = false, children, items = iosMessageMenu, selected, wash, recent, barEdgeInset, details, onSelect, onAction, onPickEmoji, onClose, progress, open = true, onExited, autoFocus = true, scale: scaleProp, textScale: textScaleProp, className, style }: MessageActionsProps) {
   const root = useRef<HTMLDivElement>(null);
   const scrub = useRef<((time: number | null) => void) | null>(null);
   const id = useId().replace(/:/g, "");
   const s = scaleProp ?? liftScale(rect);
   const scale: [number, number] = typeof s === "number" ? [s, s] : s;
   const textScale = textScaleProp ?? 1;
-  const L = layoutMessageActions({ rect, frame, direction, scale, items, tail });
+  const L = layoutMessageActions({ rect, frame, direction, scale, items, tail, barEdgeInset });
   const side = L.outgoing ? "left" : "right";
 
   useEffect(() => {

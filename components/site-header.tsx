@@ -3,17 +3,42 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
-import { ArrowUpRight, MessageCircle, Moon, Sun } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { useRef } from "react";
+import { AudioLines, CalendarDays, Circle, Code2, House, ImageIcon, Link2, Maximize2, Menu, MessageCircle, Moon, PanelLeft, Smile, Sun, UserRound, X } from "lucide-react";
+import { componentHref, siteComponents } from "@/lib/site-catalog";
+import { ComponentSearch } from "./component-search";
+import { Brand } from "./brand";
+import { AddToAgent } from "./add-to-agent";
+
+const icons = [MessageCircle, PanelLeft, UserRound, MessageCircle, Smile, ImageIcon, Link2, AudioLines, Circle, Code2, PanelLeft, Maximize2, UserRound, CalendarDays];
+const navigation = siteComponents.map(([name, title], i) => ({ name, title, Icon: icons[i] }));
+
+function ComponentNavigation({ close }: { close?: () => void }) {
+  const pathname = usePathname();
+  const selected = pathname === "/components" ? "ios-messages-app" : pathname.split("/").pop();
+  return <>
+    <nav className="component-navigation" aria-label="Components">
+      <Link href="/" className="home-nav-link" onClick={close} aria-current={pathname === "/" ? "page" : undefined}><House size={17} aria-hidden="true" /><span>Home</span></Link>
+      <h2>Components</h2>
+      {navigation.map(({name, title, Icon}) => <Link key={name} href={componentHref(name)} onClick={close} aria-current={selected === name ? "page" : undefined}><Icon size={17} aria-hidden="true" /><span>{title}</span></Link>)}
+    </nav>
+  </>;
+}
 
 export function SiteHeader() {
   const pathname = usePathname();
-  const { setTheme } = useTheme();
-  return <header className="sticky top-0 z-50 border-b border-border/80 bg-background/90 backdrop-blur-xl">
-    <div className="mx-auto flex h-[72px] max-w-[1440px] items-center gap-5 px-5 sm:gap-10 sm:px-10">
-      <Link href="/" aria-label="iMessage UI home" className="flex shrink-0 items-center gap-2.5"><span className="brand-mark flex size-8 items-center justify-center rounded-[10px]"><MessageCircle className="size-[23px] fill-white text-white" strokeWidth={1.5} /></span><span className="text-[18px] font-semibold tracking-[-0.6px]">iMessage<span className="ml-1 font-normal text-muted-foreground">UI</span></span></Link>
-      <nav aria-label="Main navigation" className="ml-auto flex items-center gap-4 text-sm sm:ml-1 sm:gap-7">{[{ href: "/harness", title: "Lab" }, { href: "/r/registry.json", title: "Registry" }, { href: "/docs", title: "Docs" }].map(link => <Link key={link.href} href={link.href} className={cn("transition-colors hover:text-foreground", pathname === link.href ? "text-foreground" : "text-muted-foreground")}>{link.title}</Link>)}</nav>
-      <div className="ml-auto hidden items-center gap-5 sm:flex"><a href="/llms.txt" className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">llms.txt <ArrowUpRight className="size-3" /></a><div className="h-4 w-px bg-border" /><button type="button" aria-label="Switch to dark theme" onClick={() => setTheme("dark")} className="rounded-full p-2 hover:bg-muted dark:hidden"><Moon className="size-4" /></button><button type="button" aria-label="Switch to light theme" onClick={() => setTheme("light")} className="hidden rounded-full p-2 hover:bg-muted dark:block"><Sun className="size-4" /></button></div>
-    </div>
-  </header>;
+  const { resolvedTheme, setTheme } = useTheme();
+  const menu = useRef<HTMLDialogElement>(null);
+  if (pathname.startsWith("/harness") || pathname.startsWith("/lab")) return null;
+  const home = pathname === "/";
+  return <>
+    <header className={`registry-header ${home ? "home-header" : ""}`}>
+      <div className="header-breadcrumb">
+        {!home && <button type="button" className="icon-button mobile-menu" aria-label="Open components" onClick={() => menu.current?.showModal()}><Menu size={19} /></button>}
+        <Link href="/" className="site-brand" aria-label="Message UI home"><Brand /><strong>Message UI</strong></Link>
+      </div>
+      <div className="header-actions">{home && <Link href="/components" className="header-components-link">Components</Link>}<ComponentSearch /><button type="button" className="icon-button theme-switch" aria-label="Toggle site appearance" onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}><Sun size={17} className="hidden dark:block" /><Moon size={17} className="dark:hidden" /></button>{!home && <AddToAgent />}</div>
+    </header>
+    {!home && <><aside className="registry-sidebar"><ComponentNavigation /></aside><dialog ref={menu} className="mobile-sidebar-dialog" aria-label="Component navigation"><button type="button" aria-label="Close components" className="icon-button mobile-close" onClick={() => menu.current?.close()}><X size={20} /></button><ComponentNavigation close={() => menu.current?.close()} /></dialog></>}
+  </>;
 }

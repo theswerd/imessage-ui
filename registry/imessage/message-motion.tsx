@@ -196,10 +196,14 @@ export function playSendAnimation(o: SendAnimationOptions): MotionHandle {
   const m = bubbleMetrics[platform];
   const side = o.bubble.dataset.direction === "incoming" ? "left" : "right";
   const frameRect = o.frame.getBoundingClientRect();
+  // Preview frames can be scaled by an ancestor. Rects are in screen pixels, while the ghost,
+  // clone and their keyframes use the frame's local CSS pixels.
+  const scaleX = frameRect.width / o.frame.offsetWidth || 1;
+  const scaleY = frameRect.height / o.frame.offsetHeight || 1;
   const slot = body.getBoundingClientRect();
-  const fx = o.field.left - frameRect.left, fy = o.field.top - frameRect.top, fw = o.field.width, fh = o.field.height;
-  const bw = slot.width, bh = slot.height;
-  const sx = slot.left - frameRect.left, sy = slot.top - frameRect.top;
+  const fx = (o.field.left - frameRect.left) / scaleX, fy = (o.field.top - frameRect.top) / scaleY, fw = o.field.width / scaleX, fh = o.field.height / scaleY;
+  const bw = slot.width / scaleX, bh = slot.height / scaleY;
+  const sx = (slot.left - frameRect.left) / scaleX, sy = (slot.top - frameRect.top) / scaleY;
   const gx = side === "right" ? fx + fw - bw : fx, gy = fy + (fh - bh) / 2;
   const dx = gx - sx, dy = gy - sy;
   const cs = getComputedStyle(body);
@@ -251,8 +255,8 @@ export function playSendAnimation(o: SendAnimationOptions): MotionHandle {
   const editor = ghostParent.querySelector("textarea, input, [contenteditable]");
   ghostParent.insertBefore(ghost, editor?.parentElement === ghostParent ? editor : ghostParent.firstChild);
   // The keyframes below are in frame coordinates; shift them if the rect lives inside the field instead.
-  const ox = ghostParent === o.frame ? 0 : ghostParent.getBoundingClientRect().left - frameRect.left;
-  const oy = ghostParent === o.frame ? 0 : ghostParent.getBoundingClientRect().top - frameRect.top;
+  const ox = ghostParent === o.frame ? 0 : (ghostParent.getBoundingClientRect().left - frameRect.left) / scaleX;
+  const oy = ghostParent === o.frame ? 0 : (ghostParent.getBoundingClientRect().top - frameRect.top) / scaleY;
 
   const fieldRadius = o.fieldRadius ?? fh / 2;
   const shape: Keyframe[] = [];
@@ -287,10 +291,10 @@ export function playSendAnimation(o: SendAnimationOptions): MotionHandle {
   clone.setAttribute("aria-hidden", "true");
   clone.querySelectorAll("[id]").forEach(el => el.removeAttribute("id"));
   Object.assign(clone.style, {
-    position: "absolute", left: `${rootRect.left - frameRect.left}px`, top: `${rootRect.top - frameRect.top}px`, width: `${rootRect.width}px`,
+    position: "absolute", left: `${(rootRect.left - frameRect.left) / scaleX}px`, top: `${(rootRect.top - frameRect.top) / scaleY}px`, width: `${rootRect.width / scaleX}px`,
     margin: "0", pointerEvents: "none", zIndex: "31", opacity: "0", overflowAnchor: "none",
     // The tail corner is the anchor: it flies alone and the rest of the bubble unfolds from it.
-    transformOrigin: `${((side === "right" ? slot.right : slot.left) - rootRect.left).toFixed(2)}px ${(slot.bottom - rootRect.top).toFixed(2)}px`,
+    transformOrigin: `${(((side === "right" ? slot.right : slot.left) - rootRect.left) / scaleX).toFixed(2)}px ${((slot.bottom - rootRect.top) / scaleY).toFixed(2)}px`,
   });
   // `cloneNode` copies declarations but not the palette the bubble inherits, so resolve it onto the clone.
   // It then paints the measured gradient wherever it is appended, not only under the element that
@@ -298,7 +302,7 @@ export function playSendAnimation(o: SendAnimationOptions): MotionHandle {
   for (const property of Array.from(cs)) if (property.startsWith("--im-")) clone.style.setProperty(property, cs.getPropertyValue(property));
   const realFrame = o.bubble.querySelector<HTMLElement>('[data-slot="bubble-frame"]');
   const cloneFrame = clone.querySelector<HTMLElement>('[data-slot="bubble-frame"]');
-  if (realFrame && cloneFrame) { cloneFrame.style.width = `${realFrame.getBoundingClientRect().width}px`; cloneFrame.style.maxWidth = "none"; }
+  if (realFrame && cloneFrame) { cloneFrame.style.width = `${realFrame.getBoundingClientRect().width / scaleX}px`; cloneFrame.style.maxWidth = "none"; }
   o.frame.appendChild(clone);
 
   const transformAt = (ms: number) => `translate(${(dx * offsetAt(ms)).toFixed(2)}px, ${(dy * offsetAt(ms)).toFixed(2)}px) scale(${scaleAt(ms).toFixed(4)})`;
@@ -316,10 +320,28 @@ export function playSendAnimation(o: SendAnimationOptions): MotionHandle {
   // held up for the whole flight rather than faded in; it is animated only so the handle owns its opacity.
   if (o.placeholder) animations.push(o.placeholder.animate([{ offset: 0, opacity: 1 }, { offset: 1, opacity: 1 }], timing));
   if (o.sendButton) animations.push(o.sendButton.animate([{ offset: 0, opacity: 1 }, { offset: at(S.morph), opacity: 0 }, { offset: 1, opacity: 0 }], timing));
+  // Sending can collapse a multi-line composer or resize the viewport around the software keyboard.
+  // Keep the copy over the real slot when that layout or the transcript's scroll position changes.
+  // Observe it even while paused, so a scrubbed send has the same destination as a running one.
+  const followSlot = () => {
+    const currentFrame = o.frame.getBoundingClientRect();
+    const currentSlot = o.bubble.getBoundingClientRect();
+    const xScale = currentFrame.width / o.frame.offsetWidth || 1;
+    const yScale = currentFrame.height / o.frame.offsetHeight || 1;
+    clone.style.left = `${(currentSlot.left - currentFrame.left) / xScale}px`;
+    clone.style.top = `${(currentSlot.top - currentFrame.top) / yScale}px`;
+  };
+  const layout = new ResizeObserver(followSlot);
+  layout.observe(o.frame);
+  layout.observe(o.bubble);
+  o.frame.addEventListener("scroll", followSlot, true);
   // Keep the clone's screen-space fill honest while it climbs (the body's bottom edge moves through the gradient).
-  const tick = (ms: number) => clone.style.setProperty("--bubble-bottom", `${(sy + bh + dy * offsetAt(ms)).toFixed(2)}px`);
+  const tick = (ms: number) => {
+    followSlot();
+    clone.style.setProperty("--bubble-bottom", `${(sy + bh + dy * offsetAt(ms)).toFixed(2)}px`);
+  };
   tick(0);
-  return makeHandle(animations, D, () => { ghost.remove(); clone.remove(); }, o.paused, tick);
+  return makeHandle(animations, D, () => { layout.disconnect(); o.frame.removeEventListener("scroll", followSlot, true); ghost.remove(); clone.remove(); }, o.paused, tick);
 }
 
 /** The message text fades in inside the shrinking rect as it takes the bubble's shape. */
@@ -399,6 +421,8 @@ export type ArrivalAnimation = { id: string; progress?: number };
 export type ArrivalAnimationOptions = {
   /** The device frame (iOS) or window pane (macOS); the flying copy is added to it. */
   frame: RefObject<HTMLElement | null>;
+  /** Newly appended outgoing messages animate automatically when `send` is omitted. Initial history and thread replacements do not. */
+  messages?: readonly { id: string; direction: "incoming" | "outgoing" }[];
   /** The message that was just sent: the composer's text row becomes that bubble and flies to its slot. */
   send?: ArrivalAnimation | null;
   /** The message that just arrived: it pops in from the typing indicator's position. */
@@ -408,35 +432,57 @@ export type ArrivalAnimationOptions = {
 };
 
 /**
- * Drives the send and receive animations for the app shells: give it the frame and the id of the message
- * that just arrived and it finds the bubble, the composer field and the typing indicator itself.
+ * Drives the app shells and standalone conversation. Outgoing appends animate by default;
+ * explicit send/receive IDs allow controlled playback and deterministic checkpoints.
  */
-export function useArrivalAnimation({ frame, send, receive, onSendEnd }: ArrivalAnimationOptions) {
+export function useArrivalAnimation({ frame, messages, send, receive, onSendEnd }: ArrivalAnimationOptions) {
   const running = useRef<MotionHandle | null>(null);
+  const previousMessages = useRef(messages);
   // Kept in a ref so a fresh inline callback cannot restart a flight that is already in the air.
   const end = useRef(onSendEnd);
   useEffect(() => { end.current = onSendEnd; }, [onSendEnd]);
   const sendId = send?.id ?? null, sendProgress = send?.progress;
   const receiveId = receive?.id ?? null, receiveProgress = receive?.progress;
 
-  useLayoutEffect(() => {
-    const root = frame.current;
-    if (!root || !sendId) return;
-    const bubble = root.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(sendId)}"] [data-slot="message-bubble"]`);
+  const playSend = useCallback((root: HTMLElement, id: string, progress?: number) => {
+    const bubble = root.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(id)}"] [data-slot="message-bubble"]`);
     const field = root.querySelector<HTMLElement>('[data-slot="field"]');
     if (!bubble || !field) return;
     running.current?.cancel();
+    // Measure the destination after bringing an offscreen new message into view, not before a
+    // later scroll moves its slot out from under the flying copy.
+    const log = bubble.closest<HTMLElement>('[data-slot="message-list"]');
+    if (log) log.scrollTop = log.scrollHeight - log.clientHeight;
     const handle = playSendAnimation({
       frame: root, field: field.getBoundingClientRect(), bubble, ghostParent: field,
       sendButton: field.querySelector<HTMLElement>('[data-slot="send"]'),
       fieldRadius: parseFloat(getComputedStyle(field).borderTopLeftRadius) || undefined,
-      paused: sendProgress !== undefined,
+      paused: progress !== undefined,
     });
     running.current = handle;
-    if (sendProgress === undefined) void handle.finished.then(() => { if (running.current === handle) { running.current = null; end.current?.(); } });
-    else handle.seek(Math.max(0, Math.min(1, sendProgress)) * handle.duration);
+    if (progress === undefined) void handle.finished.then(() => { if (running.current === handle) { running.current = null; end.current?.(); } });
+    else handle.seek(Math.max(0, Math.min(1, progress)) * handle.duration);
+    return handle;
+  }, []);
+
+  useLayoutEffect(() => {
+    const root = frame.current;
+    if (!root || !sendId) return;
+    const handle = playSend(root, sendId, sendProgress);
+    if (!handle) return;
     return () => { handle.cancel(); if (running.current === handle) running.current = null; };
-  }, [frame, sendId, sendProgress]);
+  }, [frame, sendId, sendProgress, playSend]);
+
+  useLayoutEffect(() => {
+    const previous = previousMessages.current;
+    previousMessages.current = messages;
+    if (send !== undefined || !messages || !previous || messages.length <= previous.length) return;
+    // A history prepend, a new thread, or a reset is not a send. Compare IDs, so status updates
+    // and reaction edits neither start a second flight nor cancel one already in progress.
+    if (!previous.every((message, index) => messages[index]?.id === message.id)) return;
+    const newest = messages[messages.length - 1];
+    if (newest.direction === "outgoing" && frame.current) playSend(frame.current, newest.id);
+  }, [frame, messages, send, playSend]);
 
   useLayoutEffect(() => {
     const root = frame.current;

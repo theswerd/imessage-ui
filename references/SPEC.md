@@ -7,6 +7,10 @@ Every number here was measured from native captures on 2026-09-08:
 
 Units are points unless stated. Fractions come from the 3x/2x pixel grid; reproduce them exactly in CSS px (1 pt = 1 CSS px).
 
+Registry preview presets also exercise 375×667 and 440×956 viewports. These are unverified responsive
+layouts, not additional native references. The status bar retains its side insets and centers its
+island as the width changes; the measured 402pt layout remains the reference.
+
 ## iOS
 
 ### Conversation view chrome
@@ -475,9 +479,9 @@ described as measured:
   stay derived from the bubble. The thread view dims and blurs the rest of the conversation, from
   documented behaviour.
 - **Photo messages** (`message-image.tsx`): photos take the measured bubble outline including the tail.
-  The tail is filled by sampling the photo's own trailing-bottom edge. Grid: one photo keeps its
-  aspect ratio, two are side by side, three put a tall tile first, four or more show four tiles with
-  a "+N" count on the last.
+  The photo continues through the tail cutout; only the hang below the image uses a sampled
+  trailing-bottom color. That extrapolated fill remains unverified. A single photo keeps its aspect
+  ratio; multiple photos are sent as a vertical run (see the later photo-run measurements).
 - **Audio messages** (`message-audio.tsx`): ChatKit describes the row and it is not the shape that
   was guessed here. `audioWaveformHeight` **35**, `audioWaveformGapWidth` **2**,
   `audioProgressViewSize` **{29, 29}**, `audioBalloonHorizontalSpacing` **10**,
@@ -1590,12 +1594,26 @@ so the geometry is read off the runtime and the screenshot only confirms it.
 | Bottom bar | container 0, 798, 402, 76; button row 28, 798, 346, 48 |
 | Reply button | Ø48 glass disc at (28, 798), `accessibilityLabel` "reply", action `replyTapped:`, image `arrowshape.turn.up.left` (symbol box 21.333 × 17.333, ink 21.67 × 19.67). Disabled when the delegate says so |
 | Share button | Ø48 glass disc at (326, 798), `accessibilityLabel` "Share", action `_actionButtonTapped:` (QuickLook's own), image `square.and.arrow.up` (symbol box 19 × 22, ink 18.67 × 24). Same slot as the list's compose button, "Ø48 centered (350, 822)" |
-| Toolbar order | `[reply, flexible space, share]`. Nothing else, in a build with no chat item |
+| Toolbar order | `[reply, flexible space, share]` **in the probe, which had no chat item**. In real Messages `-[CKQLPreviewController updateBarButtonItems]` (the iOS build, 872 bytes — the single-`ret` reading was the macCatalyst one) adds a tapback item and a reply item to `additionalLeftBarButtonItems` and a save item to `additionalRightBarButtonItems`, so the footer reads leading `[tapback, reply]`, trailing `[save, share]`. The tapback and reply side is picked by `CKFeatureFlags.isTapbacksRefreshEnabled`, which the capture shows is on (reply is at x 28). See `references/image-viewer.md` |
 | Glass | over a (0,0,0) ground the disc interior reads #131313 = white at 7.45%; the outer edge peaks at 52/255 = a rim of white at ~14% over that fill. Glyph ink #f3f3f3. A disabled glyph peaks at 90/255 = 0.32 of the enabled ink. The blur radius is unmeasurable: the ground behind the discs is flat |
 | Close glyph | X, ink 16.67 × 17.0 centred on its disc; each diagonal is 9.5 device px across a row, so at 45° the stroke is 9.5/3/√2 = 2.24 |
 | Status bar | shown (`PUOneUpSettings -allowStatusBar` = 1), white ink over the black ground, and it hides with the rest of the chrome |
 | Fit | the photo is fitted, never filled (`scaleToFitBehavior` 1, `minimumContentInset` 0). A 1200 × 1600 fixture in 402 × 874 lands at x 0, y 169.00, 402 × 536.00; measured 169.00–704.67 down the column at x 201 and 0–401.67 along the row at y 437 |
 | Chrome auto-hide | real, not theoretical: in the capture runs the chrome was up at 1.4 s and gone by 2.6 s with no input (`chromeAutoHideDelay` 3 s, `persistChromeVisibility` 0) |
+
+### What it pages over: the layout group, which spans messages
+
+Added 2026-09-10, from ChatKit disassembly rather than from a capture (`references/image-viewer.md`,
+"It pages across messages, not inside one"). `-[CKChatController _displayPreviewItemForMediaObject:]`
+sets `CKQLPreviewControllerDataSource.previewItems` from
+`-[CKChatController(QuickLook) previewItemsForMediaObject:currentItemIndex:containsRestoring:]`, and
+that call reads the tapped chat item's `layoutGroupIdentifier` and enumerates **the whole
+transcript's** `chatItems`, keeping every item whose own `layoutGroupIdentifier` matches and
+reporting the tapped item's position in the result as the index to open on. A send of N photos is N
+separate messages (§3.4 of `simulator-cases.md`), so tapping any one of them opens a viewer that
+pages over all N. When the tapped item's `layoutGroupIdentifier` is empty the test is skipped and
+every media chat item in the transcript is taken. How `layoutGroupIdentifier` is derived is **not**
+measured.
 
 ### PhotosUI values, read at the phone idiom
 
@@ -2245,3 +2263,23 @@ macOS dark  same geometry, rgb(0,145,255)
 The white-on-selection is `shouldUnreadIndicatorChangeOnSelection` YES on the Mac and NO on the phone,
 observed rather than asserted: the iOS dot holds its blue through a 650 ms touch, the macOS dot goes
 white the instant the selection fill arrives and comes back blue on an inactive window.
+
+
+## Rich link metadata (2026-09-29)
+
+`LinkPreview` retains supplied titles and descriptions even without an image. Cards with no metadata
+keep the measured compact hostname variant. `imageAlt` describes a supplied preview image.
+The rich variants, including text-only metadata cards, remain **UNVERIFIED** against native captures.
+The `link-preview` and `rich-link-preview` harness checkpoints cover iOS/macOS in light/dark; these
+are implementation regressions, not new evidence of Apple fidelity.
+
+
+### Photo viewer regression validation (2026-09-29)
+
+Native iPhone 17 Pro, iOS 26.0 (23A343): `CKQLPreviewController` landscape fit is
+`{0,303,402,268}` for a 3:2 JPEG; portrait fit remains `{0,169,402,536}` for the 3:4 fixture.
+`tests/ios/` contains the repeatable native/Safari journey. `tests/e2e/photo-viewer.spec.ts`
+covers exact replay of opening/paging/dismissal and live scaled/cancelled/coalesced gestures.
+The photo viewer is a separate stacking context above transcript reactions, and its demo fills
+the preview frame. Detailed evidence and the remaining QuickLook zoom-policy difference are in
+`references/image-viewer.md`; passing browser baselines is not proof of complete native fidelity.

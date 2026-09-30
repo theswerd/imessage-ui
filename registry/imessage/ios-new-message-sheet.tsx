@@ -57,6 +57,73 @@ function GlassLayers({ round = false, clip }: { round?: boolean; clip?: "left" |
   );
 }
 
+/**
+ * How the sheet leaves. **Measured**, twice, off an iPhone 17 Pro running iOS 26: the recordings
+ * `newmsg-sheet-open` and `newmsg-sheet-body` (`references/simulator-cases.md` §2.4, and
+ * `references/ios/motion/simulator-checkpoints.json` as the `sheet-dismiss` case) both open with
+ * this sheet already up and a `sms:` deep link dismissing it, so what they capture is the dismissal.
+ * `rec/edge.py --col 603` tracked the panel's top edge down the centre column of the 1206×2622
+ * screen; `samples` are those readings, **in device pixels at 3×, exactly as recorded** — divide by
+ * 3 for the points this file otherwise works in (186 px is the 62 pt `top` below).
+ *
+ * The whole thing is 200 ms, and the shape is the point: peak velocity ~17 px/ms over 45–65 ms, off
+ * a slow start and into a slow finish. A linear slide over the same 200 ms hits both ends and is
+ * outside the recording's own tolerance at exactly the start of the curve — 369 px at 15 ms against
+ * a recorded 241 ± 30, and 564 at 31 ms against 430 ± 60 — while landing inside it at every later
+ * sample (746 vs 683 ± 80, 953 vs 965 ± 100, 1160 vs 1216 ± 110, 1380 vs 1454 ± 120, 2415 vs
+ * 2363 ± 80). So the two samples in the first 31 ms are what a straight line cannot fake, and that
+ * is why this is a table rather than a duration plus an ease: `iosSheetDismissKeyframes()`
+ * interpolates *between the recorded samples*, so a frame at a sampled time is the sample.
+ *
+ * NOT MEASURED, and worth knowing before trusting a frame between the samples:
+ * - 98 → 183 ms is one straight line here because `newmsg-sheet-open` has no sample inside it. The
+ *   second recording does, and disagrees: with its 25 ms of latency removed it puts the edge near
+ *   1896 px at ~117 ms where this table interpolates 1657. Anything read off that stretch is ours.
+ * - The dim fading out under the panel. The recorder tracked one edge and says nothing about the
+ *   backdrop, so the shell crossfades it over the same 200 ms because it has to do something.
+ * - The presentation. Nothing recorded a sheet arriving; `iosScreenTransition.present` is still a
+ *   guess. What *is* recorded is that a **re-present is not animated at all** — see
+ *   `iosScreenTransition.represent`.
+ */
+export const iosSheetDismissal = {
+  duration: 200,
+  /** The recorded screen, device px: 402 × 874 pt at 3×. `samples` end when the edge reaches this. */
+  screenHeight: 2622,
+  /** Top edge of the panel in device px, at the recorder's t = 0 (first frame past `changedFromRest` 0.05). */
+  samples: [
+    { t: 0, y: 186 }, { t: 15, y: 241 }, { t: 31, y: 430 }, { t: 46, y: 683 }, { t: 63, y: 965 },
+    { t: 80, y: 1216 }, { t: 98, y: 1454 }, { t: 183, y: 2363 }, { t: 200, y: 2622 },
+  ],
+  /**
+   * The second recording, on its own clock (`newmsg-sheet-body`, which starts with 25 ms of latency
+   * before anything moves). Kept because it is where the checkpoints' tolerances come from — the two
+   * agree within 8% at every sampled time, and that spread is the 8–120 px each assertion allows.
+   */
+  crossCheck: [
+    { t: 25, y: 186 }, { t: 33, y: 229 }, { t: 47, y: 378 }, { t: 62, y: 622 }, { t: 73, y: 834 },
+    { t: 93, y: 1095 }, { t: 108, y: 1345 }, { t: 125, y: 1569 }, { t: 142, y: 1896 },
+    { t: 158, y: 2061 }, { t: 175, y: 2199 }, { t: 192, y: 2312 }, { t: 210, y: 2622 },
+  ],
+} as const;
+
+/**
+ * The dismissal as Web Animations keyframes on the panel's own `translateY`.
+ *
+ * `translateY(100%)` is exactly the travel and that is not a coincidence: the panel is `top: 62`
+ * to `bottom: 0`, so its height *is* the distance from its resting top edge to the bottom of the
+ * screen — 812 pt, the 2436 device px between the first sample and the last. Each keyframe is
+ * therefore `(y - 186) / 2436` of the panel's height, with no fitted curve in between.
+ *
+ * Play it with `easing: "linear"`: an ease over the whole effect would re-time the offsets and put
+ * the recorded samples somewhere the recording never saw them.
+ */
+export function iosSheetDismissKeyframes(): Keyframe[] {
+  const { duration, samples } = iosSheetDismissal;
+  const rest = samples[0]!.y;
+  const travel = samples.at(-1)!.y - rest;
+  return samples.map(({ t, y }) => ({ offset: t / duration, transform: `translateY(${((y - rest) / travel * 100).toFixed(4)}%)` }));
+}
+
 export function IosNewMessageSheet({ title = "New Message", value, onChange, onClose, onAddContact, caret = false, children, className, style, ...props }: IosNewMessageSheetProps) {
   const id = useId();
   // Escape dismisses the sheet, the same as the close button.

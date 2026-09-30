@@ -4,7 +4,7 @@ The Messages list screen: large title, rows with avatars and previews, search pi
 
 ## Requirements
 
-React 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor.
+React 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor. Standalone primitives need PaletteStyle inside a data-im-platform wrapper; full conversation and app shells include it. Setup: http://localhost:3100/onboard.md
 
 ## Install
 
@@ -15,7 +15,35 @@ npx shadcn@latest add http://localhost:3100/r/ios-conversation-list.json
 ## Usage
 
 ```tsx
-Install the full collection, then import the components you need from @/components/imessage/.
+"use client";
+
+import {
+  IosConversationList,
+  IosConversationRow,
+  type IosConversationListProps,
+} from "@/components/message-ui/ios-conversation-list";
+
+const conversations = [
+  { id: "jamie", name: "Jamie Lee", initials: "JL",
+    preview: "The Dolomites. Italy 🇮🇹", time: "9:41 AM", unread: true },
+  { id: "alex", name: "Alex Morgan", initials: "AM",
+    preview: "See you Saturday!", time: "Yesterday" },
+];
+
+export function Inbox(props: Pick<IosConversationListProps, "onSelect" | "onSearch" | "onCompose">) {
+  return <div className="relative h-[680px] w-full max-w-[402px] overflow-hidden">
+    <IosConversationList conversations={conversations} {...props} />
+  </div>;
+}
+
+// Use the same rows inside your own list layout.
+export function CustomList({ onSelect }: Pick<IosConversationListProps, "onSelect">) {
+  return <ul className="m-0 max-w-[402px] list-none p-0">
+    {conversations.map(conversation => <li key={conversation.id}>
+      <IosConversationRow conversation={conversation} onSelect={onSelect} />
+    </li>)}
+  </ul>;
+}
 ```
 
-Components render UI only. Supply your own message data, persistence, uploads, and send handlers. No iMessage or Apple service connection is included.
+Components render UI only. Supply your own message data, persistence, uploads, and send handlers. Connect your own messaging service.

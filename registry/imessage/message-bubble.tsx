@@ -45,11 +45,38 @@ export function isEmojiOnly(text: ReactNode): boolean {
 /**
  * Where a reaction balloon hangs off a message's own box, per platform. It lives here because every
  * message kind needs it, not only a text bubble: a photo, a link card, an audio row and a bare emoji
- * all take reactions too, and each draws its own container.
+ * all take reactions too, and each draws its own container. `message-list.tsx` reads this table for
+ * every one of those kinds, so it is what actually places a Tapback on a **photo**.
+ *
+ * These are the measured captures, and they are the same three numbers `tapback.tsx` exports as
+ * `balloonSlot` and `message-image.tsx` keeps as `reactionSlot`. `tests/unit/tapback-slot.test.ts`
+ * asserts all three agree, because they did not:
+ *
+ * | | was here | measured | out by |
+ * |---|---|---|---|
+ * | iOS marginTop | 28 | 28 | — |
+ * | iOS top | −27.25 | **−27.39** | 0.14 |
+ * | iOS side | −14.1 | **−13.85** | 0.25 |
+ * | macOS marginTop | 19.6 | **27.4** | 7.80 |
+ * | macOS top | −19.1 | **−22.05** | 2.95 |
+ * | macOS side | −9.9 | **−11.79** | 1.89 |
+ *
+ * iOS averages the outgoing capture (`conv3-light.png` → `tapback-love-light.png`, −27.47 / −14.02)
+ * and the mirrored incoming one (`incoming-light.png`, −27.31 / +13.68); the same pair gives the slot
+ * the list opens above the bubble, whose cluster gap grows 10.313 → 38.313, i.e. exactly 28.
+ * macOS is `tapback-love-dark-2x.png`, cross-checked light: body bottom 34.93 → next body top 65.51
+ * is a 30.58 gap where the cluster gap below it is 3.18, so the slot opens 27.40; the Ø28 circle's
+ * top (86.92 px) sits 22.05 above the body top (131.01 px) and its leading edge (245.46 px) 11.79
+ * outside the body's leading edge (269.03 px).
+ *
+ * The macOS row is the one that mattered: at 19.6 / −19.1 / −9.9 a Tapback on a macOS photo sat 7.8 pt
+ * short in its slot, 2.95 pt too low against the photo and 1.89 pt too far in over it — visible, and
+ * wrong for every non-text message kind, not just photos. `tapback.tsx` had flagged it in a comment
+ * since the macOS balloon was measured; this is that correction landing in the table that draws.
  */
 export const reactionOffsets: Record<Platform, { marginTop: number; top: number; side: number }> = {
-  ios: { marginTop: 28, top: -27.25, side: -14.1 },
-  macos: { marginTop: 19.6, top: -19.1, side: -9.9 },
+  ios: { marginTop: 28, top: -27.39, side: -13.85 },
+  macos: { marginTop: 27.4, top: -22.05, side: -11.79 },
 };
 
 function fillVars(direction: Direction, service: Service): CSSProperties {
@@ -120,11 +147,13 @@ function useNativeTextFit(enabled: boolean, paddingX: number, minWidth: number, 
         else lines.push({ top: rect.top, left: rect.left, right: rect.right });
       }
       if (!lines.length) return;
-      const longest = Math.max(...lines.map(l => l.right - l.left));
+      const layoutWidth = parseFloat(getComputedStyle(frameEl).width);
+      const scaleX = frameEl.getBoundingClientRect().width / layoutWidth || 1;
+      const longest = Math.max(...lines.map(l => l.right - l.left)) / scaleX;
       const bubble = textEl.parentElement as HTMLElement;
       bubble.style.textAlign = lines.length === 1 && longest < minWidth - 2 * paddingX ? "center" : "";
       const hug = Math.ceil((longest + 2 * paddingX) * 100) / 100 + 0.05;
-      if (lines.length > 1 && hug < frameEl.getBoundingClientRect().width - 0.1) frameEl.style.width = `${hug}px`;
+      if (lines.length > 1 && hug < layoutWidth - 0.1) frameEl.style.width = `${hug}px`;
     };
     measure();
     const observer = new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measure); });

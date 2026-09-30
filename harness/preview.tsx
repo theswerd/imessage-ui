@@ -13,6 +13,8 @@ import { ScreenEffect } from "@/registry/imessage/screen-effects";
 import type { IosSearchSection } from "@/registry/imessage/ios-search";
 import { contact, frameAt, iosConversations, macConversations, now, platforms, type FixtureMessage, type Platform, type Reaction, type ScenarioId, type SceneFrame } from "./scenarios";
 import { cn } from "@/lib/utils";
+import { ThemeCrossfade } from "@/registry/imessage/theme-transition";
+import { IosPushBanner } from "@/registry/imessage/ios-push-banner";
 
 function toMessage(fixture: FixtureMessage): Message {
   const sentAt = now.getTime() - fixture.minutesAgo * 60_000;
@@ -24,7 +26,7 @@ function toMessage(fixture: FixtureMessage): Message {
     // sentences rather than a balloon, so it is checked before every balloon kind.
     kind: fixture.system ? "system" : fixture.link ? "link" : fixture.attachment ? "attachment" : fixture.images ? "image" : fixture.audio ? "audio" : "text",
     system: fixture.system,
-    link: fixture.link ? { url: fixture.link.url, host: fixture.link.host, title: fixture.link.title } : undefined,
+    link: fixture.link ? { url: fixture.link.url, host: fixture.link.host, title: fixture.link.title, image: fixture.link.image } : undefined,
     attachments: fixture.attachment ? [{ name: fixture.attachment.name, size: fixture.attachment.size, href: fixture.attachment.href }] : undefined,
     images: fixture.images,
     audio: fixture.audio,
@@ -320,6 +322,12 @@ export function HarnessPreview({ platform, scenario, time, interactive = true, o
     <div ref={deviceFrame} data-testid="device" data-platform={platform} data-scenario={scenario} data-time={time}
       className={cn("relative isolate shrink-0 overflow-hidden", platform === "ios" ? "rounded-[36px]" : "rounded-[27px]")}
       style={{ width: width ?? size.width, height: size.height, boxShadow: "0 20px 70px -25px #00000040" }}>
+      {/* An appearance switch is two copies of the whole UI with the destination fading in over the
+          origin — every `dark:` token family at once, rather than the one palette a variable sweep
+          could reach. Only a scenario that states `themeCrossfade` pays for the second copy, and the
+          banner below stays outside it because the OS draws it over whatever the app is doing. */}
+      <ThemeCrossfade to={frame.themeCrossfade?.to ?? "dark"} ms={frame.themeCrossfade?.ms ?? Number.POSITIVE_INFINITY}
+        enabled={Boolean(frame.themeCrossfade)}>
       {platform === "ios" ? (
         <IosMessagesApp {...shared} width={width ?? iosScreen.width} height={iosScreen.height} time="9:41" screen={activeScreen}
           conversations={iosConversations(frame.conversations)}
@@ -440,6 +448,16 @@ export function HarnessPreview({ platform, scenario, time, interactive = true, o
           onContextMenuClose={() => { setContextMenu(null); onEvent?.("reactions.close"); }}
           footer="Syncing with iCloud Paused" overlay={<>{callCard}{effectOverlay}</>} />
       )}
+      </ThemeCrossfade>
+      {/*
+        The notification banner is drawn by the OS *over* the app, not by Messages inside it, so it is
+        a sibling of the shell rather than one of its overlays — it has to be able to cover the status
+        bar and the Dynamic Island, which is where it grows out of. It places itself: the geometry is
+        a pure function of (kind, ms) against the recorded table, so seeking the scene is all it takes.
+      */}
+      {platform === "ios" && frame.pushBanner
+        ? <IosPushBanner kind={frame.pushBanner.kind} t={frame.pushBanner.ms} />
+        : null}
     </div>
   );
 }

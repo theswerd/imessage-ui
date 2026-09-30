@@ -141,21 +141,28 @@ describe("scenario timelines", () => {
  * if the number the shell is handed is a pure function of the scenario and the time.
  */
 describe("the presented surfaces", () => {
-  test("the photo viewer opens on a tile, pages at the halfway point and holds the drop", () => {
+  test("the photo viewer opens on a tile, continuously pages and holds the drop", () => {
     const open = scenarioFor("photo-viewer");
     expect(open.duration).toBe(frameworkMotion.photoViewer);
-    expect(frameAt("photo-viewer", 0).photoViewer).toEqual({ id: "ph", index: 2, progress: 0 });
+    // `id` is the message that was TAPPED — "ph2", the third of the run — and `index` counts photos
+    // in the whole run rather than in that message. The viewer pages across messages: measured in
+    // ChatKit, its item list is every chat item sharing the tapped one's `layoutGroupIdentifier`.
+    expect(frameAt("photo-viewer", 0).photoViewer).toEqual({ id: "ph2", index: 2, progress: 0 });
     expect(frameAt("photo-viewer", 150).photoViewer!.progress).toBeCloseTo(0.5, 6);
     expect(frameAt("photo-viewer", 300).photoViewer!.progress).toBe(1);
-    // The message it opens from carries five photos, so `pageWindow` has two either side and only
-    // the first four have a tile in the log — the fifth is the case that fades instead of flying.
-    const photos = frameAt("photo-viewer", 0).messages.find(message => message.id === "ph")?.images;
-    expect(photos).toHaveLength(viewerPhotos.length);
+    // Five photos, as five messages — the shape a send of five actually takes. `pageWindow` has two
+    // either side of the tapped one, and the run is what the viewer pages over.
+    const run = frameAt("photo-viewer", 0).messages.filter(message => message.id.startsWith("ph"));
+    expect(run).toHaveLength(viewerPhotos.length);
+    expect(run.every(message => message.images?.length === 1)).toBe(true);
     expect(viewerPhotos.length).toBeGreaterThan(4);
-    // Paging commits at half of `timing.page`, so the two halves state different items.
+    // Intermediate checkpoints hold the strip between photos instead of jumping between two stills.
     expect(frameAt("photo-viewer-page", 0).photoViewer!.index).toBe(1);
     expect(frameAt("photo-viewer-page", 149).photoViewer!.index).toBe(1);
-    expect(frameAt("photo-viewer-page", 150).photoViewer!.index).toBe(2);
+    expect(frameAt("photo-viewer-page", 150).photoViewer!.index).toBe(1);
+    expect(frameAt("photo-viewer-page", 150).photoViewer!.pageOffset).toBe(-0.5);
+    expect(frameAt("photo-viewer-page", 300).photoViewer!.index).toBe(2);
+    expect(frameAt("photo-viewer-page", 300).photoViewer!.pageOffset).toBe(0);
     expect(frameAt("photo-viewer-page", 300).photoViewer!.progress).toBe(1);
     // The drop is held by `dismiss`, never by the entrance, which stays settled throughout.
     const drop = frameAt("photo-viewer-dismiss", 300).photoViewer!;

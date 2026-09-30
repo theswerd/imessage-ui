@@ -4,7 +4,7 @@ The attachment sheet with its app rows and the embedded photo grid.
 
 ## Requirements
 
-React 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor.
+React 19, Tailwind CSS 4, and an initialized shadcn project. Uses the standard cn utility at @/lib/utils. Enable dark mode with a .dark ancestor. Standalone primitives need PaletteStyle inside a data-im-platform wrapper; full conversation and app shells include it. Setup: http://localhost:3100/onboard.md
 
 ## Install
 
@@ -15,7 +15,7 @@ npx shadcn@latest add http://localhost:3100/r/ios-plus-menu.json
 ## Usage
 
 ```tsx
-Install the full collection, then import the components you need from @/components/imessage/.
+// Exported props and source: http://localhost:3100/r/ios-plus-menu.json
 ```
 
-Components render UI only. Supply your own message data, persistence, uploads, and send handlers. No iMessage or Apple service connection is included.
+Components render UI only. Supply your own message data, persistence, uploads, and send handlers. Connect your own messaging service.

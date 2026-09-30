@@ -39,8 +39,34 @@ export const macScreen = { width: macWindowMetrics.width, height: macWindowMetri
 export const macTransitions = {
   /** Conversation switch: the pane dissolves while the arriving content rises `shift` points into place. */
   conversation: { duration: 140, shift: 6, dissolve: 0.62 },
-  /** The sidebar's selected row travels to its new place; its text crosses to the selected colour sooner. */
-  selection: { duration: 140, text: 110 },
+  /**
+   * **The sidebar's selection does not animate, and this is why there is no constant for it.**
+   *
+   * This used to be `{ duration: 140, text: 110 }`, driving a blue tile that travelled between rows
+   * while the two rows' text cross-faded. Nothing native does that.
+   *
+   * The container first: the Mac conversation list is a **`UICollectionView`**, not a table.
+   * `-[CKUIBehavior conversationListTableViewClass]` answers nil at every idiom, and
+   * `CKConversationListCollectionViewController` is the only conversation-list view controller in the
+   * framework. Its cell is `CKConversationListCollectionViewConversationCell` :
+   * `CKConversationListEmbeddedCollectionViewCell` : `UICollectionViewListCell`, and that base class
+   * carries a `UITableViewCell` as *content* (`_embeddedTableViewCell`, `forwardStateToEmbeddedCell:`)
+   * whose own `backgroundColor` is clear — the fill is painted by a `_UISystemBackgroundView` from a
+   * `UIBackgroundConfiguration`. (This is worth spelling out because the first measurement of it read
+   * the embedded table cell and took that for the list.)
+   *
+   * The finding survives the correction, and was reproduced on both containers at both idioms: the
+   * user-click path creates **zero** `CAAnimation`s. The leaving fill, the arriving fill and the
+   * separators either side all change in the same instant, and there is no shared highlight view
+   * anywhere in the list to travel between them.
+   *
+   * UIKit does own an animated selection path, for callers that pass `animated:YES` — which the click
+   * never does. On the collection list it runs **0.3 s** on `cubic-bezier(0.42, 0, 0.58, 1)`; 0.5 s is
+   * the table's number, for the container the app does not use, and neither is the `CATransaction`
+   * default of 0.25 s. Even that path is two in-place cross-fades with nothing travelling.
+   *
+   * The pane's own crossfade below is a different thing and stays; it was measured separately.
+   */
   /**
    * The context menu appearing. Its dismissal is the 120 ms `context-menu.tsx` already owns, and the
    * plus popover owns both ends of its own presentation (`macPlusMenuMetrics.motion`), which grows
@@ -173,7 +199,6 @@ const popoverChrome = cn(
  * and `macos-sidebar.tsx`. No capture of an inactive *light* window exists, so light keeps its fill.
  */
 const macAppStyles = `
-[data-im-platform="macos"][data-switching="true"] [data-slot="sidebar-row"][data-selected="true"] > button{background-color:transparent!important}
 [data-slot="header-outgoing"] [data-slot="header-glass"],[data-slot="header-outgoing"] [data-slot="compose-button"],[data-slot="header-outgoing"] [data-slot="video-button"]{display:none}
 :where(.dark,.dark *) [data-slot="macos-messages-app"][data-active="false"] [data-slot="mac-sidebar"]:not(:where([data-preview-theme="light"] *)){--sb-fill:#292929}
 [data-slot="macos-messages-app"][data-active="false"] :is([data-slot="compose-button"],[data-slot="video-button"],[data-slot="add-recipient-button"],[data-slot="attach-button"],[data-slot="emoji-button"],[data-slot="sidebar-options"]){opacity:0.5}
@@ -245,6 +270,7 @@ export type MacMessagesAppProps = {
   onVideoCall?: () => void;
   onDetails?: () => void;
   /**
+   * Omit to animate appended outgoing messages automatically; null disables automatic sends.
    * That message was just sent: the composer's text row becomes its bubble and flies to its slot.
    * With `progress` the animation is seeked to `progress * duration` instead of played.
    */
@@ -374,7 +400,6 @@ type OutgoingPane = {
   /** Its own faces, so a group's stacked photo crosses to the next conversation's instead of popping. */
   members: MacHeaderMember[] | undefined;
   /** Indices of the row it left and the row it landed on, when both are unpinned sidebar rows. */
-  rows: { from: number; to: number } | null;
 };
 
 /**
@@ -597,7 +622,7 @@ export function MacMessagesApp({
   }
   const mine = target?.reactions?.find(reaction => reaction.byMe);
   const selected: TapbackSelection | undefined = mine ? (mine.emoji ? { emoji: mine.emoji } : { type: mine.type as never }) : undefined;
-  useArrivalAnimation({ frame: pane, send: sendAnimation, receive: receiveAnimation, onSendEnd: onSendAnimationEnd });
+  useArrivalAnimation({ frame: pane, messages, send: sendAnimation, receive: receiveAnimation, onSendEnd: onSendAnimationEnd });
 
   /**
    * The conversation the pane is leaving. It cannot be derived during render the way the menus'
@@ -621,10 +646,7 @@ export function MacMessagesApp({
     // The sidebar has nothing to travel from either: the highlight was on the draft's row, and that
     // row leaves the list in this same commit.
     if (before.composing) return;
-    const rows = conversations.filter(conversation => !conversation.pinned);
-    const from = rows.findIndex(row => row.id === before.id);
-    const to = rows.findIndex(row => row.id === selectedId);
-    setOutgoingPane({ messages: before.messages, contact: before.contact, group: before.group, members: before.members, rows: from >= 0 && to >= 0 && from !== to ? { from, to } : null });
+    setOutgoingPane({ messages: before.messages, contact: before.contact, group: before.group, members: before.members });
   }, [selectedId, transcript, contact, group, groupMembers, conversations, composing]);
 
   const switchProgress = conversationTransition?.progress;
@@ -650,63 +672,12 @@ export function MacMessagesApp({
     add(root.querySelector('[data-slot="pane-outgoing"]'), leave, leaving);
     add(contacts.find(element => element.closest('[data-slot="header-outgoing"]')), leave, leaving);
 
-    // The sidebar's selection is one highlight that moves, not two that swap: the row it leaves drops
-    // its own fill, the row it lands on has its fill suppressed by `macAppStyles` for as long as this
-    // runs, and this chip travels between them. It is inserted as the list's first child so the rows'
-    // avatars and text keep painting over it, the way the real fill does.
-    let chip: HTMLElement | null = null;
-    const travel = outgoingPane.rows;
-    const list = travel ? shell.current?.querySelector<HTMLElement>('[data-slot="sidebar-rows"]') : null;
-    const items = list?.querySelectorAll<HTMLElement>('[data-slot="sidebar-row"]');
-    const fromRow = travel && items ? items[travel.from] : undefined;
-    const toRow = travel && items ? items[travel.to] : undefined;
-    if (travel && list && fromRow && toRow) {
-      // Geometry comes from the sidebar's own metrics, not from the DOM: `offsetTop` and
-      // `offsetHeight` are integers, and a row is 80.5 tall, so a chip built from them would sit half
-      // a point off the row it is standing in for. Rows stack from the list's top with no gaps.
-      const row = macSidebarMetrics.row;
-      chip = document.createElement("div");
-      chip.dataset.slot = "sidebar-selection-travel";
-      chip.setAttribute("aria-hidden", "true");
-      Object.assign(chip.style, {
-        position: "absolute", left: "0px", top: `${travel.from * row.height}px`,
-        width: `${row.width}px`, height: `${row.height}px`, borderRadius: `${row.radius}px`,
-        background: active ? "#3478f6" : getComputedStyle(list).getPropertyValue("--sb-inactive").trim() || "#3a3a3a",
-        // A transient element must never become a scroll anchor: scrubbing rebuilds it every frame.
-        pointerEvents: "none", overflowAnchor: "none",
-      } satisfies Partial<CSSStyleDeclaration>);
-      // The same continuous corner `macos-sidebar.tsx` gives the row it is standing in for.
-      if (CSS.supports?.("corner-shape: superellipse(1.4)")) { chip.style.borderRadius = "10px"; chip.style.setProperty("corner-shape", "superellipse(1.4)"); }
-      list.insertBefore(chip, list.firstChild);
-      // `top`, not a transform: a transformed layer rasterizes at its own subpixel offset and lands a
-      // device pixel above the row it is standing in for, which shows at both ends of the travel.
-      add(chip, [{ top: `${(travel.from * row.height).toFixed(2)}px` }, { top: `${(travel.to * row.height).toFixed(2)}px` }],
-        { duration: macTransitions.selection.duration, easing: arriving.easing });
-      // The row text crosses with the fill, and a little sooner, so the name is already white by the
-      // time the highlight is under it. Driven here rather than by a CSS transition so that the whole
-      // switch answers to one `progress`. An inactive window's selected row keeps the plain colours
-      // (`macos-sidebar.tsx`), so there is nothing to cross then.
-      const ink = getComputedStyle(list);
-      const plain = { name: ink.getPropertyValue("--sb-name").trim() || "#000000", secondary: ink.getPropertyValue("--sb-secondary").trim() || "#6e6e6d" };
-      const chosen = active ? { name: "#ffffff", secondary: "#d6e4fd" } : plain;
-      const crossText = (row: HTMLElement, toSelected: boolean) => {
-        for (const [slot, from, to] of [
-          ['[data-slot="row-name"]', plain.name, chosen.name],
-          ['[data-slot="row-time"]', plain.secondary, chosen.secondary],
-          ['[data-slot="row-preview"]', plain.secondary, chosen.secondary],
-        ] as const) {
-          add(row.querySelector(slot), toSelected ? [{ color: from }, { color: to }] : [{ color: to }, { color: from }],
-            { duration: macTransitions.selection.text, easing: "linear" });
-        }
-      };
-      crossText(fromRow, false);
-      crossText(toRow, true);
-    }
+    // Nothing happens to the sidebar here. The selected row's fill just changes, in the same frame
+    // the click lands, because that is what the table does — see `macTransitions.selection` above.
 
     if (switchProgress === undefined) void Promise.all(animations.map(animation => animation.finished.catch(() => undefined))).then(clear);
     else { const t = clamp01(switchProgress) * D; animations.forEach(animation => { animation.pause(); animation.currentTime = t; }); }
     return () => {
-      chip?.remove();
       animations.forEach(animation => { try { animation.cancel(); } catch { /* already gone */ } });
     };
   }, [outgoingPane, pane, switchProgress, active]);
@@ -991,7 +962,7 @@ export function MacMessagesApp({
   return (
     <PlatformProvider platform="macos">
       <PaletteStyle platform="macos" />
-      <div ref={shell} data-im-platform="macos" data-switching={outgoingPane?.rows ? "true" : undefined} className={cn("relative", className)} style={{ width, height, ...style }}
+      <div ref={shell} data-im-platform="macos" className={cn("relative", className)} style={{ width, height, ...style }}
         // The window's menu-bar equivalents (`macShortcuts`, read off the live macOS 26 Messages menu
         // bar). All three are bound on the window rather than on the document, so a second app on the
         // same page keeps its own.

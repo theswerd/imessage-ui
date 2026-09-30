@@ -343,13 +343,16 @@ export const macSidebarMetrics = {
     headerBottomPadding: 8,
   },
   /**
-   * How long a separator takes to cross when the selection moves. **Unverified**: no capture holds a
-   * switch. It is the same 140 ms `macos-messages-app.tsx` gives the travelling highlight
-   * (`macTransitions.selection.duration`), copied rather than imported because that file imports this
-   * one. The two have to agree: the separators the selection uncovers and covers are the ones it is
-   * moving between, so a different number would make them lead or trail the fill.
+   * How long a separator takes to cross when the selection moves: **zero**. This was 140 ms and
+   * carried a note saying it was unverified because no capture held a switch. It is verified now, and
+   * it is instant. The user-click path on the list — a `UICollectionView` of
+   * `UICollectionViewListCell`, not the table it was first measured as — creates no `CAAnimation` for
+   * the cell or for the separators either side of it, so a separator the selection uncovers appears in
+   * the same frame the fill leaves. Kept as a named zero rather than deleted so
+   * the reduced-motion rule below still has one thing to talk about, and so this note stays attached
+   * to the number it corrects.
    */
-  selectionFade: 140,
+  selectionFade: 0,
 };
 
 /**

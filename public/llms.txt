@@ -1,11 +1,11 @@
-# iMessage UI
+# Message UI
 
-A shadcn registry of Messages components for the web, measured against iOS 26 and macOS 26.
+A shadcn registry of Messages-style components for the web. Native captures and framework measurements inform many surfaces; source comments document approximations and remaining gaps.
 
 Registry: http://localhost:3100/r/registry.json
-Namespace: @imessage → http://localhost:3100/r/{name}.json
+Namespace: @message-ui → http://localhost:3100/r/{name}.json
 
-- [Platform context](http://localhost:3100/llms/platform.txt): Tells every iMessage component whether to render iOS 26 or macOS 26 metrics.
+- [Platform context](http://localhost:3100/llms/platform.txt): Tells every Message UI component whether to render iOS 26 or macOS 26 metrics.
 - [Design tokens](http://localhost:3100/llms/tokens.txt): Measured colors, screen-space bubble gradients, type scale, and spacing for iOS and macOS.
 - [Bubble shape](http://localhost:3100/llms/bubble-shape.txt): The traced native bubble outline and tail as SVG path and clip-path generators.
 - [Screen-space fill hook](http://localhost:3100/llms/use-screen-space.txt): Keeps bubble fills aligned to the screen-space gradient while a list scrolls.
@@ -30,6 +30,7 @@ Namespace: @imessage → http://localhost:3100/r/{name}.json
 - [Long press hook](http://localhost:3100/llms/use-long-press.txt): A cancelable 500 ms hold with keyboard, double-click, and right-click alternatives.
 - [Message list](http://localhost:3100/llms/message-list.txt): The scrolling log: clusters and tails, date headers, status labels, sender names, emoji-only rows, link cards, attachments, and the typing indicator.
 - [iOS status bar](http://localhost:3100/llms/ios-status-bar.txt): Time, Dynamic Island, cellular, Wi-Fi, and battery exactly as iOS 26 draws them.
+- [Notification banner](http://localhost:3100/llms/ios-push-banner.txt): The iOS 26 push banner, expanding out of the Dynamic Island on its recorded frames.
 - [iOS nav bar](http://localhost:3100/llms/ios-nav-bar.txt): The conversation nav bar with the glass back button, large avatar, and name pill, plus the list's large title.
 - [iOS scroll edge](http://localhost:3100/llms/ios-scroll-edge.txt): The wash iOS 26 lays over a message scrolling up under the conversation's floating nav bar, measured per theme.
 - [iOS composer](http://localhost:3100/llms/ios-composer.txt): The glass message field with the plus button, microphone, auto-growing text, and the send pill.
@@ -60,3 +61,4 @@ Namespace: @imessage → http://localhost:3100/r/{name}.json
 - [System message](http://localhost:3100/llms/system-message.txt): The centred grey lines that are not bubbles: group renames, joins and leaves, the group photo, a missed call, a reaction summary, and the unknown-sender sentence.
 - [Group avatar](http://localhost:3100/llms/group-avatar.txt): The stacked faces a group conversation shows in the list, the nav bar, the details header and the macOS sidebar.
 - [Audio recorder](http://localhost:3100/llms/audio-recorder.txt): The composer turning into a voice-message recorder: live waveform, running timer, and the send, stop and cancel controls.
+- [Appearance switch](http://localhost:3100/llms/theme-transition.txt): The system light/dark switch as iOS 26 plays it: a crossfade of about half a second, on two different curves in the two directions, from the recorded ramps.

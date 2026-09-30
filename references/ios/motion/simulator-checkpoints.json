@@ -1,0 +1,1488 @@
+{
+  "device": {
+    "udid": "525CB796-F5C9-41C3-92FC-D760CA5CE9DC",
+    "px": [
+      1206,
+      2622
+    ],
+    "pt": [
+      402,
+      874
+    ],
+    "scale": 3
+  },
+  "zeroRule": "first frame whose changedFromRest exceeds `zeroThreshold`",
+  "cases": [
+    {
+      "case": "appearance-light-to-dark",
+      "drive": "xcrun simctl ui $UDID appearance dark",
+      "zeroThreshold": 0.002,
+      "duration": 440,
+      "checkpoints": [
+        0,
+        47,
+        105,
+        157,
+        192,
+        257,
+        307,
+        342,
+        393,
+        423,
+        440
+      ],
+      "assertions": [
+        {
+          "at": 0,
+          "kind": "region",
+          "region": [
+            150,
+            1450,
+            900,
+            300
+          ],
+          "rgb": [
+            239,
+            239,
+            239
+          ],
+          "tol": 4
+        },
+        {
+          "at": 47,
+          "kind": "region",
+          "region": [
+            150,
+            1450,
+            900,
+            300
+          ],
+          "rgb": [
+            208,
+            208,
+            208
+          ],
+          "tol": 4
+        },
+        {
+          "at": 105,
+          "kind": "region",
+          "region": [
+            150,
+            1450,
+            900,
+            300
+          ],
+          "rgb": [
+            168,
+            168,
+            168
+          ],
+          "tol": 4
+        },
+        {
+          "at": 157,
+          "kind": "region",
+          "region": [
+            150,
+            1450,
+            900,
+            300
+          ],
+          "rgb": [
+            138,
+            138,
+            140
+          ],
+          "tol": 4
+        },
+        {
+          "at": 192,
+          "kind": "region",
+          "region": [
+            150,
+            1450,
+            900,
+            300
+          ],
+          "rgb": [
+            119,
+            119,
+            122
+          ],
+          "tol": 4
+        },
+        {
+          "at": 257,
+          "kind": "region",
+          "region": [
+            150,
+            1450,
+            900,
+            300
+          ],
+          "rgb": [
+            88,
+            88,
+            90
+          ],
+          "tol": 4
+        },
+        {
+          "at": 307,
+          "kind": "region",
+          "region": [
+            150,
+            1450,
+            900,
+            300
+          ],
+          "rgb": [
+            66,
+            66,
+            68
+          ],
+          "tol": 4
+        },
+        {
+          "at": 342,
+          "kind": "region",
+          "region": [
+            150,
+            1450,
+            900,
+            300
+          ],
+          "rgb": [
+            53,
+            53,
+            55
+          ],
+          "tol": 4
+        },
+        {
+          "at": 393,
+          "kind": "region",
+          "region": [
+            150,
+            1450,
+            900,
+            300
+          ],
+          "rgb": [
+            38,
+            38,
+            40
+          ],
+          "tol": 4
+        },
+        {
+          "at": 423,
+          "kind": "region",
+          "region": [
+            150,
+            1450,
+            900,
+            300
+          ],
+          "rgb": [
+            31,
+            31,
+            33
+          ],
+          "tol": 4
+        },
+        {
+          "at": 440,
+          "kind": "region",
+          "region": [
+            150,
+            1450,
+            900,
+            300
+          ],
+          "rgb": [
+            30,
+            30,
+            32
+          ],
+          "tol": 4
+        },
+        {
+          "at": 473,
+          "kind": "region",
+          "region": [
+            150,
+            1450,
+            900,
+            300
+          ],
+          "rgb": [
+            26,
+            26,
+            28
+          ],
+          "tol": 2,
+          "note": "settled; flat to 953 ms"
+        },
+        {
+          "at": 0,
+          "kind": "region",
+          "region": [
+            400,
+            2220,
+            400,
+            60
+          ],
+          "rgb": [
+            12,
+            141,
+            252
+          ],
+          "tol": 3,
+          "note": "systemBlue, light"
+        },
+        {
+          "at": 473,
+          "kind": "region",
+          "region": [
+            400,
+            2220,
+            400,
+            60
+          ],
+          "rgb": [
+            12,
+            146,
+            253
+          ],
+          "tol": 3,
+          "note": "systemBlue, dark: only G moves, by 7"
+        },
+        {
+          "at": 423,
+          "kind": "progress",
+          "differsFromSettled": 0.82,
+          "tol": 0.06
+        },
+        {
+          "at": 440,
+          "kind": "progress",
+          "differsFromSettled": 0.021,
+          "tol": 0.02,
+          "note": "the last 10% of the dissolve is one frame"
+        }
+      ]
+    },
+    {
+      "case": "appearance-dark-to-light",
+      "drive": "xcrun simctl ui $UDID appearance light",
+      "zeroThreshold": 0.002,
+      "duration": 450,
+      "checkpoints": [
+        0,
+        55,
+        98,
+        148,
+        198,
+        248,
+        298,
+        350,
+        400,
+        450
+      ],
+      "assertions": [
+        {
+          "at": 0,
+          "kind": "region",
+          "region": [
+            150,
+            1450,
+            900,
+            300
+          ],
+          "rgb": [
+            9,
+            9,
+            9
+          ],
+          "tol": 3
+        },
+        {
+          "at": 55,
+          "kind": "region",
+          "region": [
+            150,
+            1450,
+            900,
+            300
+          ],
+          "rgb": [
+            26,
+            26,
+            26
+          ],
+          "tol": 4
+        },
+        {
+          "at": 98,
+          "kind": "region",
+          "region": [
+            150,
+            1450,
+            900,
+            300
+          ],
+          "rgb": [
+            44,
+            44,
+            44
+          ],
+          "tol": 4
+        },
+        {
+          "at": 148,
+          "kind": "region",
+          "region": [
+            150,
+            1450,
+            900,
+            300
+          ],
+          "rgb": [
+            67,
+            67,
+            67
+          ],
+          "tol": 4
+        },
+        {
+          "at": 198,
+          "kind": "region",
+          "region": [
+            150,
+            1450,
+            900,
+            300
+          ],
+          "rgb": [
+            95,
+            95,
+            95
+          ],
+          "tol": 4
+        },
+        {
+          "at": 248,
+          "kind": "region",
+          "region": [
+            150,
+            1450,
+            900,
+            300
+          ],
+          "rgb": [
+            126,
+            126,
+            126
+          ],
+          "tol": 4
+        },
+        {
+          "at": 298,
+          "kind": "region",
+          "region": [
+            150,
+            1450,
+            900,
+            300
+          ],
+          "rgb": [
+            159,
+            159,
+            159
+          ],
+          "tol": 4
+        },
+        {
+          "at": 350,
+          "kind": "region",
+          "region": [
+            150,
+            1450,
+            900,
+            300
+          ],
+          "rgb": [
+            196,
+            196,
+            196
+          ],
+          "tol": 4
+        },
+        {
+          "at": 400,
+          "kind": "region",
+          "region": [
+            150,
+            1450,
+            900,
+            300
+          ],
+          "rgb": [
+            236,
+            236,
+            236
+          ],
+          "tol": 4
+        },
+        {
+          "at": 450,
+          "kind": "region",
+          "region": [
+            150,
+            1450,
+            900,
+            300
+          ],
+          "rgb": [
+            253,
+            253,
+            253
+          ],
+          "tol": 2,
+          "note": "settled; flat to 1098 ms"
+        }
+      ],
+      "note": "NOT the reverse of light-to-dark: this one accelerates (0.07 of the distance in the first 55 ms, 0.24 in the last 50), the other decelerates. Two curves, not one."
+    },
+    {
+      "case": "list-light-to-dark",
+      "backdrop": "the Messages conversation list",
+      "drive": "xcrun simctl ui $UDID appearance dark",
+      "zeroThreshold": 0.05,
+      "duration": 492,
+      "checkpoints": [
+        0,
+        47,
+        104,
+        152,
+        199,
+        242,
+        292,
+        359,
+        409,
+        442,
+        492
+      ],
+      "assertions": [
+        {
+          "at": 0,
+          "kind": "region",
+          "region": [
+            200,
+            1300,
+            800,
+            400
+          ],
+          "rgb": [
+            230,
+            230,
+            230
+          ],
+          "tol": 4
+        },
+        {
+          "at": 47,
+          "kind": "region",
+          "region": [
+            200,
+            1300,
+            800,
+            400
+          ],
+          "rgb": [
+            207,
+            207,
+            209
+          ],
+          "tol": 4
+        },
+        {
+          "at": 104,
+          "kind": "region",
+          "region": [
+            200,
+            1300,
+            800,
+            400
+          ],
+          "rgb": [
+            175,
+            175,
+            177
+          ],
+          "tol": 4
+        },
+        {
+          "at": 152,
+          "kind": "region",
+          "region": [
+            200,
+            1300,
+            800,
+            400
+          ],
+          "rgb": [
+            146,
+            146,
+            148
+          ],
+          "tol": 4
+        },
+        {
+          "at": 199,
+          "kind": "region",
+          "region": [
+            200,
+            1300,
+            800,
+            400
+          ],
+          "rgb": [
+            121,
+            121,
+            123
+          ],
+          "tol": 4
+        },
+        {
+          "at": 242,
+          "kind": "region",
+          "region": [
+            200,
+            1300,
+            800,
+            400
+          ],
+          "rgb": [
+            98,
+            98,
+            101
+          ],
+          "tol": 4
+        },
+        {
+          "at": 292,
+          "kind": "region",
+          "region": [
+            200,
+            1300,
+            800,
+            400
+          ],
+          "rgb": [
+            74,
+            74,
+            77
+          ],
+          "tol": 4
+        },
+        {
+          "at": 359,
+          "kind": "region",
+          "region": [
+            200,
+            1300,
+            800,
+            400
+          ],
+          "rgb": [
+            50,
+            50,
+            52
+          ],
+          "tol": 4
+        },
+        {
+          "at": 409,
+          "kind": "region",
+          "region": [
+            200,
+            1300,
+            800,
+            400
+          ],
+          "rgb": [
+            37,
+            37,
+            39
+          ],
+          "tol": 4
+        },
+        {
+          "at": 442,
+          "kind": "region",
+          "region": [
+            200,
+            1300,
+            800,
+            400
+          ],
+          "rgb": [
+            32,
+            32,
+            35
+          ],
+          "tol": 4
+        },
+        {
+          "at": 492,
+          "kind": "region",
+          "region": [
+            200,
+            1300,
+            800,
+            400
+          ],
+          "rgb": [
+            30,
+            30,
+            32
+          ],
+          "tol": 4
+        },
+        {
+          "at": 0,
+          "kind": "region",
+          "region": [
+            200,
+            2420,
+            600,
+            80
+          ],
+          "rgb": [
+            217,
+            219,
+            223
+          ],
+          "tol": 4,
+          "note": "search pill"
+        },
+        {
+          "at": 104,
+          "kind": "region",
+          "region": [
+            200,
+            2420,
+            600,
+            80
+          ],
+          "rgb": [
+            144,
+            144,
+            147
+          ],
+          "tol": 4,
+          "note": "search pill"
+        },
+        {
+          "at": 199,
+          "kind": "region",
+          "region": [
+            200,
+            2420,
+            600,
+            80
+          ],
+          "rgb": [
+            97,
+            97,
+            100
+          ],
+          "tol": 4,
+          "note": "search pill"
+        },
+        {
+          "at": 292,
+          "kind": "region",
+          "region": [
+            200,
+            2420,
+            600,
+            80
+          ],
+          "rgb": [
+            60,
+            60,
+            62
+          ],
+          "tol": 4,
+          "note": "search pill"
+        },
+        {
+          "at": 409,
+          "kind": "region",
+          "region": [
+            200,
+            2420,
+            600,
+            80
+          ],
+          "rgb": [
+            31,
+            31,
+            33
+          ],
+          "tol": 4,
+          "note": "search pill"
+        },
+        {
+          "at": 492,
+          "kind": "region",
+          "region": [
+            200,
+            2420,
+            600,
+            80
+          ],
+          "rgb": [
+            25,
+            25,
+            27
+          ],
+          "tol": 4,
+          "note": "search pill"
+        }
+      ],
+      "note": "The cleanest of the appearance captures: t=0 is the frame the crossfade starts, not 6% in. Half the distance is covered by ~180 ms and it is settled at 492."
+    },
+    {
+      "case": "list-dark-to-light",
+      "backdrop": "the Messages conversation list",
+      "drive": "xcrun simctl ui $UDID appearance light",
+      "zeroThreshold": 0.05,
+      "duration": 495,
+      "checkpoints": [
+        0,
+        55,
+        105,
+        155,
+        193,
+        247,
+        292,
+        343,
+        393,
+        445,
+        495
+      ],
+      "assertions": [
+        {
+          "at": 0,
+          "kind": "region",
+          "region": [
+            200,
+            1300,
+            800,
+            400
+          ],
+          "rgb": [
+            32,
+            32,
+            34
+          ],
+          "tol": 4
+        },
+        {
+          "at": 55,
+          "kind": "region",
+          "region": [
+            200,
+            1300,
+            800,
+            400
+          ],
+          "rgb": [
+            41,
+            41,
+            43
+          ],
+          "tol": 4
+        },
+        {
+          "at": 105,
+          "kind": "region",
+          "region": [
+            200,
+            1300,
+            800,
+            400
+          ],
+          "rgb": [
+            55,
+            55,
+            57
+          ],
+          "tol": 4
+        },
+        {
+          "at": 155,
+          "kind": "region",
+          "region": [
+            200,
+            1300,
+            800,
+            400
+          ],
+          "rgb": [
+            73,
+            73,
+            75
+          ],
+          "tol": 4
+        },
+        {
+          "at": 193,
+          "kind": "region",
+          "region": [
+            200,
+            1300,
+            800,
+            400
+          ],
+          "rgb": [
+            89,
+            89,
+            91
+          ],
+          "tol": 4
+        },
+        {
+          "at": 247,
+          "kind": "region",
+          "region": [
+            200,
+            1300,
+            800,
+            400
+          ],
+          "rgb": [
+            114,
+            114,
+            116
+          ],
+          "tol": 4
+        },
+        {
+          "at": 292,
+          "kind": "region",
+          "region": [
+            200,
+            1300,
+            800,
+            400
+          ],
+          "rgb": [
+            141,
+            141,
+            143
+          ],
+          "tol": 4
+        },
+        {
+          "at": 343,
+          "kind": "region",
+          "region": [
+            200,
+            1300,
+            800,
+            400
+          ],
+          "rgb": [
+            170,
+            170,
+            172
+          ],
+          "tol": 4
+        },
+        {
+          "at": 393,
+          "kind": "region",
+          "region": [
+            200,
+            1300,
+            800,
+            400
+          ],
+          "rgb": [
+            203,
+            203,
+            204
+          ],
+          "tol": 4
+        },
+        {
+          "at": 445,
+          "kind": "region",
+          "region": [
+            200,
+            1300,
+            800,
+            400
+          ],
+          "rgb": [
+            239,
+            239,
+            239
+          ],
+          "tol": 4
+        },
+        {
+          "at": 495,
+          "kind": "region",
+          "region": [
+            200,
+            1300,
+            800,
+            400
+          ],
+          "rgb": [
+            245,
+            245,
+            245
+          ],
+          "tol": 4
+        }
+      ],
+      "note": "Same backdrop, same duration, DIFFERENT curve: half the distance is not covered until ~290 ms. Reproduced in linear light as well as sRGB, so it is not a colour-space artifact."
+    },
+    {
+      "case": "content-size-l-to-xxxl",
+      "drive": "xcrun simctl ui $UDID content_size extra-extra-extra-large",
+      "zeroThreshold": 0.002,
+      "duration": 0,
+      "checkpoints": [
+        0,
+        233
+      ],
+      "assertions": [
+        {
+          "at": 0,
+          "kind": "progress",
+          "differsFromSettled": 0.002,
+          "tol": 0.004,
+          "note": "the new metrics are already drawn in the first frame"
+        },
+        {
+          "at": 233,
+          "kind": "progress",
+          "differsFromSettled": 0.0,
+          "tol": 0.001,
+          "note": "table reload settles"
+        }
+      ],
+      "note": "duration is 0 on purpose. Seven frames in five seconds of recording; there is nothing between t=0 and t=8 ms. Any transition on a Dynamic Type change is wrong."
+    },
+    {
+      "case": "sheet-dismiss",
+      "from": [
+        "newmsg-sheet-open",
+        "newmsg-sheet-body"
+      ],
+      "drive": "xcrun simctl openurl $UDID 'sms:+18885551212'",
+      "zeroThreshold": 0.05,
+      "duration": 200,
+      "checkpoints": [
+        0,
+        15,
+        31,
+        46,
+        63,
+        80,
+        98,
+        140,
+        183,
+        200
+      ],
+      "assertions": [
+        {
+          "at": 0,
+          "kind": "edge",
+          "edge": "sheet.top",
+          "y": 186,
+          "tol": 8,
+          "note": "at rest, 62 pt"
+        },
+        {
+          "at": 15,
+          "kind": "edge",
+          "edge": "sheet.top",
+          "y": 241,
+          "tol": 30
+        },
+        {
+          "at": 31,
+          "kind": "edge",
+          "edge": "sheet.top",
+          "y": 430,
+          "tol": 60
+        },
+        {
+          "at": 46,
+          "kind": "edge",
+          "edge": "sheet.top",
+          "y": 683,
+          "tol": 80
+        },
+        {
+          "at": 63,
+          "kind": "edge",
+          "edge": "sheet.top",
+          "y": 965,
+          "tol": 100
+        },
+        {
+          "at": 80,
+          "kind": "edge",
+          "edge": "sheet.top",
+          "y": 1216,
+          "tol": 110
+        },
+        {
+          "at": 98,
+          "kind": "edge",
+          "edge": "sheet.top",
+          "y": 1454,
+          "tol": 120,
+          "note": "past mid-screen"
+        },
+        {
+          "at": 183,
+          "kind": "edge",
+          "edge": "sheet.top",
+          "y": 2363,
+          "tol": 80
+        },
+        {
+          "at": 200,
+          "kind": "edge",
+          "edge": "sheet.top",
+          "y": 2622,
+          "tol": 0,
+          "note": "off the bottom; list top edge at 153 is what remains"
+        }
+      ],
+      "note": "Two independent recordings, agreeing within 8% at every sampled time; tolerances are that spread. Peak velocity ~17 px/ms at 45-65 ms \u2014 ease-in-out, not linear. `newmsg-sheet-body` shows 25 ms of latency before the first movement."
+    },
+    {
+      "case": "sheet-represent",
+      "from": "newmsg-sheet-open",
+      "duration": 0,
+      "checkpoints": [
+        0
+      ],
+      "assertions": [
+        {
+          "at": 0,
+          "kind": "edge",
+          "edge": "sheet.top",
+          "y": 186,
+          "tol": 8
+        }
+      ],
+      "note": "Not animated. The list is bare from 216 to 613 ms and the sheet is fully in place at 643 ms with no intermediate frames at all \u2014 and this recorder emits a frame on every screen change, so a 300 ms slide would have left ~18."
+    },
+    {
+      "case": "push-banner-short",
+      "drive": "xcrun simctl push $UDID com.apple.MobileSMS rec/push-short.json",
+      "zeroThreshold": 0.02,
+      "duration": 200,
+      "checkpoints": [
+        0,
+        17,
+        33,
+        55,
+        68,
+        85,
+        102,
+        133,
+        150,
+        183,
+        200
+      ],
+      "assertions": [
+        {
+          "at": 0,
+          "kind": "box",
+          "box": [
+            300,
+            0,
+            622,
+            204
+          ],
+          "tol": 24,
+          "note": "starts at the Dynamic Island's width, 207 pt"
+        },
+        {
+          "at": 17,
+          "kind": "box",
+          "box": [
+            258,
+            0,
+            710,
+            320
+          ],
+          "tol": 24
+        },
+        {
+          "at": 33,
+          "kind": "box",
+          "box": [
+            221,
+            0,
+            767,
+            327
+          ],
+          "tol": 24
+        },
+        {
+          "at": 55,
+          "kind": "box",
+          "box": [
+            180,
+            0,
+            904,
+            330
+          ],
+          "tol": 24
+        },
+        {
+          "at": 68,
+          "kind": "box",
+          "box": [
+            154,
+            0,
+            933,
+            371
+          ],
+          "tol": 24
+        },
+        {
+          "at": 85,
+          "kind": "box",
+          "box": [
+            59,
+            0,
+            1133,
+            525
+          ],
+          "tol": 24,
+          "note": "80% of final height by here"
+        },
+        {
+          "at": 102,
+          "kind": "box",
+          "box": [
+            32,
+            0,
+            1160,
+            525
+          ],
+          "tol": 24
+        },
+        {
+          "at": 133,
+          "kind": "box",
+          "box": [
+            23,
+            0,
+            1167,
+            521
+          ],
+          "tol": 24
+        },
+        {
+          "at": 150,
+          "kind": "box",
+          "box": [
+            0,
+            0,
+            1199,
+            521
+          ],
+          "tol": 24
+        },
+        {
+          "at": 183,
+          "kind": "box",
+          "box": [
+            0,
+            0,
+            1206,
+            521
+          ],
+          "tol": 12,
+          "note": "full width"
+        },
+        {
+          "at": 200,
+          "kind": "box",
+          "box": [
+            0,
+            0,
+            1206,
+            528
+          ],
+          "tol": 12,
+          "note": "settled, 176 pt tall"
+        },
+        {
+          "at": 7132,
+          "kind": "box",
+          "box": [
+            12,
+            0,
+            1117,
+            521
+          ],
+          "tol": 40,
+          "note": "first retraction frame \u2014 it holds for 7.1 s, not 5"
+        }
+      ]
+    },
+    {
+      "case": "push-banner-long",
+      "drive": "xcrun simctl push $UDID com.apple.MobileSMS rec/push-long.json",
+      "zeroThreshold": 0.02,
+      "duration": 200,
+      "checkpoints": [
+        0,
+        18,
+        50,
+        83,
+        116,
+        150,
+        183,
+        200
+      ],
+      "assertions": [
+        {
+          "at": 0,
+          "kind": "box",
+          "box": [
+            59,
+            0,
+            1125,
+            525
+          ],
+          "tol": 30
+        },
+        {
+          "at": 50,
+          "kind": "box",
+          "box": [
+            100,
+            0,
+            1084,
+            521
+          ],
+          "tol": 30
+        },
+        {
+          "at": 116,
+          "kind": "box",
+          "box": [
+            59,
+            0,
+            1076,
+            521
+          ],
+          "tol": 30
+        },
+        {
+          "at": 150,
+          "kind": "box",
+          "box": [
+            10,
+            0,
+            1189,
+            528
+          ],
+          "tol": 24
+        },
+        {
+          "at": 183,
+          "kind": "box",
+          "box": [
+            0,
+            0,
+            1205,
+            568
+          ],
+          "tol": 16
+        },
+        {
+          "at": 200,
+          "kind": "box",
+          "box": [
+            0,
+            0,
+            1206,
+            569
+          ],
+          "tol": 12,
+          "note": "settled, 190 pt"
+        }
+      ],
+      "note": "A 3+ line body buys 14 pt over the short banner's 176, not three lines. The banner clamps."
+    },
+    {
+      "case": "push-banner-group",
+      "drive": "xcrun simctl push $UDID com.apple.MobileSMS rec/push-group.json",
+      "zeroThreshold": 0.02,
+      "duration": 215,
+      "checkpoints": [
+        0,
+        15,
+        31,
+        66,
+        100,
+        133,
+        165,
+        198,
+        215
+      ],
+      "assertions": [
+        {
+          "at": 0,
+          "kind": "box",
+          "box": [
+            356,
+            0,
+            599,
+            316
+          ],
+          "tol": 24
+        },
+        {
+          "at": 15,
+          "kind": "box",
+          "box": [
+            323,
+            0,
+            632,
+            319
+          ],
+          "tol": 24
+        },
+        {
+          "at": 31,
+          "kind": "box",
+          "box": [
+            228,
+            0,
+            744,
+            320
+          ],
+          "tol": 24
+        },
+        {
+          "at": 66,
+          "kind": "box",
+          "box": [
+            201,
+            0,
+            798,
+            328
+          ],
+          "tol": 24
+        },
+        {
+          "at": 100,
+          "kind": "box",
+          "box": [
+            146,
+            0,
+            942,
+            414
+          ],
+          "tol": 24
+        },
+        {
+          "at": 133,
+          "kind": "box",
+          "box": [
+            96,
+            0,
+            1046,
+            452
+          ],
+          "tol": 24
+        },
+        {
+          "at": 165,
+          "kind": "box",
+          "box": [
+            56,
+            0,
+            1128,
+            506
+          ],
+          "tol": 24
+        },
+        {
+          "at": 198,
+          "kind": "box",
+          "box": [
+            6,
+            0,
+            1199,
+            543
+          ],
+          "tol": 16
+        },
+        {
+          "at": 215,
+          "kind": "box",
+          "box": [
+            0,
+            0,
+            1206,
+            543
+          ],
+          "tol": 12,
+          "note": "settled, 181 pt \u2014 a subtitle buys 5 pt"
+        }
+      ],
+      "note": "15 ms slower to full width than the one-line banner."
+    },
+    {
+      "case": "list-content-size-ax5",
+      "backdrop": "the Messages conversation list",
+      "drive": "xcrun simctl ui $UDID content_size accessibility-extra-extra-extra-large",
+      "zeroThreshold": 0.05,
+      "duration": 0,
+      "checkpoints": [
+        0,
+        28
+      ],
+      "assertions": [
+        {
+          "at": 0,
+          "kind": "progress",
+          "differsFromRest": 0.117,
+          "tol": 0.02,
+          "note": "the AX5 metrics are already drawn in the first frame after the change"
+        },
+        {
+          "at": 28,
+          "kind": "progress",
+          "differsFromRest": 0.1,
+          "tol": 0.01,
+          "note": "flat from here to the end of the 5.8 s recording"
+        }
+      ],
+      "note": "Confirms 2.3 at the far end of the ladder: the accessibility sizes snap too. 182 frames in the recording, none of them between 0 and 28 ms carrying any motion \u2014 the tail is a blinking caret."
+    }
+  ]
+}

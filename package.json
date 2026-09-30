@@ -1,5 +1,5 @@
 {
-  "name": "imessage-ui",
+  "name": "message-ui",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -17,13 +17,17 @@
     "test:report": "playwright show-report",
     "reference:compare": "bun scripts/compare-references.ts",
     "reference:import": "bun scripts/import-reference.ts",
+    "reference:record": "bun scripts/reference/record.ts",
+    "reference:checkpoint": "bun scripts/reference/checkpoint.ts",
+    "eval:simulator": "bun scripts/eval-simulator-cases.ts",
     "test:registry": "bun scripts/test-registry.ts",
     "serve:test": "bun run build && bun run start --port 3101",
     "test:all": "playwright test",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
-    "test:all:prod": "bun run build && (npx next start --port 3102 & sleep 12) && PLAYWRIGHT_BASE_URL=http://localhost:3102 playwright test; kill %1 2>/dev/null || true"
+    "test:all:prod": "bun run build && (npx next start --port 3102 & sleep 12) && PLAYWRIGHT_BASE_URL=http://localhost:3102 playwright test; kill %1 2>/dev/null || true",
+    "test:ios": "python3 scripts/test-ios.py"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",

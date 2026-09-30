@@ -235,7 +235,7 @@ export type MacComposerProps = Omit<ComponentProps<"form">, "onSubmit" | "onChan
   grow?: { fromLines: number; progress: number };
 };
 
-export function MacComposer({ onSend, onChange, value, defaultValue = "", placeholder = "iMessage", focusedPlaceholder = "Message", autoFocus = false, disabled = false, onAttach, attachExpanded, onEmoji, onAudio, fieldWidth, maxLines = 9, grow, className, style, ...props }: MacComposerProps) {
+export function MacComposer({ onSend, onChange, value, defaultValue = "", placeholder = "Message", focusedPlaceholder = "Message", autoFocus = false, disabled = false, onAttach, attachExpanded, onEmoji, onAudio, fieldWidth, maxLines = 9, grow, className, style, ...props }: MacComposerProps) {
   const m = macComposerMetrics;
   const [draft, setDraft] = useState(defaultValue);
   const [focused, setFocused] = useState(autoFocus);

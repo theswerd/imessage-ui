@@ -19,7 +19,9 @@ export default async function globalSetup(config: FullConfig) {
     "/lab/tapback?scene=balloon&theme=light",
     "/lab/effects?platform=ios&screen=confetti&t=0.4",
     "/lab/reply?platform=ios&theme=light",
-    "/docs",
+    "/",
+    "/components/message-image",
+    "/components/message-audio",
   ];
   for (const route of routes) {
     try {

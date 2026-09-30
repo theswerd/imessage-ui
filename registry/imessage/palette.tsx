@@ -20,6 +20,10 @@ export function PaletteStyle({ platform }: { platform: Platform }) {
   const scope = `[data-im-platform="${platform}"]`;
   const css =
     block(scope, { ...paletteVars(palettes[platform].light), ...tapbackVars("light", platform) }) +
-    block(`.dark ${scope}`, { ...paletteVars(palettes[platform].dark), ...tapbackVars("dark", platform) });
+    block(`.dark ${scope}`, { ...paletteVars(palettes[platform].dark), ...tapbackVars("dark", platform) }) +
+    // An explicitly light preview must remain light inside a dark documentation site. Keep the
+    // same isolation boundary as the Tailwind dark variant in app/globals.css.
+    block(`[data-preview-theme="light"] ${scope}`, { ...paletteVars(palettes[platform].light), ...tapbackVars("light", platform) }) +
+    block(`[data-preview-theme="dark"] ${scope}`, { ...paletteVars(palettes[platform].dark), ...tapbackVars("dark", platform) });
   return <style data-slot="palette" data-platform={platform}>{css}</style>;
 }
